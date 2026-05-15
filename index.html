@@ -522,7 +522,7 @@
 <script>
   // Track real load progress by polling for each script's window-export
   (function () {
-    var modules = ['React', 'ReactDOM', 'Babel', 'useTweaks', 'Icon', 'Glyph', 'DeviceCatalog', 'OPT_Engine', 'Palette', 'Topology', 'CLI', 'Inspector'];
+    var modules = ['React', 'ReactDOM', 'Babel', 'useTweaks', 'Icon', 'Glyph', 'DeviceCatalog', 'OPT_Engine', 'Palette', 'Topology', 'CLI', 'Inspector', 'PacketTracerImporter'];
     var fill = document.getElementById('boot-fill');
     function tick() {
       var done = 0;
@@ -555,6 +555,7 @@
 <script type="text/babel" src="topology.jsx"></script>
 <script type="text/babel" src="cli.jsx"></script>
 <script type="text/babel" src="inspector.jsx"></script>
+<script src="packet-tracer-importer.js"></script>
 <script type="text/babel" src="app.jsx"></script>
 </body>
 </html>

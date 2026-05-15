@@ -9,6 +9,7 @@ const Icon = window.Icon;
 const Glyph = window.Glyph;
 const DeviceCatalog = window.DeviceCatalog;
 const OPT_Engine = window.OPT_Engine;
+const PacketTracerImporter = window.PacketTracerImporter;
 const useTweaks = window.useTweaks;
 const TweaksPanel = window.TweaksPanel;
 const TweakSection = window.TweakSection;
@@ -18,6 +19,105 @@ const TweakColor = window.TweakColor;
 const TweakButton = window.TweakButton;
 const ifaceName = (name) => OPT_Engine.shortIfaceName ? OPT_Engine.shortIfaceName(name) : name;
 const ifaceText = (text) => OPT_Engine.shortIfaceNamesInText ? OPT_Engine.shortIfaceNamesInText(text) : text;
+
+function packetTracerKind(device) {
+  const text = `${device?.kind || ""} ${device?.model || ""} ${device?.name || ""}`.toLowerCase();
+  if (text.includes("router")) return "router";
+  if (text.includes("server")) return "server";
+  if (text.includes("pc")) return "pc";
+  if (text.includes("switch") || /^sw/i.test(device?.name || "")) return "l2switch";
+  return device?.kind || "l2switch";
+}
+
+function packetTracerEndpoint(endpoint) {
+  const [deviceName, ...ifaceParts] = String(endpoint || "").split(":");
+  return { deviceName, iface: ifaceParts.join(":") };
+}
+
+function packetTracerIfaceSeed(kind, name, deviceName) {
+  const isSwitch = kind === "l2switch" || kind === "l3switch";
+  const iface = {
+    ip: null,
+    mask: null,
+    gw: null,
+    up: true,
+    admUp: true,
+    mac: randMac(),
+    desc: `imported from ${deviceName}`,
+  };
+  if (isSwitch && !String(name).toLowerCase().startsWith("vlan")) {
+    iface.mode = "trunk";
+    iface.vlan = 1;
+    iface.nativeVlan = 1;
+    iface.allowedVlans = "all";
+    iface.stp = { portfast: false, bpduguard: false, state: "forwarding" };
+  }
+  return iface;
+}
+
+function buildTopologyFromPacketTracer(activity) {
+  const deviceMap = {};
+  const devices = {};
+  for (const src of activity?.devices || []) {
+    const kind = packetTracerKind(src);
+    const dev = OPT_Engine.makeDevice(kind, src.name || "PT-Device", Number(src.x) || 300, Number(src.y) || 240, {}, {
+      packetTracer: {
+        model: src.model || null,
+        power: src.power || null,
+      },
+    });
+    dev.model = src.model && !/hidden/i.test(src.model) ? src.model : dev.model;
+    devices[dev.id] = dev;
+    deviceMap[src.name] = dev.id;
+  }
+
+  const ensureIface = (devId, iface) => {
+    const dev = devices[devId];
+    if (!dev || !iface) return;
+    if (!dev.interfaces[iface]) {
+      dev.interfaces[iface] = packetTracerIfaceSeed(dev.kind, iface, dev.hostname);
+    } else {
+      dev.interfaces[iface] = { ...dev.interfaces[iface], up: true, admUp: true };
+      if ((dev.kind === "l2switch" || dev.kind === "l3switch") && !String(iface).toLowerCase().startsWith("vlan")) {
+        dev.interfaces[iface] = {
+          mode: "trunk",
+          vlan: 1,
+          nativeVlan: 1,
+          allowedVlans: "all",
+          stp: { portfast: false, bpduguard: false, state: "forwarding" },
+          ...dev.interfaces[iface],
+        };
+      }
+    }
+  };
+
+  const links = [];
+  for (const src of activity?.links || []) {
+    const a = packetTracerEndpoint(src.from);
+    const b = packetTracerEndpoint(src.to);
+    const aId = deviceMap[a.deviceName];
+    const bId = deviceMap[b.deviceName];
+    if (!aId || !bId || !a.iface || !b.iface) continue;
+    ensureIface(aId, a.iface);
+    ensureIface(bId, b.iface);
+    links.push({
+      id: OPT_Engine.uid("l"),
+      a: aId,
+      ai: a.iface,
+      b: bId,
+      bi: b.iface,
+      type: /serial/i.test(src.type || "") ? "serial" : "copper",
+      up: true,
+      packetTracer: {
+        type: src.type || null,
+        fromStatus: src.fromStatus || null,
+        toStatus: src.toStatus || null,
+      },
+    });
+  }
+
+  return { devices, links };
+}
 
 const TWEAK_DEFAULTS = /*EDITMODE-BEGIN*/{
   "accent": "cyan",
@@ -39,6 +139,7 @@ const ACCENTS = {
 function App() {
   const [t, setTweak] = useTweaks(TWEAK_DEFAULTS);
   const dragDepth = useRef(0);
+  const importFileInputRef = useRef(null);
 
   // ── Apply accent tweak to CSS variables
   useEffect(() => {
@@ -70,6 +171,7 @@ function App() {
           selectedIds: cur.selectedIds || (cur.selectedId ? [cur.selectedId] : []),
           openConsoles: cur.openConsoles || [],
           activeBottom: cur.activeBottom || "events",
+          ptActivity: cur.ptActivity || null,
           loaded: true,
         };
       }
@@ -78,12 +180,13 @@ function App() {
     return {
       tabs: [{ id: "w-0", name: "lab-01 · two-router-vlan.opt" }],
       activeWid: "w-0",
-      snapshots: { "w-0": { devices: s.devices, links: s.links, selectedIds: [], openConsoles: [], activeBottom: "events" } },
+      snapshots: { "w-0": { devices: s.devices, links: s.links, selectedIds: [], openConsoles: [], activeBottom: "events", ptActivity: null } },
       devices: s.devices,
       links: s.links,
       selectedIds: [],
       openConsoles: [],
       activeBottom: "events",
+      ptActivity: null,
       loaded: false,
     };
   }, []);
@@ -95,6 +198,7 @@ function App() {
   const [activityTab, setActivityTab] = useState("labs");
   const [openConsoles, setOpenConsoles] = useState(initial.openConsoles);
   const [activeBottom, setActiveBottom] = useState(initial.activeBottom);
+  const [ptActivity, setPtActivity] = useState(initial.ptActivity);
 
   // Derived: the most-recently-selected device (used for inspector / context menu)
   const selectedId = selectedIds[selectedIds.length - 1] || null;
@@ -113,22 +217,22 @@ function App() {
   const [activeWid, setActiveWid] = useState(initial.activeWid);
   const snapshotsRef = useRef(initial.snapshots);
   useEffect(() => {
-    snapshotsRef.current[activeWid] = { devices, links, selectedIds, openConsoles, activeBottom };
-  }, [devices, links, selectedIds, openConsoles, activeBottom, activeWid]);
+    snapshotsRef.current[activeWid] = { devices, links, selectedIds, openConsoles, activeBottom, ptActivity };
+  }, [devices, links, selectedIds, openConsoles, activeBottom, ptActivity, activeWid]);
 
   // Persist to localStorage (debounced)
   useEffect(() => {
     const handle = setTimeout(() => {
       try {
         // Ensure current snap is up-to-date before saving
-        snapshotsRef.current[activeWid] = { devices, links, selectedIds, openConsoles, activeBottom };
+        snapshotsRef.current[activeWid] = { devices, links, selectedIds, openConsoles, activeBottom, ptActivity };
         localStorage.setItem(STORAGE_KEY, JSON.stringify({
           tabs, activeWid, snapshots: snapshotsRef.current,
         }));
       } catch (e) {}
     }, 250);
     return () => clearTimeout(handle);
-  }, [tabs, activeWid, devices, links, selectedIds, openConsoles, activeBottom]);
+  }, [tabs, activeWid, devices, links, selectedIds, openConsoles, activeBottom, ptActivity]);
 
   // Hide boot splash on first mount (with a brief hold so the splash is actually seen)
   useEffect(() => {
@@ -146,7 +250,7 @@ function App() {
   }, []);
   const switchTab = (newId) => {
     if (newId === activeWid) return;
-    snapshotsRef.current[activeWid] = { devices, links, selectedIds, openConsoles, activeBottom };
+    snapshotsRef.current[activeWid] = { devices, links, selectedIds, openConsoles, activeBottom, ptActivity };
     const snap = snapshotsRef.current[newId];
     const norm = OPT_Engine.normalizeTopology(snap?.devices || {}, snap?.links || []);
     setActiveWid(newId);
@@ -155,21 +259,24 @@ function App() {
     setSelectedIds(snap?.selectedIds || (snap?.selectedId ? [snap.selectedId] : []));
     setOpenConsoles(snap?.openConsoles || []);
     setActiveBottom(snap?.activeBottom || "events");
+    setPtActivity(snap?.ptActivity || null);
   };
   const newBlankTab = () => {
-    snapshotsRef.current[activeWid] = { devices, links, selectedIds, openConsoles, activeBottom };
+    snapshotsRef.current[activeWid] = { devices, links, selectedIds, openConsoles, activeBottom, ptActivity };
     const id = `w-${Date.now()}`;
+    snapshotsRef.current[id] = { devices: {}, links: [], selectedIds: [], openConsoles: [], activeBottom: "events", ptActivity: null };
     setTabs((ts) => [...ts, { id, name: `untitled-${ts.length}.opt` }]);
     setActiveWid(id);
-    setDevices({}); setLinks([]); setSelectedId(null); setOpenConsoles([]); setActiveBottom("events");
+    setDevices({}); setLinks([]); setSelectedId(null); setOpenConsoles([]); setActiveBottom("events"); setPtActivity(null);
   };
   const newStarterTab = () => {
-    snapshotsRef.current[activeWid] = { devices, links, selectedIds, openConsoles, activeBottom };
+    snapshotsRef.current[activeWid] = { devices, links, selectedIds, openConsoles, activeBottom, ptActivity };
     const id = `w-${Date.now()}`;
     const s = OPT_Engine.makeStarter();
+    snapshotsRef.current[id] = { devices: s.devices, links: s.links, selectedIds: [], openConsoles: [], activeBottom: "events", ptActivity: null };
     setTabs((ts) => [...ts, { id, name: `lab-${ts.length + 1}.opt` }]);
     setActiveWid(id);
-    setDevices(s.devices); setLinks(s.links); setSelectedId(null); setOpenConsoles([]); setActiveBottom("events");
+    setDevices(s.devices); setLinks(s.links); setSelectedId(null); setOpenConsoles([]); setActiveBottom("events"); setPtActivity(null);
   };
   const closeTab = (id) => {
     setTabs((ts) => {
@@ -186,6 +293,7 @@ function App() {
         setSelectedIds(snap?.selectedIds || (snap?.selectedId ? [snap.selectedId] : []));
         setOpenConsoles(snap?.openConsoles || []);
         setActiveBottom(snap?.activeBottom || "events");
+        setPtActivity(snap?.ptActivity || null);
       } else {
         delete snapshotsRef.current[id];
       }
@@ -275,7 +383,7 @@ function App() {
   const openImportedTopology = (topology, filename) => {
     const norm = OPT_Engine.normalizeTopology(topology.devices || {}, topology.links || []);
     const tabName = filename.replace(/\.(json|opt)$/i, "") || "imported-lab";
-    snapshotsRef.current[activeWid] = { devices, links, selectedIds, openConsoles, activeBottom };
+    snapshotsRef.current[activeWid] = { devices, links, selectedIds, openConsoles, activeBottom, ptActivity };
     const id = `w-${Date.now()}`;
     snapshotsRef.current[id] = {
       devices: norm.devices,
@@ -283,6 +391,7 @@ function App() {
       selectedIds: [],
       openConsoles: [],
       activeBottom: "events",
+      ptActivity: null,
     };
     setTabs((ts) => [...ts, { id, name: `${tabName}.opt` }]);
     setActiveWid(id);
@@ -291,19 +400,53 @@ function App() {
     setSelectedIds([]);
     setOpenConsoles([]);
     setActiveBottom("events");
+    setPtActivity(null);
     setEvents([]);
     setPackets([]);
     setToast({ kind: "ok", msg: `Imported ${filename}` });
     log("ok", "import", `loaded ${filename}`);
   };
 
+  const openImportedPacketTracer = (activity, filename) => {
+    const topology = buildTopologyFromPacketTracer(activity);
+    const norm = OPT_Engine.normalizeTopology(topology.devices || {}, topology.links || []);
+    const title = activity?.title || filename.replace(/\.(pka|pkt)$/i, "") || "packet-tracer-assignment";
+    snapshotsRef.current[activeWid] = { devices, links, selectedIds, openConsoles, activeBottom, ptActivity };
+    const id = `w-${Date.now()}`;
+    snapshotsRef.current[id] = {
+      devices: norm.devices,
+      links: norm.links,
+      selectedIds: [],
+      openConsoles: [],
+      activeBottom: "events",
+      ptActivity: activity,
+    };
+    setTabs((ts) => [...ts, { id, name: `${title}.pka`, source: "packet-tracer" }]);
+    setActiveWid(id);
+    setDevices(norm.devices);
+    setLinks(norm.links);
+    setSelectedIds([]);
+    setOpenConsoles([]);
+    setActiveBottom("events");
+    setPtActivity(activity);
+    setEvents([]);
+    setPackets([]);
+    setToast({ kind: activity?.unsupported ? "warn" : "ok", msg: `Imported ${filename}` });
+    const detail = activity?.progress?.score ? ` score ${activity.progress.score}` : `${norm.links.length} links`;
+    log(activity?.unsupported ? "warn" : "ok", "import", `loaded Packet Tracer assignment ${filename} (${detail})`);
+  };
+
   const importPacketTracerActivity = async (file) => {
-    // Packet Tracer activity files are recognized here, but modern .pka/.pkt
-    // content is proprietary and appears compressed/encrypted. Plug a parser or
-    // local extractor into this function when one exists.
-    const bytes = await file.slice(0, 16).arrayBuffer();
-    const head = Array.from(new Uint8Array(bytes)).map(b => b.toString(16).padStart(2, "0")).join(" ");
-    throw new Error(`Packet Tracer file recognized (${head}); OpenPT needs a .pka/.pkt extractor before it can build the lab.`);
+    if (!PacketTracerImporter?.importPacketTracerFile) {
+      throw new Error("Packet Tracer importer module did not load.");
+    }
+    return PacketTracerImporter.importPacketTracerFile(file);
+  };
+
+  const openPacketTracerFilePicker = () => {
+    if (!importFileInputRef.current) return;
+    importFileInputRef.current.value = "";
+    importFileInputRef.current.click();
   };
 
   const handleImportFile = async (file) => {
@@ -319,7 +462,8 @@ function App() {
         return;
       }
       if (lower.endsWith(".pka") || lower.endsWith(".pkt")) {
-        await importPacketTracerActivity(file);
+        const activity = await importPacketTracerActivity(file);
+        openImportedPacketTracer(activity, name);
         return;
       }
       throw new Error("Drop an OpenPT .json/.opt file, or a Packet Tracer .pka/.pkt file for extractor diagnostics.");
@@ -462,8 +606,29 @@ function App() {
         lines: JSON.parse(JSON.stringify(m[devId].lines || {})),
         dhcp: JSON.parse(JSON.stringify(m[devId].dhcp || { excluded: [], pools: {}, bindings: [] })),
         ospf: JSON.parse(JSON.stringify(m[devId].ospf || {})),
+        rip: JSON.parse(JSON.stringify(m[devId].rip || {})),
+        eigrp: JSON.parse(JSON.stringify(m[devId].eigrp || {})),
+        bgp: JSON.parse(JSON.stringify(m[devId].bgp || {})),
         acls: JSON.parse(JSON.stringify(m[devId].acls || {})),
-        nat: JSON.parse(JSON.stringify(m[devId].nat || { translations: [] })),
+        nat: JSON.parse(JSON.stringify(m[devId].nat || { pools: {}, rules: [], translations: [] })),
+        routeMaps: JSON.parse(JSON.stringify(m[devId].routeMaps || {})),
+        prefixLists: JSON.parse(JSON.stringify(m[devId].prefixLists || {})),
+        vrfs: JSON.parse(JSON.stringify(m[devId].vrfs || {})),
+        aaa: JSON.parse(JSON.stringify(m[devId].aaa || { enabled: false, methods: [] })),
+        crypto: JSON.parse(JSON.stringify(m[devId].crypto || {})),
+        snmp: JSON.parse(JSON.stringify(m[devId].snmp || { communities: [], hosts: [] })),
+        ntp: JSON.parse(JSON.stringify(m[devId].ntp || { servers: [] })),
+        netflow: JSON.parse(JSON.stringify(m[devId].netflow || { exporters: {}, monitors: {} })),
+        ipSla: JSON.parse(JSON.stringify(m[devId].ipSla || {})),
+        tracks: JSON.parse(JSON.stringify(m[devId].tracks || {})),
+        qos: JSON.parse(JSON.stringify(m[devId].qos || { classMaps: {}, policyMaps: {}, servicePolicies: {} })),
+        etherchannels: JSON.parse(JSON.stringify(m[devId].etherchannels || {})),
+        span: JSON.parse(JSON.stringify(m[devId].span || [])),
+        vtp: JSON.parse(JSON.stringify(m[devId].vtp || { mode: "transparent", domain: "" })),
+        dhcpSnooping: JSON.parse(JSON.stringify(m[devId].dhcpSnooping || { enabled: false, vlans: [], trusted: [] })),
+        dai: JSON.parse(JSON.stringify(m[devId].dai || { vlans: [], trusted: [] })),
+        loggingHosts: [...(m[devId].loggingHosts || [])],
+        files: { ...(m[devId].files || {}) },
       };
       const ifaces = { ...d.interfaces };
       switch (cmd.kind) {
@@ -474,6 +639,9 @@ function App() {
         case "erase-startup":
           d.startupConfig = "";
           log("warn", d.hostname, "startup-config erased");
+          break;
+        case "file-delete":
+          delete d.files[cmd.path.startsWith("flash:") ? cmd.path : `flash:${cmd.path}`];
           break;
         case "hostname":
           d.hostname = cmd.value;
@@ -540,6 +708,11 @@ function App() {
           ifaces[cmd.iface] = { ...ifaces[cmd.iface], vlan: cmd.value };
           log("ok", d.hostname, `${ifaceName(cmd.iface)} access vlan ${cmd.value}`);
           break;
+        case "voice-vlan":
+          d.vlans = { ...(d.vlans || {}), [cmd.value]: d.vlans?.[cmd.value] || `VOICE${cmd.value}` };
+          ifaces[cmd.iface] = { ...ifaces[cmd.iface], voiceVlan: cmd.value };
+          log("ok", d.hostname, `${ifaceName(cmd.iface)} voice vlan ${cmd.value}`);
+          break;
         case "trunk-native":
           d.vlans = { ...(d.vlans || {}), [cmd.value]: d.vlans?.[cmd.value] || `VLAN${cmd.value}` };
           ifaces[cmd.iface] = { ...ifaces[cmd.iface], nativeVlan: cmd.value, mode: "trunk" };
@@ -558,12 +731,69 @@ function App() {
           if (!cmd.acl) delete ifaces[cmd.iface].acl[cmd.dir];
           log("ok", d.hostname, `${ifaceName(cmd.iface)} access-group ${cmd.dir} ${cmd.acl || "removed"}`);
           break;
+        case "policy-route":
+          ifaces[cmd.iface] = { ...ifaces[cmd.iface], policyRouteMap: cmd.name };
+          log("ok", d.hostname, `${ifaceName(cmd.iface)} policy route-map ${cmd.name}`);
+          break;
         case "nat-role":
           ifaces[cmd.iface] = { ...ifaces[cmd.iface], natRole: cmd.value };
           log("ok", d.hostname, `${ifaceName(cmd.iface)} nat role ${cmd.value || "removed"}`);
           break;
         case "stp-portfast":
           ifaces[cmd.iface] = { ...ifaces[cmd.iface], stp: { ...(ifaces[cmd.iface].stp || {}), portfast: cmd.value } };
+          break;
+        case "stp-guard":
+          ifaces[cmd.iface] = { ...ifaces[cmd.iface], stp: { ...(ifaces[cmd.iface].stp || {}), guard: cmd.value } };
+          break;
+        case "stp-bpduguard":
+          ifaces[cmd.iface] = { ...ifaces[cmd.iface], stp: { ...(ifaces[cmd.iface].stp || {}), bpduguard: cmd.value } };
+          break;
+        case "port-security":
+          ifaces[cmd.iface] = { ...ifaces[cmd.iface], portSecurity: { ...(ifaces[cmd.iface].portSecurity || {}), ...cmd, enabled: cmd.enabled ?? ifaces[cmd.iface].portSecurity?.enabled ?? true } };
+          delete ifaces[cmd.iface].portSecurity.kind;
+          delete ifaces[cmd.iface].portSecurity.iface;
+          break;
+        case "channel-group": {
+          const po = `Port-channel${cmd.id}`;
+          ifaces[cmd.iface] = { ...ifaces[cmd.iface], channelGroup: { id: cmd.id, mode: cmd.mode } };
+          if (!ifaces[po]) ifaces[po] = { ip: null, mask: null, up: true, admUp: true, mac: randMac(), desc: "", mode: ifaces[cmd.iface].mode || "trunk", vlan: ifaces[cmd.iface].vlan || 1, nativeVlan: ifaces[cmd.iface].nativeVlan || 1, allowedVlans: ifaces[cmd.iface].allowedVlans || "all" };
+          d.etherchannels[cmd.id] = { protocol: ["active", "passive"].includes(cmd.mode) ? "LACP" : ["auto", "desirable"].includes(cmd.mode) ? "PAgP" : "static", members: [...new Set([...(d.etherchannels[cmd.id]?.members || []), cmd.iface])] };
+          log("ok", d.hostname, `${ifaceName(cmd.iface)} joined channel-group ${cmd.id}`);
+          break;
+        }
+        case "storm-control":
+          ifaces[cmd.iface] = { ...ifaces[cmd.iface], stormControl: { ...(ifaces[cmd.iface].stormControl || {}), ...cmd } };
+          delete ifaces[cmd.iface].stormControl.kind;
+          delete ifaces[cmd.iface].stormControl.iface;
+          break;
+        case "dhcp-snoop-trust":
+          ifaces[cmd.iface] = { ...ifaces[cmd.iface], dhcpSnoopingTrust: cmd.value };
+          d.dhcpSnooping.trusted = cmd.value ? [...new Set([...(d.dhcpSnooping.trusted || []), cmd.iface])] : (d.dhcpSnooping.trusted || []).filter(x => x !== cmd.iface);
+          break;
+        case "dai-trust":
+          ifaces[cmd.iface] = { ...ifaces[cmd.iface], daiTrust: cmd.value };
+          d.dai.trusted = cmd.value ? [...new Set([...(d.dai.trusted || []), cmd.iface])] : (d.dai.trusted || []).filter(x => x !== cmd.iface);
+          break;
+        case "encapsulation":
+          ifaces[cmd.iface] = { ...ifaces[cmd.iface], encapsulation: cmd.value };
+          break;
+        case "tunnel-source":
+          ifaces[cmd.iface] = { ...ifaces[cmd.iface], tunnelSource: cmd.value };
+          break;
+        case "tunnel-destination":
+          ifaces[cmd.iface] = { ...ifaces[cmd.iface], tunnelDestination: cmd.value };
+          break;
+        case "service-policy":
+          ifaces[cmd.iface] = { ...ifaces[cmd.iface], servicePolicy: { ...(ifaces[cmd.iface].servicePolicy || {}), [cmd.dir]: cmd.policy } };
+          break;
+        case "pim":
+          ifaces[cmd.iface] = { ...ifaces[cmd.iface], pim: cmd.mode };
+          break;
+        case "igmp-join":
+          ifaces[cmd.iface] = { ...ifaces[cmd.iface], igmpGroups: [...new Set([...(ifaces[cmd.iface].igmpGroups || []), cmd.group])] };
+          break;
+        case "hsrp":
+          ifaces[cmd.iface] = { ...ifaces[cmd.iface], hsrp: { ...(ifaces[cmd.iface].hsrp || {}), [cmd.group]: { ...(ifaces[cmd.iface].hsrp?.[cmd.group] || {}), ...(cmd.ip ? { ip: cmd.ip } : {}), ...(cmd.priority ? { priority: cmd.priority } : {}), priority: cmd.priority || ifaces[cmd.iface].hsrp?.[cmd.group]?.priority || 100 } } };
           break;
         case "speed":
         case "duplex":
@@ -597,9 +827,16 @@ function App() {
         case "ospf-create":
           d.ospf[cmd.pid] = d.ospf[cmd.pid] || { networks: [], passive: [] };
           break;
-        case "ospf-router-id":
-          d.ospf[cmd.pid] = { ...(d.ospf[cmd.pid] || { networks: [], passive: [] }), routerId: cmd.routerId };
+        case "routing-create": {
+          const db = cmd.proto === "eigrp" ? d.eigrp : cmd.proto === "rip" ? d.rip : d.bgp;
+          db[cmd.id] = db[cmd.id] || { networks: [], passive: [], neighbors: [] };
           break;
+        }
+        case "routing-router-id": {
+          const db = cmd.proto === "ospf" ? d.ospf : cmd.proto === "eigrp" ? d.eigrp : cmd.proto === "rip" ? d.rip : d.bgp;
+          db[cmd.id] = { ...(db[cmd.id] || { networks: [], passive: [], neighbors: [] }), routerId: cmd.routerId };
+          break;
+        }
         case "ospf-network": {
           const ospf = d.ospf[cmd.pid] || { networks: [], passive: [] };
           ospf.networks = [...(ospf.networks || []).filter(n => !(n.network === cmd.network && n.wildcard === cmd.wildcard && n.area === cmd.area)), { network: cmd.network, wildcard: cmd.wildcard, area: cmd.area }];
@@ -615,6 +852,29 @@ function App() {
         }
         case "ospf-default":
           d.ospf[cmd.pid] = { ...(d.ospf[cmd.pid] || { networks: [], passive: [] }), defaultOriginate: cmd.value };
+          break;
+        case "routing-network": {
+          const db = cmd.proto === "eigrp" ? d.eigrp : cmd.proto === "rip" ? d.rip : d.bgp;
+          const id = cmd.id || (cmd.proto === "rip" ? "rip" : "1");
+          db[id] = db[id] || { networks: [], passive: [], neighbors: [] };
+          db[id].networks = [...(db[id].networks || []).filter(n => n.network !== cmd.network), { network: cmd.network, wildcard: cmd.wildcard, mask: cmd.mask || wildcardToMaskSafe(cmd.wildcard) }];
+          log("ok", d.hostname, `${cmd.proto} network ${cmd.network}`);
+          break;
+        }
+        case "routing-passive": {
+          const db = cmd.proto === "ospf" ? d.ospf : cmd.proto === "eigrp" ? d.eigrp : cmd.proto === "rip" ? d.rip : d.bgp;
+          db[cmd.id] = db[cmd.id] || { networks: [], passive: [], neighbors: [] };
+          db[cmd.id].passive = cmd.value ? [...new Set([...(db[cmd.id].passive || []), cmd.iface])] : (db[cmd.id].passive || []).filter(x => x !== cmd.iface);
+          break;
+        }
+        case "routing-field": {
+          const db = cmd.proto === "rip" ? d.rip : cmd.proto === "eigrp" ? d.eigrp : d.bgp;
+          db[cmd.id] = { ...(db[cmd.id] || { networks: [], passive: [], neighbors: [] }), [cmd.field]: cmd.value };
+          break;
+        }
+        case "bgp-neighbor":
+          d.bgp[cmd.id] = d.bgp[cmd.id] || { networks: [], passive: [], neighbors: [] };
+          d.bgp[cmd.id].neighbors = [...(d.bgp[cmd.id].neighbors || []).filter(n => n.ip !== cmd.ip), { ip: cmd.ip, remoteAs: cmd.remoteAs }];
           break;
         case "dhcp-pool":
           d.dhcp.pools[cmd.name] = d.dhcp.pools[cmd.name] || {};
@@ -652,6 +912,121 @@ function App() {
           d.acls[cmd.name] = d.acls[cmd.name] || { type: "extended", entries: [] };
           d.acls[cmd.name].entries.push({ action: "remark", spec: cmd.value });
           break;
+        case "prefix-list-entry":
+          d.prefixLists[cmd.name] = d.prefixLists[cmd.name] || { entries: [] };
+          d.prefixLists[cmd.name].entries.push({ action: cmd.action, prefix: cmd.prefix });
+          break;
+        case "route-map-create":
+          d.routeMaps[cmd.name] = d.routeMaps[cmd.name] || { sequences: [] };
+          if (!d.routeMaps[cmd.name].sequences.some(s => s.seq === cmd.seq)) d.routeMaps[cmd.name].sequences.push({ seq: cmd.seq, action: cmd.action });
+          break;
+        case "route-map-line": {
+          d.routeMaps[cmd.name] = d.routeMaps[cmd.name] || { sequences: [] };
+          let seq = d.routeMaps[cmd.name].sequences.find(s => s.seq === cmd.seq);
+          if (!seq) { seq = { seq: cmd.seq, action: "permit" }; d.routeMaps[cmd.name].sequences.push(seq); }
+          seq[cmd.field] = cmd.value;
+          break;
+        }
+        case "vrf-create":
+          d.vrfs[cmd.name] = d.vrfs[cmd.name] || { afs: [] };
+          break;
+        case "vrf-rd":
+          d.vrfs[cmd.name] = { ...(d.vrfs[cmd.name] || { afs: [] }), rd: cmd.rd };
+          break;
+        case "vrf-af":
+          d.vrfs[cmd.name] = d.vrfs[cmd.name] || { afs: [] };
+          d.vrfs[cmd.name].afs = [...new Set([...(d.vrfs[cmd.name].afs || []), cmd.af])];
+          break;
+        case "nat-pool":
+          d.nat.pools[cmd.name] = { start: cmd.start, end: cmd.end, mask: cmd.mask };
+          break;
+        case "nat-rule":
+          d.nat.rules = [...(d.nat.rules || []).filter(r => r.config !== cmd.config), { config: cmd.config, ...cmd.rule }];
+          break;
+        case "aaa":
+          d.aaa.enabled = cmd.enabled;
+          break;
+        case "aaa-method":
+          d.aaa.methods = [...(d.aaa.methods || []).filter(x => !(x.service === cmd.service && x.list === cmd.list)), { service: cmd.service, list: cmd.list, methods: cmd.methods }];
+          break;
+        case "crypto-rsa":
+          d.crypto.rsaKeys = { modulus: cmd.modulus, generated: true };
+          d.services.ssh = true;
+          break;
+        case "ntp-server":
+          d.ntp.servers = [...new Set([...(d.ntp.servers || []), cmd.server])];
+          break;
+        case "snmp-community":
+          d.snmp.communities = [...(d.snmp.communities || []).filter(c => c.name !== cmd.name), { name: cmd.name, access: cmd.access }];
+          break;
+        case "snmp-host":
+          d.snmp.hosts = [...(d.snmp.hosts || []).filter(h => h.host !== cmd.host), { host: cmd.host, community: cmd.community }];
+          break;
+        case "logging-host":
+          d.loggingHosts = [...new Set([...(d.loggingHosts || []), cmd.host])];
+          break;
+        case "dhcp-snooping":
+          d.dhcpSnooping.enabled = cmd.enabled;
+          break;
+        case "dhcp-snooping-vlan":
+          d.dhcpSnooping.vlans = cmd.vlans;
+          break;
+        case "dai-vlan":
+          d.dai.vlans = cmd.vlans;
+          break;
+        case "stp-root":
+          d.stp = d.stp || { mode: "rapid-pvst", vlanPriority: {} };
+          d.stp.vlanPriority = { ...(d.stp.vlanPriority || {}), [cmd.vlan]: cmd.role === "primary" ? 24576 : 28672 };
+          break;
+        case "stp-priority":
+          d.stp = d.stp || { mode: "rapid-pvst", vlanPriority: {} };
+          d.stp.vlanPriority = { ...(d.stp.vlanPriority || {}), [cmd.vlan]: cmd.priority };
+          break;
+        case "span-source": {
+          const s = d.span.find(x => x.session === cmd.session) || { session: cmd.session };
+          s.source = cmd.iface;
+          d.span = [...d.span.filter(x => x.session !== cmd.session), s];
+          break;
+        }
+        case "span-dest": {
+          const s = d.span.find(x => x.session === cmd.session) || { session: cmd.session };
+          s.destination = cmd.iface;
+          d.span = [...d.span.filter(x => x.session !== cmd.session), s];
+          break;
+        }
+        case "vtp":
+          d.vtp[cmd.field] = cmd.value;
+          break;
+        case "class-map-create":
+          d.qos.classMaps[cmd.name] = d.qos.classMaps[cmd.name] || { matchType: cmd.matchType, matches: [] };
+          break;
+        case "class-map-match":
+          d.qos.classMaps[cmd.name] = d.qos.classMaps[cmd.name] || { matchType: "match-any", matches: [] };
+          d.qos.classMaps[cmd.name].matches.push(cmd.match);
+          break;
+        case "policy-map-create":
+          d.qos.policyMaps[cmd.name] = d.qos.policyMaps[cmd.name] || { classes: [] };
+          break;
+        case "policy-map-class":
+          d.qos.policyMaps[cmd.policy] = d.qos.policyMaps[cmd.policy] || { classes: [] };
+          if (!d.qos.policyMaps[cmd.policy].classes.some(c => c.name === cmd.className)) d.qos.policyMaps[cmd.policy].classes.push({ name: cmd.className, actions: [] });
+          break;
+        case "policy-map-action": {
+          d.qos.policyMaps[cmd.policy] = d.qos.policyMaps[cmd.policy] || { classes: [] };
+          let cls = d.qos.policyMaps[cmd.policy].classes.find(c => c.name === cmd.className);
+          if (!cls) { cls = { name: cmd.className, actions: [] }; d.qos.policyMaps[cmd.policy].classes.push(cls); }
+          cls.actions.push(cmd.action);
+          break;
+        }
+        case "ip-sla-create":
+          d.ipSla[cmd.id] = d.ipSla[cmd.id] || {};
+          break;
+        case "ip-sla-field":
+          d.ipSla[cmd.id] = { ...(d.ipSla[cmd.id] || {}), [cmd.field]: cmd.value, lastOk: true };
+          break;
+        case "track":
+          d.tracks[cmd.id] = { object: cmd.object, state: "up" };
+          break;
       }
       d.interfaces = ifaces;
       const next = { ...m, [devId]: OPT_Engine.recalcConnectedRoutes(d) };
@@ -666,7 +1041,9 @@ function App() {
     setSimRunning(true);
     const pid = OPT_Engine.uid("p");
     const speed = 1 / Math.max(0.25, t.packetSpeed || 1);
-    const segMs = 600 * speed;
+    const segMs = 360 * speed;
+    const legPauseMs = 55 * speed;
+    const turnPauseMs = 130 * speed;
 
     // Deduped device waypoint sequence
     const waypoints = [];
@@ -706,7 +1083,7 @@ function App() {
           isReply = true;
           seq = waypoints.slice().reverse();
           i = 0;
-          setTimeout(step, 220 * speed);
+          setTimeout(step, turnPauseMs);
           return;
         }
         // All done
@@ -732,12 +1109,12 @@ function App() {
         else {
           setActiveHopDeviceId(to.id);
           i++;
-          setTimeout(step, 90 * speed);
+          setTimeout(step, legPauseMs);
         }
       };
       requestAnimationFrame(animate);
     };
-    setTimeout(step, 220 * speed);
+    setTimeout(step, turnPauseMs);
   };
 
   const handlePing = (srcId, target, opts = {}, onComplete) => {
@@ -815,6 +1192,17 @@ function App() {
       onDragLeave={handleDragLeave}
       onDrop={handleDrop}
     >
+      <input
+        ref={importFileInputRef}
+        type="file"
+        accept=".pka,.pkt"
+        style={{ display: "none" }}
+        onChange={(e) => {
+          const file = e.target.files?.[0];
+          if (file) handleImportFile(file);
+          e.target.value = "";
+        }}
+      />
       {/* Title bar */}
       <div className="titlebar">
         <div className="tb-logo">
@@ -830,13 +1218,14 @@ function App() {
           setTweak={setTweak}
           onNewBlankTab={newBlankTab}
           onNewStarterTab={newStarterTab}
+          onImportPacketTracer={openPacketTracerFilePicker}
           onReset={() => {
             const s = OPT_Engine.makeStarter();
             setDevices(s.devices); setLinks(s.links); setSelectedId(null);
-            setEvents([]); setPackets([]);
+            setEvents([]); setPackets([]); setPtActivity(null);
             log("ok", "system", "scenario reset to starter");
           }}
-          onClearAll={() => { setDevices({}); setLinks([]); setSelectedId(null); setEvents([]); setPackets([]); log("warn", "system", "topology cleared"); }}
+          onClearAll={() => { setDevices({}); setLinks([]); setSelectedId(null); setEvents([]); setPackets([]); setPtActivity(null); log("warn", "system", "topology cleared"); }}
           onDeleteSelected={() => selectedId && deleteDevice(selectedId)}
           onPing={(srcName, dst) => {
             const src = Object.values(devices).find(d => d.hostname === srcName);
@@ -846,6 +1235,7 @@ function App() {
             if (key === "starter") {
               const s = OPT_Engine.makeStarter();
               setDevices(s.devices); setLinks(s.links); setSelectedId(null);
+              setPtActivity(null);
               log("ok", "system", "loaded lab: Two-router VLAN routing");
             }
           }}
@@ -995,7 +1385,7 @@ function App() {
         <div className="file-drop-overlay">
           <div className="file-drop-panel">
             <div className="file-drop-title">Drop lab file</div>
-            <div className="file-drop-subtitle">OpenPT JSON imports now. Packet Tracer PKA/PKT files need the extractor hook.</div>
+            <div className="file-drop-subtitle">OpenPT JSON/OPT and Packet Tracer PKA/PKT files open in a new tab.</div>
           </div>
         </div>
       )}
@@ -1109,6 +1499,7 @@ function TitleMenus(props) {
     File: [
       { label: "New blank tab", kbd: "⌘N", on: () => { props.onNewBlankTab(); } },
       { label: "New starter scenario tab", on: () => { props.onNewStarterTab(); } },
+      { label: "Import Packet Tracer File...", on: () => { props.onImportPacketTracer(); } },
       { sep: true },
       { sect: "Export" },
       { label: "Export topology as JSON", on: () => { downloadJSON({ devices: props.devices, links: props.links }, "openpt-topology.json"); } },
@@ -1195,7 +1586,6 @@ function TitleMenus(props) {
           {open === name && (
             menus[name].kind === "devices" ? (
               <div className="tb-dropdown" style={{ minWidth: 300 }}>
-                <div className="tb-dropdown-section">Drag onto canvas</div>
                 <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 4, padding: "0 4px 6px" }}>
                   {DeviceCatalog.map((d) => (
                     <div
@@ -1555,6 +1945,10 @@ function parseAclEntry(action, spec, aclType) {
   const src = parseHost(idx);
   const dst = parseHost(src.next);
   return { action, spec, proto, src: src.value, srcWildcard: src.wildcard, dst: dst.value, dstWildcard: dst.wildcard };
+}
+function wildcardToMaskSafe(wildcard) {
+  if (!wildcard || !wildcard.includes(".")) return "255.255.255.0";
+  return OPT_Engine.wildcardToMask ? OPT_Engine.wildcardToMask(wildcard) : "255.255.255.0";
 }
 function networkAddress(ip, mask) {
   const ipI = OPT_Engine.ipToInt(ip), m = OPT_Engine.ipToInt(mask);

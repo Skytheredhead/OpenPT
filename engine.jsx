@@ -201,28 +201,28 @@ function isRouterLike(d) { return d?.kind === "router" || d?.kind === "l3switch"
 function clone(obj) { return JSON.parse(JSON.stringify(obj)); }
 function shortIfaceName(n) {
   return String(n || "")
-    .replace(/^HundredGigabitEthernet\s*/i, "hu")
-    .replace(/^FortyGigabitEthernet\s*/i, "fo")
-    .replace(/^TwentyFiveGigE\s*/i, "twe")
-    .replace(/^TenGigabitEthernet\s*/i, "te")
-    .replace(/^GigabitEthernet\s*/i, "g")
-    .replace(/^FastEthernet\s*/i, "f")
-    .replace(/^Ethernet\s*/i, "e")
-    .replace(/^Serial\s*/i, "s")
-    .replace(/^Vlan\s*/i, "vlan");
+    .replace(/^HundredGigabitEthernet\s*/i, "Hu")
+    .replace(/^FortyGigabitEthernet\s*/i, "Fo")
+    .replace(/^TwentyFiveGigE\s*/i, "Twe")
+    .replace(/^TenGigabitEthernet\s*/i, "Te")
+    .replace(/^GigabitEthernet\s*/i, "Gi")
+    .replace(/^FastEthernet\s*/i, "Fa")
+    .replace(/^Ethernet\s*/i, "Eth")
+    .replace(/^Serial\s*/i, "Se")
+    .replace(/^Vlan\s*/i, "Vl");
 }
 
 function shortIfaceNamesInText(text) {
   return String(text || "")
-    .replace(/\bHundredGigabitEthernet\s*(?=\d)/gi, "hu")
-    .replace(/\bFortyGigabitEthernet\s*(?=\d)/gi, "fo")
-    .replace(/\bTwentyFiveGigE\s*(?=\d)/gi, "twe")
-    .replace(/\bTenGigabitEthernet\s*(?=\d)/gi, "te")
-    .replace(/\bGigabitEthernet\s*(?=\d)/gi, "g")
-    .replace(/\bFastEthernet\s*(?=\d)/gi, "f")
-    .replace(/\bEthernet\s*(?=\d)/gi, "e")
-    .replace(/\bSerial\s*(?=\d)/gi, "s")
-    .replace(/\bVlan\s*(?=\d)/gi, "vlan");
+    .replace(/\bHundredGigabitEthernet\s*(?=\d)/gi, "Hu")
+    .replace(/\bFortyGigabitEthernet\s*(?=\d)/gi, "Fo")
+    .replace(/\bTwentyFiveGigE\s*(?=\d)/gi, "Twe")
+    .replace(/\bTenGigabitEthernet\s*(?=\d)/gi, "Te")
+    .replace(/\bGigabitEthernet\s*(?=\d)/gi, "Gi")
+    .replace(/\bFastEthernet\s*(?=\d)/gi, "Fa")
+    .replace(/\bEthernet\s*(?=\d)/gi, "Eth")
+    .replace(/\bSerial\s*(?=\d)/gi, "Se")
+    .replace(/\bVlan\s*(?=\d)/gi, "Vl");
 }
 
 function normalizeDevice(d) {
@@ -339,23 +339,37 @@ function ospfEnabledOn(dev, ifaceName, ifc) {
   return (ospf.networks || []).some((n) => inNet(ifc.ip, n.network, wildcardToMask(n.wildcard)));
 }
 
+function dynamicEnabledOn(dev, proto, ifaceName, ifc) {
+  if (proto === "O") return ospfEnabledOn(dev, ifaceName, ifc);
+  if (!isRouterLike(dev)) return false;
+  const db = proto === "R" ? Object.values(dev.rip || {})[0]
+           : proto === "D" ? Object.values(dev.eigrp || {})[0]
+           : proto === "B" ? Object.values(dev.bgp || {})[0]
+           : null;
+  if (!db || db.passive?.includes?.(ifaceName)) return false;
+  if (proto === "B") return (db.networks || []).some((n) => inNet(ifc.ip, n.network, n.mask || "255.255.255.0"));
+  return (db.networks || []).some((n) => inNet(ifc.ip, n.network, n.mask || "255.255.255.0"));
+}
+
 function recomputeDynamicRoutes(devices, links) {
-  let next = Object.fromEntries(Object.entries(devices || {}).map(([id, d]) => [id, recalcConnectedRoutes({ ...d, routes: (d.routes || []).filter((r) => r.type !== "O") })]));
+  let next = Object.fromEntries(Object.entries(devices || {}).map(([id, d]) => [id, recalcConnectedRoutes({ ...d, routes: (d.routes || []).filter((r) => !["O", "R", "D", "B"].includes(r.type)) })]));
   const routerIds = Object.keys(next).filter((id) => isRouterLike(next[id]));
-  for (const aId of routerIds) {
-    const a = next[aId];
-    for (const [aIfName, aIf] of Object.entries(a.interfaces || {})) {
-      if (!aIf.ip || !aIf.up || !ospfEnabledOn(a, aIfName, aIf)) continue;
-      const peer = findPeer(next, links, aId, aIfName);
-      const b = next[peer?.peerId];
-      const bIf = b?.interfaces?.[peer?.peerIface];
-      if (!b || !bIf?.ip || !bIf.up || !ospfEnabledOn(b, peer.peerIface, bIf)) continue;
-      if (!sameSubnet(aIf.ip, bIf.ip, aIf.mask)) continue;
-      const learned = (b.routes || []).filter((r) => r.type === "C");
-      for (const r of learned) {
-        if (inNet(aIf.ip, r.dst, r.mask)) continue;
-        if ((a.routes || []).some((x) => x.dst === r.dst && x.mask === r.mask)) continue;
-        a.routes.push({ dst: r.dst, mask: r.mask, via: bIf.ip, iface: aIfName, type: "O" });
+  for (const proto of ["O", "R", "D", "B"]) {
+    for (const aId of routerIds) {
+      const a = next[aId];
+      for (const [aIfName, aIf] of Object.entries(a.interfaces || {})) {
+        if (!aIf.ip || !aIf.up || !dynamicEnabledOn(a, proto, aIfName, aIf)) continue;
+        const peer = findPeer(next, links, aId, aIfName);
+        const b = next[peer?.peerId];
+        const bIf = b?.interfaces?.[peer?.peerIface];
+        if (!b || !bIf?.ip || !bIf.up || !dynamicEnabledOn(b, proto, peer.peerIface, bIf)) continue;
+        if (!sameSubnet(aIf.ip, bIf.ip, aIf.mask)) continue;
+        const learned = (b.routes || []).filter((r) => r.type === "C" || r.type === proto);
+        for (const r of learned) {
+          if (inNet(aIf.ip, r.dst, r.mask)) continue;
+          if ((a.routes || []).some((x) => x.dst === r.dst && x.mask === r.mask)) continue;
+          a.routes.push({ dst: r.dst, mask: r.mask, via: bIf.ip, iface: aIfName, type: proto });
+        }
       }
     }
   }
@@ -468,6 +482,12 @@ function planPath(devices, links, srcId, dstIp) {
       if (!nb.vlans?.[vlan]) return { ok: false, error: `${nb.hostname}: VLAN ${vlan} does not exist`, hops };
       if (!vlanAllows(inIf, vlan)) return { ok: false, error: `${nb.hostname} ${ingressIface}: VLAN ${vlan} not allowed`, hops };
       if (inIf.stp?.state === "blocking") return { ok: false, error: `${nb.hostname} ${ingressIface}: STP blocking`, hops };
+      if (inIf.portSecurity?.enabled && inIf.portSecurity.violation === "shutdown") {
+        return { ok: false, error: `${nb.hostname} ${ingressIface}: port-security violation shutdown`, hops };
+      }
+      if (inIf.stormControl?.action === "shutdown") {
+        return { ok: false, error: `${nb.hostname} ${ingressIface}: storm-control shutdown`, hops };
+      }
       let chosen = null;
       const candidates = [];
       for (const [pname, pifc] of Object.entries(nb.interfaces || {})) {
@@ -557,8 +577,34 @@ function serializeConfig(d) {
   const out = ["!", `! ${d.model || d.kind} running-config`, "!", `hostname ${d.hostname}`];
   if (d.secrets?.enable) out.push(`enable secret ${d.secrets.enable}`);
   if (d.services?.passwordEncryption) out.push("service password-encryption");
+  if (d.aaa?.enabled) out.push("aaa new-model");
+  if (d.vtp?.domain) out.push(`vtp domain ${d.vtp.domain}`);
+  if (d.vtp?.mode) out.push(`vtp mode ${d.vtp.mode}`);
+  for (const h of d.loggingHosts || []) out.push(`logging host ${h}`);
+  for (const s of d.ntp?.servers || []) out.push(`ntp server ${s}`);
+  for (const c of d.snmp?.communities || []) out.push(`snmp-server community ${c.name} ${c.access}`);
+  for (const h of d.snmp?.hosts || []) out.push(`snmp-server host ${h.host} ${h.community || ""}`.trim());
+  if (d.crypto?.rsaKeys) out.push(`crypto key generate rsa modulus ${d.crypto.rsaKeys.modulus}`);
+  if (d.dhcpSnooping?.enabled) out.push("ip dhcp snooping");
+  if (d.dhcpSnooping?.vlans?.length) out.push(`ip dhcp snooping vlan ${d.dhcpSnooping.vlans.join(",")}`);
+  if (d.dai?.vlans?.length) out.push(`ip arp inspection vlan ${d.dai.vlans.join(",")}`);
   if (d.ipRouting === false && d.kind !== "router") out.push("no ip routing");
   for (const [u, v] of Object.entries(d.users || {})) out.push(`username ${u} secret ${v.secret}`);
+  for (const [name, p] of Object.entries(d.prefixLists || {})) for (const e of p.entries || []) out.push(`ip prefix-list ${name} ${e.action} ${e.prefix}`);
+  for (const [name, rm] of Object.entries(d.routeMaps || {})) {
+    for (const seq of rm.sequences || []) {
+      out.push(`route-map ${name} ${seq.action} ${seq.seq}`);
+      if (seq.match) out.push(` match ${seq.match}`);
+      if (seq.set) out.push(` set ${seq.set}`);
+    }
+  }
+  for (const [name, vrf] of Object.entries(d.vrfs || {})) {
+    out.push(`vrf definition ${name}`);
+    if (vrf.rd) out.push(` rd ${vrf.rd}`);
+    out.push("!");
+  }
+  for (const [name, pool] of Object.entries(d.nat?.pools || {})) out.push(`ip nat pool ${name} ${pool.start} ${pool.end} netmask ${pool.mask}`);
+  for (const rule of d.nat?.rules || []) out.push(rule.config);
   for (const e of d.dhcp?.excluded || []) out.push(`ip dhcp excluded-address ${e.start}${e.end && e.end !== e.start ? ` ${e.end}` : ""}`);
   for (const [name, p] of Object.entries(d.dhcp?.pools || {})) {
     out.push(`ip dhcp pool ${name}`);
@@ -580,6 +626,27 @@ function serializeConfig(d) {
     if (ifc.ip) out.push(` ip address ${ifc.ip} ${ifc.mask}`);
     if (ifc.mode) out.push(` switchport mode ${ifc.mode}`);
     if (ifc.mode === "access" && ifc.vlan) out.push(` switchport access vlan ${ifc.vlan}`);
+    if (ifc.voiceVlan) out.push(` switchport voice vlan ${ifc.voiceVlan}`);
+    if (ifc.channelGroup) out.push(` channel-group ${ifc.channelGroup.id} mode ${ifc.channelGroup.mode}`);
+    if (ifc.portSecurity?.enabled) out.push(" switchport port-security");
+    if (ifc.portSecurity?.maximum) out.push(` switchport port-security maximum ${ifc.portSecurity.maximum}`);
+    if (ifc.portSecurity?.violation) out.push(` switchport port-security violation ${ifc.portSecurity.violation}`);
+    if (ifc.stormControl?.level) out.push(` storm-control broadcast level ${ifc.stormControl.level}`);
+    if (ifc.stormControl?.action) out.push(` storm-control action ${ifc.stormControl.action}`);
+    if (ifc.dhcpSnoopingTrust) out.push(" ip dhcp snooping trust");
+    if (ifc.daiTrust) out.push(" ip arp inspection trust");
+    if (ifc.encapsulation) out.push(` encapsulation ${ifc.encapsulation}`);
+    if (ifc.tunnelSource) out.push(` tunnel source ${ifc.tunnelSource}`);
+    if (ifc.tunnelDestination) out.push(` tunnel destination ${ifc.tunnelDestination}`);
+    if (ifc.policyRouteMap) out.push(` ip policy route-map ${ifc.policyRouteMap}`);
+    if (ifc.servicePolicy?.in) out.push(` service-policy input ${ifc.servicePolicy.in}`);
+    if (ifc.servicePolicy?.out) out.push(` service-policy output ${ifc.servicePolicy.out}`);
+    if (ifc.pim) out.push(` ip pim ${ifc.pim}`);
+    for (const g of ifc.igmpGroups || []) out.push(` ip igmp join-group ${g}`);
+    for (const [g, h] of Object.entries(ifc.hsrp || {})) {
+      if (h.ip) out.push(` standby ${g} ip ${h.ip}`);
+      if (h.priority) out.push(` standby ${g} priority ${h.priority}`);
+    }
     if (ifc.mode === "trunk") {
       if (ifc.nativeVlan && ifc.nativeVlan !== 1) out.push(` switchport trunk native vlan ${ifc.nativeVlan}`);
       if (ifc.allowedVlans && ifc.allowedVlans !== "all") out.push(` switchport trunk allowed vlan ${ifc.allowedVlans}`);
@@ -598,6 +665,38 @@ function serializeConfig(d) {
     for (const p of o.passive || []) out.push(` passive-interface ${p}`);
     out.push("!");
   }
+  for (const [pid, r] of Object.entries(d.rip || {})) {
+    out.push("router rip");
+    if (r.version) out.push(` version ${r.version}`);
+    for (const n of r.networks || []) out.push(` network ${n.network}`);
+    out.push("!");
+  }
+  for (const [asn, e] of Object.entries(d.eigrp || {})) {
+    out.push(`router eigrp ${asn}`);
+    for (const n of e.networks || []) out.push(` network ${n.network} ${n.wildcard || ""}`.trim());
+    out.push("!");
+  }
+  for (const [asn, b] of Object.entries(d.bgp || {})) {
+    out.push(`router bgp ${asn}`);
+    for (const n of b.neighbors || []) out.push(` neighbor ${n.ip} remote-as ${n.remoteAs}`);
+    for (const n of b.networks || []) out.push(` network ${n.network}${n.mask ? ` mask ${n.mask}` : ""}`);
+    out.push("!");
+  }
+  for (const [name, c] of Object.entries(d.qos?.classMaps || {})) out.push(`class-map ${c.matchType || "match-any"} ${name}`, ...(c.matches || []).map((m) => ` match ${m}`), "!");
+  for (const [name, p] of Object.entries(d.qos?.policyMaps || {})) {
+    out.push(`policy-map ${name}`);
+    for (const cls of p.classes || []) {
+      out.push(` class ${cls.name}`);
+      for (const a of cls.actions || []) out.push(`  ${a}`);
+    }
+    out.push("!");
+  }
+  for (const [id, sla] of Object.entries(d.ipSla || {})) {
+    out.push(`ip sla ${id}`);
+    if (sla.icmpEcho) out.push(` icmp-echo ${sla.icmpEcho}`);
+    out.push("!");
+  }
+  for (const [id, tr] of Object.entries(d.tracks || {})) out.push(`track ${id} ${tr.object || ""}`.trim());
   for (const [name, acl] of Object.entries(d.acls || {})) {
     out.push(`ip access-list ${acl.type} ${name}`);
     for (const e of acl.entries || []) out.push(` ${e.action} ${e.src || "any"}${e.dst ? ` ${e.dst}` : ""}`);
