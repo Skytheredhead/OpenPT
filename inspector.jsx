@@ -19,6 +19,7 @@ function Inspector({ device, onTogglePower, onDelete, onRename, onConsole }) {
   const m = window.DeviceCatalog.find(c => c.kind === device.kind);
   const isRouterLike = device.kind === "router" || device.kind === "l3switch";
   const isSwitchLike = device.kind === "l2switch" || device.kind === "l3switch";
+  const ifaceName = window.OPT_Engine.shortIfaceName;
 
   return (
     <div style={{ display: "flex", flexDirection: "column", minHeight: 0, height: "100%" }}>
@@ -62,7 +63,7 @@ function Inspector({ device, onTogglePower, onDelete, onRename, onConsole }) {
               return (
                 <div key={n} className="iface-row">
                   <div>
-                    <div className="nm">{n}</div>
+                    <div className="nm" title={n}>{ifaceName(n)}</div>
                     <div className="ip">
                       {ifc.ip ? `${ifc.ip}/${window.OPT_Engine.maskBits(ifc.mask)}` : "unassigned"}
                       {ifc.vlan != null ? ` · VLAN ${ifc.vlan}` : ""}
@@ -88,7 +89,7 @@ function Inspector({ device, onTogglePower, onDelete, onRename, onConsole }) {
                       <span style={{ color: r.type === "C" ? "var(--ok)" : "var(--accent)" }}>{r.type}</span>
                       &nbsp;{r.dst}/{window.OPT_Engine.maskBits(r.mask)}
                     </div>
-                    <div className="ip">{r.via === "directly" ? `directly connected · ${r.iface}` : `via ${r.via} · ${r.iface}`}</div>
+                    <div className="ip">{r.via === "directly" ? `directly connected · ${ifaceName(r.iface)}` : `via ${r.via} · ${ifaceName(r.iface)}`}</div>
                   </div>
                 </div>
               ))}
@@ -101,7 +102,7 @@ function Inspector({ device, onTogglePower, onDelete, onRename, onConsole }) {
             <h4>VLANs</h4>
             <div className="iface-table">
               {Object.entries(device.vlans || {}).map(([id, name]) => {
-                const ports = Object.entries(device.interfaces).filter(([_, i]) => String(i.vlan) === String(id)).map(([n]) => n);
+                const ports = Object.entries(device.interfaces).filter(([_, i]) => String(i.vlan) === String(id)).map(([n]) => ifaceName(n));
                 return (
                   <div key={id} className="iface-row">
                     <div>

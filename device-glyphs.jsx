@@ -78,9 +78,9 @@ const Glyph = {
 window.Glyph = Glyph;
 
 window.DeviceCatalog = [
-  { kind: "router",   label: "Router",     short: "R",   ifaces: ["G0/0","G0/1","S0/0/0","S0/0/1"], pwr: true,  color: "var(--accent)" },
-  { kind: "l3switch", label: "L3 Switch",  short: "MLS", ifaces: ["G0/1","G0/2","G0/3","G0/4","G0/5","G0/6"], pwr: true, color: "var(--violet)" },
-  { kind: "l2switch", label: "L2 Switch",  short: "SW",  ifaces: ["F0/1","F0/2","F0/3","F0/4","F0/5","F0/6","F0/7","F0/8"], pwr: true, color: "var(--fg-1)" },
+  { kind: "router",   label: "ISR4321 Router", short: "ISR", ifaces: ["GigabitEthernet0/0/0","GigabitEthernet0/0/1","Serial0/1/0","Serial0/1/1"], pwr: true, color: "var(--accent)" },
+  { kind: "l3switch", label: "Catalyst 9200L L3", short: "C9200L", ifaces: [...Array.from({ length: 24 }, (_, i) => `GigabitEthernet1/0/${i + 1}`), ...Array.from({ length: 4 }, (_, i) => `GigabitEthernet1/1/${i + 1}`)], pwr: true, color: "var(--violet)" },
+  { kind: "l2switch", label: "Catalyst 9200L", short: "C9200L", ifaces: [...Array.from({ length: 24 }, (_, i) => `GigabitEthernet1/0/${i + 1}`), ...Array.from({ length: 4 }, (_, i) => `GigabitEthernet1/1/${i + 1}`)], pwr: true, color: "var(--fg-1)" },
   { kind: "pc",       label: "PC",         short: "PC",  ifaces: ["eth0"], pwr: true, color: "var(--ok)" },
   { kind: "server",   label: "Server",     short: "SRV", ifaces: ["eth0"], pwr: true, color: "var(--magenta)" },
   { kind: "ap",       label: "Wireless AP",short: "AP",  ifaces: ["eth0","wlan0"], pwr: true, color: "var(--accent)" },

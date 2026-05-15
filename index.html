@@ -364,6 +364,38 @@
   .toast.ok .dot { background: var(--ok); }
   .toast.err .dot { background: var(--err); }
 
+  .file-drop-overlay {
+    position: fixed;
+    inset: 0;
+    z-index: 180;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: color-mix(in oklab, var(--bg-0) 72%, transparent);
+    border: 2px solid var(--accent);
+    pointer-events: none;
+  }
+  .file-drop-panel {
+    width: min(420px, calc(100vw - 40px));
+    border: 1px solid var(--accent-dim);
+    border-radius: 8px;
+    background: color-mix(in oklab, var(--bg-1) 96%, transparent);
+    box-shadow: 0 18px 54px rgba(0,0,0,0.55);
+    padding: 18px 20px;
+    text-align: center;
+  }
+  .file-drop-title {
+    font-size: 15px;
+    font-weight: 600;
+    color: var(--fg-0);
+  }
+  .file-drop-subtitle {
+    margin-top: 6px;
+    font-size: 12px;
+    color: var(--fg-2);
+    line-height: 1.4;
+  }
+
   /* ── Context menu ─────────────────────────────────────────── */
   .ctxmenu {
     position: fixed;

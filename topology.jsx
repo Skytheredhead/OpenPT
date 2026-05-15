@@ -153,6 +153,7 @@ function Topology(props) {
   const G = window.Glyph;
   const cat = window.DeviceCatalog;
   const meta = (k) => cat.find(c => c.kind === k) || cat[0];
+  const ifaceName = window.OPT_Engine.shortIfaceName;
 
   const fit = () => {
     const wrap = wrapRef.current;
@@ -278,7 +279,7 @@ function Topology(props) {
               onDoubleClick={() => onDeleteLink && onDeleteLink(l.id)}
               title="Double-click to remove"
             >
-              {l.ai} ↔ {l.bi}
+              <span title={l.ai}>{ifaceName(l.ai)}</span> ↔ <span title={l.bi}>{ifaceName(l.bi)}</span>
             </div>
           );
         })}

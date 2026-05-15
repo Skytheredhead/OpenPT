@@ -16,6 +16,8 @@ const TweakSlider = window.TweakSlider;
 const TweakToggle = window.TweakToggle;
 const TweakColor = window.TweakColor;
 const TweakButton = window.TweakButton;
+const ifaceName = (name) => OPT_Engine.shortIfaceName ? OPT_Engine.shortIfaceName(name) : name;
+const ifaceText = (text) => OPT_Engine.shortIfaceNamesInText ? OPT_Engine.shortIfaceNamesInText(text) : text;
 
 const TWEAK_DEFAULTS = /*EDITMODE-BEGIN*/{
   "accent": "cyan",
@@ -36,6 +38,7 @@ const ACCENTS = {
 
 function App() {
   const [t, setTweak] = useTweaks(TWEAK_DEFAULTS);
+  const dragDepth = useRef(0);
 
   // ── Apply accent tweak to CSS variables
   useEffect(() => {
@@ -57,12 +60,13 @@ function App() {
       if (raw) {
         const data = JSON.parse(raw);
         const cur = data.snapshots?.[data.activeWid] || {};
+        const norm = OPT_Engine.normalizeTopology(cur.devices || {}, cur.links || []);
         return {
           tabs: data.tabs || [{ id: "w-0", name: "lab-01 · two-router-vlan.opt" }],
           activeWid: data.activeWid || "w-0",
           snapshots: data.snapshots || {},
-          devices: cur.devices || {},
-          links: cur.links || [],
+          devices: norm.devices,
+          links: norm.links,
           selectedIds: cur.selectedIds || (cur.selectedId ? [cur.selectedId] : []),
           openConsoles: cur.openConsoles || [],
           activeBottom: cur.activeBottom || "events",
@@ -144,9 +148,10 @@ function App() {
     if (newId === activeWid) return;
     snapshotsRef.current[activeWid] = { devices, links, selectedIds, openConsoles, activeBottom };
     const snap = snapshotsRef.current[newId];
+    const norm = OPT_Engine.normalizeTopology(snap?.devices || {}, snap?.links || []);
     setActiveWid(newId);
-    setDevices(snap?.devices || {});
-    setLinks(snap?.links || []);
+    setDevices(norm.devices);
+    setLinks(norm.links);
     setSelectedIds(snap?.selectedIds || (snap?.selectedId ? [snap.selectedId] : []));
     setOpenConsoles(snap?.openConsoles || []);
     setActiveBottom(snap?.activeBottom || "events");
@@ -173,10 +178,11 @@ function App() {
       if (activeWid === id) {
         const target = remaining[remaining.length - 1];
         const snap = snapshotsRef.current[target.id];
+        const norm = OPT_Engine.normalizeTopology(snap?.devices || {}, snap?.links || []);
         delete snapshotsRef.current[id];
         setActiveWid(target.id);
-        setDevices(snap?.devices || {});
-        setLinks(snap?.links || []);
+        setDevices(norm.devices);
+        setLinks(norm.links);
         setSelectedIds(snap?.selectedIds || (snap?.selectedId ? [snap.selectedId] : []));
         setOpenConsoles(snap?.openConsoles || []);
         setActiveBottom(snap?.activeBottom || "events");
@@ -243,6 +249,7 @@ function App() {
   const [activeHopDeviceId, setActiveHopDeviceId] = useState(null);
   const [simRunning, setSimRunning] = useState(false);
   const [toast, setToast] = useState(null);
+  const [fileDropActive, setFileDropActive] = useState(false);
   const [ctx, setCtx] = useState(null);  // { x, y, devId }
   const [pendingCmd, setPendingCmd] = useState(null);  // { devId, cmd, nonce }
 
@@ -261,8 +268,96 @@ function App() {
   const log = (severity, source, message) => {
     setEvents((e) => [
       ...e.slice(-200),
-      { t: new Date().toLocaleTimeString("en-GB", { hour12: false }).slice(3), s: severity, src: source, m: message },
+      { t: new Date().toLocaleTimeString("en-GB", { hour12: false }).slice(3), s: severity, src: source, m: ifaceText(message) },
     ]);
+  };
+
+  const openImportedTopology = (topology, filename) => {
+    const norm = OPT_Engine.normalizeTopology(topology.devices || {}, topology.links || []);
+    const tabName = filename.replace(/\.(json|opt)$/i, "") || "imported-lab";
+    snapshotsRef.current[activeWid] = { devices, links, selectedIds, openConsoles, activeBottom };
+    const id = `w-${Date.now()}`;
+    snapshotsRef.current[id] = {
+      devices: norm.devices,
+      links: norm.links,
+      selectedIds: [],
+      openConsoles: [],
+      activeBottom: "events",
+    };
+    setTabs((ts) => [...ts, { id, name: `${tabName}.opt` }]);
+    setActiveWid(id);
+    setDevices(norm.devices);
+    setLinks(norm.links);
+    setSelectedIds([]);
+    setOpenConsoles([]);
+    setActiveBottom("events");
+    setEvents([]);
+    setPackets([]);
+    setToast({ kind: "ok", msg: `Imported ${filename}` });
+    log("ok", "import", `loaded ${filename}`);
+  };
+
+  const importPacketTracerActivity = async (file) => {
+    // Packet Tracer activity files are recognized here, but modern .pka/.pkt
+    // content is proprietary and appears compressed/encrypted. Plug a parser or
+    // local extractor into this function when one exists.
+    const bytes = await file.slice(0, 16).arrayBuffer();
+    const head = Array.from(new Uint8Array(bytes)).map(b => b.toString(16).padStart(2, "0")).join(" ");
+    throw new Error(`Packet Tracer file recognized (${head}); OpenPT needs a .pka/.pkt extractor before it can build the lab.`);
+  };
+
+  const handleImportFile = async (file) => {
+    const name = file.name || "dropped-file";
+    const lower = name.toLowerCase();
+    try {
+      if (lower.endsWith(".json") || lower.endsWith(".opt")) {
+        const data = JSON.parse(await file.text());
+        if (!data || typeof data !== "object" || !data.devices || !Array.isArray(data.links)) {
+          throw new Error("Expected an OpenPT topology with devices and links.");
+        }
+        openImportedTopology(data, name);
+        return;
+      }
+      if (lower.endsWith(".pka") || lower.endsWith(".pkt")) {
+        await importPacketTracerActivity(file);
+        return;
+      }
+      throw new Error("Drop an OpenPT .json/.opt file, or a Packet Tracer .pka/.pkt file for extractor diagnostics.");
+    } catch (err) {
+      const msg = err?.message || `Could not import ${name}`;
+      setToast({ kind: "err", msg });
+      log("err", "import", msg);
+    }
+  };
+
+  const isFileDrag = (e) => Array.from(e.dataTransfer?.types || []).includes("Files");
+
+  const handleDragEnter = (e) => {
+    if (!isFileDrag(e)) return;
+    e.preventDefault();
+    dragDepth.current += 1;
+    setFileDropActive(true);
+  };
+
+  const handleDragOver = (e) => {
+    if (!isFileDrag(e)) return;
+    e.preventDefault();
+    e.dataTransfer.dropEffect = "copy";
+  };
+
+  const handleDragLeave = (e) => {
+    if (!isFileDrag(e)) return;
+    dragDepth.current = Math.max(0, dragDepth.current - 1);
+    if (dragDepth.current === 0) setFileDropActive(false);
+  };
+
+  const handleDrop = (e) => {
+    if (!isFileDrag(e)) return;
+    e.preventDefault();
+    dragDepth.current = 0;
+    setFileDropActive(false);
+    const files = Array.from(e.dataTransfer.files || []);
+    if (files[0]) handleImportFile(files[0]);
   };
 
   useEffect(() => {
@@ -272,23 +367,16 @@ function App() {
   // ── Device + link operations ─────────────────────────
   const addDevice = (kind, x, y) => {
     const cat = DeviceCatalog.find(c => c.kind === kind);
-    const id = OPT_Engine.uid("d");
     // pick a friendly name
     const existing = Object.values(devices).filter(d => d.kind === kind).length + 1;
     const baseName = { router: "R", l2switch: "SW", l3switch: "MLS", pc: "PC", server: "SRV", ap: "AP", cloud: "NET" }[kind] || "DEV";
-    const ifaces = {};
-    cat.ifaces.forEach((n) => {
-      ifaces[n] = { up: false, admUp: false, ip: null, mask: null, mac: randMac(), desc: "" };
-      if (kind === "l2switch" || kind === "l3switch") { ifaces[n].vlan = 1; ifaces[n].mode = "access"; }
-      if (kind === "pc" || kind === "server") { ifaces[n].up = true; ifaces[n].admUp = true; }
-    });
-    const d = {
-      id, kind, x, y, powered: cat.pwr,
-      hostname: `${baseName}${existing}`,
-      privileged: false,
-      interfaces: ifaces, routes: [], arp: {}, mac: {},
-      vlans: (kind === "l2switch" || kind === "l3switch") ? { 1: "default" } : undefined,
-    };
+    const d = OPT_Engine.makeDevice(kind, `${baseName}${existing}`, x, y);
+    const id = d.id;
+    if (kind === "pc" || kind === "server") {
+      d.interfaces.eth0.up = true;
+      d.interfaces.eth0.admUp = true;
+    }
+    d.powered = cat.pwr;
     setDevices((m) => ({ ...m, [id]: d }));
     log("ok", "topology", `added ${cat.label} ${d.hostname}`);
     setSelectedId(id);
@@ -344,7 +432,7 @@ function App() {
       [aId]: { ...m[aId], interfaces: { ...m[aId].interfaces, [aFree]: { ...m[aId].interfaces[aFree], up: true, admUp: true } } },
       [bId]: { ...m[bId], interfaces: { ...m[bId].interfaces, [bFree]: { ...m[bId].interfaces[bFree], up: true, admUp: true } } },
     }));
-    log("ok", "topology", `wired ${a.hostname} ${aFree} ↔ ${b.hostname} ${bFree} (${type})`);
+    log("ok", "topology", `wired ${a.hostname} ${ifaceName(aFree)} ↔ ${b.hostname} ${ifaceName(bFree)} (${type})`);
   };
 
   const onDeleteLink = (id) => {
@@ -357,50 +445,217 @@ function App() {
   const onApplyToDevice = (devId, cmd) => {
     if (!devId) return;
     setDevices((m) => {
-      const d = { ...m[devId] };
+      if (cmd.kind === "host-dhcp") {
+        const result = OPT_Engine.allocateDhcp(m, links, devId);
+        log(result.message.startsWith("No ") ? "err" : "ok", m[devId].hostname, result.message);
+        return OPT_Engine.recomputeDynamicRoutes(result.devices, links);
+      }
+      const baseDevice = OPT_Engine.normalizeDevice(m[devId]);
+      const d = {
+        ...baseDevice,
+        interfaces: { ...baseDevice.interfaces },
+        vlans: m[devId].vlans ? { ...m[devId].vlans } : undefined,
+        routes: [...(m[devId].routes || [])],
+        users: { ...(m[devId].users || {}) },
+        secrets: { ...(m[devId].secrets || {}) },
+        services: { ...(m[devId].services || {}) },
+        lines: JSON.parse(JSON.stringify(m[devId].lines || {})),
+        dhcp: JSON.parse(JSON.stringify(m[devId].dhcp || { excluded: [], pools: {}, bindings: [] })),
+        ospf: JSON.parse(JSON.stringify(m[devId].ospf || {})),
+        acls: JSON.parse(JSON.stringify(m[devId].acls || {})),
+        nat: JSON.parse(JSON.stringify(m[devId].nat || { translations: [] })),
+      };
       const ifaces = { ...d.interfaces };
       switch (cmd.kind) {
+        case "save-startup":
+          d.startupConfig = cmd.config || OPT_Engine.serializeConfig(d);
+          log("ok", d.hostname, "startup-config updated");
+          break;
+        case "erase-startup":
+          d.startupConfig = "";
+          log("warn", d.hostname, "startup-config erased");
+          break;
         case "hostname":
           d.hostname = cmd.value;
           log("ok", d.hostname, `hostname changed`);
           break;
+        case "enable-secret":
+          d.secrets.enable = cmd.value;
+          log("ok", d.hostname, "enable secret set");
+          break;
+        case "service":
+          d.services[cmd.name] = cmd.value;
+          log("ok", d.hostname, `${cmd.value ? "" : "no "}service ${cmd.name}`);
+          break;
+        case "username":
+          d.users[cmd.user] = { secret: cmd.secret };
+          log("ok", d.hostname, `username ${cmd.user} configured`);
+          break;
+        case "line-password":
+          d.lines[cmd.line] = { ...(d.lines[cmd.line] || {}), password: cmd.value };
+          break;
+        case "line-login":
+          d.lines[cmd.line] = { ...(d.lines[cmd.line] || {}), login: cmd.value };
+          break;
+        case "line-transport":
+          d.lines[cmd.line] = { ...(d.lines[cmd.line] || {}), transport: cmd.value };
+          break;
+        case "line-logging":
+          d.lines[cmd.line] = { ...(d.lines[cmd.line] || {}), loggingSync: cmd.value };
+          break;
+        case "line-timeout":
+          d.lines[cmd.line] = { ...(d.lines[cmd.line] || {}), timeout: { minutes: cmd.minutes, seconds: cmd.seconds } };
+          break;
+        case "interface-create":
+          if (!ifaces[cmd.iface]) {
+            ifaces[cmd.iface] = { ip: null, mask: null, up: true, admUp: true, mac: randMac(), desc: "" };
+            if (cmd.iface.toLowerCase().startsWith("vlan")) {
+              const id = Number(cmd.iface.replace(/\D/g, ""));
+              d.vlans = { ...(d.vlans || {}), [id]: d.vlans?.[id] || `VLAN${id}` };
+            }
+            log("ok", d.hostname, `interface ${ifaceName(cmd.iface)} created`);
+          }
+          break;
+        case "host-ip":
+          ifaces.eth0 = { ...ifaces.eth0, ip: cmd.ip, mask: cmd.mask, gw: cmd.gw, dhcp: false, up: true, admUp: true };
+          log("ok", d.hostname, `eth0 address ${cmd.ip} ${cmd.mask} gateway ${cmd.gw}`);
+          break;
         case "ip-address":
           ifaces[cmd.iface] = { ...ifaces[cmd.iface], ip: cmd.ip, mask: cmd.mask };
-          // refresh connected route on routers/L3 switches
-          if (d.kind === "router" || d.kind === "l3switch") {
-            const net = networkAddress(cmd.ip, cmd.mask);
-            const routes = (d.routes || []).filter(r => !(r.iface === cmd.iface && r.type === "C"));
-            routes.push({ dst: net, mask: cmd.mask, via: "directly", iface: cmd.iface, type: "C" });
-            d.routes = routes;
-          }
-          log("ok", d.hostname, `${cmd.iface} address ${cmd.ip} ${cmd.mask}`);
+          log("ok", d.hostname, `${ifaceName(cmd.iface)} address ${cmd.ip} ${cmd.mask}`);
           break;
         case "admin":
           ifaces[cmd.iface] = { ...ifaces[cmd.iface], admUp: cmd.up, up: cmd.up && hasLink(devId, cmd.iface, links) };
-          log(cmd.up ? "ok" : "warn", d.hostname, `${cmd.iface} ${cmd.up ? "no shutdown" : "shutdown"}`);
+          log(cmd.up ? "ok" : "warn", d.hostname, `${ifaceName(cmd.iface)} ${cmd.up ? "no shutdown" : "shutdown"}`);
           break;
         case "desc":
           ifaces[cmd.iface] = { ...ifaces[cmd.iface], desc: cmd.value };
           break;
         case "swmode":
-          ifaces[cmd.iface] = { ...ifaces[cmd.iface], mode: cmd.value };
-          log("ok", d.hostname, `${cmd.iface} switchport mode ${cmd.value}`);
+          ifaces[cmd.iface] = { ...ifaces[cmd.iface], routed: false, mode: cmd.value };
+          log("ok", d.hostname, `${ifaceName(cmd.iface)} switchport mode ${cmd.value}`);
           break;
         case "swvlan":
+          d.vlans = { ...(d.vlans || {}), [cmd.value]: d.vlans?.[cmd.value] || `VLAN${cmd.value}` };
           ifaces[cmd.iface] = { ...ifaces[cmd.iface], vlan: cmd.value };
-          log("ok", d.hostname, `${cmd.iface} access vlan ${cmd.value}`);
+          log("ok", d.hostname, `${ifaceName(cmd.iface)} access vlan ${cmd.value}`);
+          break;
+        case "trunk-native":
+          d.vlans = { ...(d.vlans || {}), [cmd.value]: d.vlans?.[cmd.value] || `VLAN${cmd.value}` };
+          ifaces[cmd.iface] = { ...ifaces[cmd.iface], nativeVlan: cmd.value, mode: "trunk" };
+          log("ok", d.hostname, `${ifaceName(cmd.iface)} trunk native vlan ${cmd.value}`);
+          break;
+        case "trunk-allowed":
+          ifaces[cmd.iface] = { ...ifaces[cmd.iface], allowedVlans: cmd.value, mode: "trunk" };
+          log("ok", d.hostname, `${ifaceName(cmd.iface)} trunk allowed vlan ${cmd.value}`);
+          break;
+        case "routed-port":
+          ifaces[cmd.iface] = { ...ifaces[cmd.iface], routed: cmd.value, mode: cmd.value ? undefined : "access", vlan: cmd.value ? undefined : (ifaces[cmd.iface].vlan || 1) };
+          log("ok", d.hostname, `${ifaceName(cmd.iface)} ${cmd.value ? "no switchport" : "switchport"}`);
+          break;
+        case "iface-acl":
+          ifaces[cmd.iface] = { ...ifaces[cmd.iface], acl: { ...(ifaces[cmd.iface].acl || {}), [cmd.dir]: cmd.acl } };
+          if (!cmd.acl) delete ifaces[cmd.iface].acl[cmd.dir];
+          log("ok", d.hostname, `${ifaceName(cmd.iface)} access-group ${cmd.dir} ${cmd.acl || "removed"}`);
+          break;
+        case "nat-role":
+          ifaces[cmd.iface] = { ...ifaces[cmd.iface], natRole: cmd.value };
+          log("ok", d.hostname, `${ifaceName(cmd.iface)} nat role ${cmd.value || "removed"}`);
+          break;
+        case "stp-portfast":
+          ifaces[cmd.iface] = { ...ifaces[cmd.iface], stp: { ...(ifaces[cmd.iface].stp || {}), portfast: cmd.value } };
+          break;
+        case "speed":
+        case "duplex":
+          ifaces[cmd.iface] = { ...ifaces[cmd.iface], [cmd.kind]: cmd.value };
           break;
         case "vlan-add":
           d.vlans = { ...(d.vlans || {}), [cmd.id]: d.vlans?.[cmd.id] || `VLAN${cmd.id}` };
           log("ok", d.hostname, `vlan ${cmd.id} created`);
           break;
+        case "vlan-remove":
+          if (d.vlans) delete d.vlans[cmd.id];
+          for (const [n, ifc] of Object.entries(ifaces)) if (String(ifc.vlan) === String(cmd.id)) ifaces[n] = { ...ifc, vlan: 1 };
+          log("warn", d.hostname, `vlan ${cmd.id} removed`);
+          break;
+        case "vlan-name":
+          d.vlans = { ...(d.vlans || {}), [cmd.id]: cmd.name };
+          log("ok", d.hostname, `vlan ${cmd.id} named ${cmd.name}`);
+          break;
         case "ip-route":
-          d.routes = [...(d.routes || []), { dst: cmd.dst, mask: cmd.mask, via: cmd.via, iface: ifaceForVia(d, cmd.via), type: "S" }];
+          d.routes = [...(d.routes || []).filter(r => !(r.type === "S" && r.dst === cmd.dst && r.mask === cmd.mask && r.via === cmd.via)), { dst: cmd.dst, mask: cmd.mask, via: cmd.via, iface: OPT_Engine.ifaceForVia(d, cmd.via), type: "S" }];
           log("ok", d.hostname, `ip route ${cmd.dst} ${cmd.mask} ${cmd.via}`);
+          break;
+        case "no-ip-route":
+          d.routes = (d.routes || []).filter(r => !(r.type === "S" && r.dst === cmd.dst && r.mask === cmd.mask && r.via === cmd.via));
+          log("warn", d.hostname, `removed ip route ${cmd.dst} ${cmd.mask} ${cmd.via}`);
+          break;
+        case "ip-routing":
+          d.ipRouting = cmd.value;
+          log(cmd.value ? "ok" : "warn", d.hostname, `${cmd.value ? "" : "no "}ip routing`);
+          break;
+        case "ospf-create":
+          d.ospf[cmd.pid] = d.ospf[cmd.pid] || { networks: [], passive: [] };
+          break;
+        case "ospf-router-id":
+          d.ospf[cmd.pid] = { ...(d.ospf[cmd.pid] || { networks: [], passive: [] }), routerId: cmd.routerId };
+          break;
+        case "ospf-network": {
+          const ospf = d.ospf[cmd.pid] || { networks: [], passive: [] };
+          ospf.networks = [...(ospf.networks || []).filter(n => !(n.network === cmd.network && n.wildcard === cmd.wildcard && n.area === cmd.area)), { network: cmd.network, wildcard: cmd.wildcard, area: cmd.area }];
+          d.ospf[cmd.pid] = ospf;
+          log("ok", d.hostname, `ospf ${cmd.pid} network ${cmd.network}`);
+          break;
+        }
+        case "ospf-passive": {
+          const ospf = d.ospf[cmd.pid] || { networks: [], passive: [] };
+          ospf.passive = cmd.value ? [...new Set([...(ospf.passive || []), cmd.iface])] : (ospf.passive || []).filter(x => x !== cmd.iface);
+          d.ospf[cmd.pid] = ospf;
+          break;
+        }
+        case "ospf-default":
+          d.ospf[cmd.pid] = { ...(d.ospf[cmd.pid] || { networks: [], passive: [] }), defaultOriginate: cmd.value };
+          break;
+        case "dhcp-pool":
+          d.dhcp.pools[cmd.name] = d.dhcp.pools[cmd.name] || {};
+          break;
+        case "dhcp-exclude":
+          d.dhcp.excluded = [...(d.dhcp.excluded || []), { start: cmd.start, end: cmd.end }];
+          break;
+        case "no-dhcp-exclude":
+          d.dhcp.excluded = (d.dhcp.excluded || []).filter(e => !(e.start === cmd.start && e.end === cmd.end));
+          break;
+        case "dhcp-network":
+          d.dhcp.pools[cmd.pool] = { ...(d.dhcp.pools[cmd.pool] || {}), network: cmd.network, mask: cmd.mask };
+          log("ok", d.hostname, `dhcp pool ${cmd.pool} network ${cmd.network}`);
+          break;
+        case "dhcp-default-router":
+          d.dhcp.pools[cmd.pool] = { ...(d.dhcp.pools[cmd.pool] || {}), defaultRouter: cmd.ip };
+          break;
+        case "dhcp-dns":
+          d.dhcp.pools[cmd.pool] = { ...(d.dhcp.pools[cmd.pool] || {}), dnsServer: cmd.ip };
+          break;
+        case "dhcp-lease":
+          d.dhcp.pools[cmd.pool] = { ...(d.dhcp.pools[cmd.pool] || {}), leaseDays: cmd.days };
+          break;
+        case "acl-create":
+          d.acls[cmd.name] = d.acls[cmd.name] || { type: cmd.aclType, entries: [] };
+          break;
+        case "acl-entry": {
+          const entry = parseAclEntry(cmd.action, cmd.spec, cmd.aclType);
+          d.acls[cmd.name] = d.acls[cmd.name] || { type: cmd.aclType, entries: [] };
+          d.acls[cmd.name].entries.push(entry);
+          log("ok", d.hostname, `ACL ${cmd.name} ${cmd.action}`);
+          break;
+        }
+        case "acl-remark":
+          d.acls[cmd.name] = d.acls[cmd.name] || { type: "extended", entries: [] };
+          d.acls[cmd.name].entries.push({ action: "remark", spec: cmd.value });
           break;
       }
       d.interfaces = ifaces;
-      return { ...m, [devId]: d };
+      const next = { ...m, [devId]: OPT_Engine.recalcConnectedRoutes(d) };
+      return OPT_Engine.recomputeDynamicRoutes(next, links);
     });
   };
   const onApply = (cmd) => onApplyToDevice(selectedId, cmd);
@@ -553,7 +808,13 @@ function App() {
   };
 
   return (
-    <div className="app">
+    <div
+      className="app"
+      onDragEnter={handleDragEnter}
+      onDragOver={handleDragOver}
+      onDragLeave={handleDragLeave}
+      onDrop={handleDrop}
+    >
       {/* Title bar */}
       <div className="titlebar">
         <div className="tb-logo">
@@ -591,9 +852,10 @@ function App() {
           onLinkR1G01={() => {
             const r1 = Object.values(devices).find(d => d.hostname === "R1");
             if (!r1) return;
-            setDevices((m) => ({ ...m, [r1.id]: { ...m[r1.id], interfaces: { ...m[r1.id].interfaces, "G0/1": { ...m[r1.id].interfaces["G0/1"], admUp: false, up: false } } } }));
-            setLinks((ls) => ls.map(l => (l.a === r1.id && l.ai === "G0/1") || (l.b === r1.id && l.bi === "G0/1") ? { ...l, up: false } : l));
-            log("warn", "R1", "G0/1 administratively shut down");
+            const iface = r1.interfaces["GigabitEthernet0/0/1"] ? "GigabitEthernet0/0/1" : "G0/1";
+            setDevices((m) => ({ ...m, [r1.id]: { ...m[r1.id], interfaces: { ...m[r1.id].interfaces, [iface]: { ...m[r1.id].interfaces[iface], admUp: false, up: false } } } }));
+            setLinks((ls) => ls.map(l => (l.a === r1.id && l.ai === iface) || (l.b === r1.id && l.bi === iface) ? { ...l, up: false } : l));
+            log("warn", "R1", `${ifaceName(iface)} administratively shut down`);
           }}
           onEnterLinkMode={(type) => { setLinkMode(true); setForceLinkType(type); }}
         />
@@ -699,6 +961,8 @@ function App() {
                 }}>
                   <CLI
                     device={devices[id]}
+                    devices={devices}
+                    links={links}
                     onApply={(cmd) => onApplyToDevice(id, cmd)}
                     onPing={handlePing}
                     pendingCmd={pendingCmd && pendingCmd.devId === id ? pendingCmd : null}
@@ -727,6 +991,22 @@ function App() {
 
       {/* (status bar removed) */}
 
+      {fileDropActive && (
+        <div className="file-drop-overlay">
+          <div className="file-drop-panel">
+            <div className="file-drop-title">Drop lab file</div>
+            <div className="file-drop-subtitle">OpenPT JSON imports now. Packet Tracer PKA/PKT files need the extractor hook.</div>
+          </div>
+        </div>
+      )}
+
+      {toast && (
+        <div className={`toast ${toast.kind || ""}`}>
+          <span className="dot"/>
+          <span>{toast.msg}</span>
+        </div>
+      )}
+
       <TweaksPanel>
         <TweakSection label="Theme" />
         <TweakColor label="Accent" value={ACCENTS[t.accent]?.a || ACCENTS.cyan.a}
@@ -751,9 +1031,10 @@ function App() {
         <TweakButton label="Shutdown R1 G0/1" onClick={() => {
           const r1 = Object.values(devices).find(d => d.hostname === "R1");
           if (!r1) return;
-          setDevices((m) => ({ ...m, [r1.id]: { ...m[r1.id], interfaces: { ...m[r1.id].interfaces, "G0/1": { ...m[r1.id].interfaces["G0/1"], admUp: false, up: false } } } }));
-          setLinks((ls) => ls.map(l => (l.a === r1.id && l.ai === "G0/1") || (l.b === r1.id && l.bi === "G0/1") ? { ...l, up: false } : l));
-          log("warn", "R1", "G0/1 administratively shut down");
+          const iface = r1.interfaces["GigabitEthernet0/0/1"] ? "GigabitEthernet0/0/1" : "G0/1";
+          setDevices((m) => ({ ...m, [r1.id]: { ...m[r1.id], interfaces: { ...m[r1.id].interfaces, [iface]: { ...m[r1.id].interfaces[iface], admUp: false, up: false } } } }));
+          setLinks((ls) => ls.map(l => (l.a === r1.id && l.ai === iface) || (l.b === r1.id && l.bi === iface) ? { ...l, up: false } : l));
+          log("warn", "R1", `${ifaceName(iface)} administratively shut down`);
         }} />
       </TweaksPanel>
 
@@ -1027,21 +1308,7 @@ function downloadText(text, filename) {
   setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 function generateConfig(d) {
-  const out = [`! ${d.hostname} running-config`, `!`, `hostname ${d.hostname}`, `!`];
-  for (const [n, ifc] of Object.entries(d.interfaces)) {
-    out.push(`interface ${n}`);
-    if (ifc.desc) out.push(` description ${ifc.desc}`);
-    if (ifc.ip)   out.push(` ip address ${ifc.ip} ${ifc.mask}`);
-    if (ifc.mode) out.push(` switchport mode ${ifc.mode}`);
-    if (ifc.vlan && ifc.mode === "access") out.push(` switchport access vlan ${ifc.vlan}`);
-    out.push(ifc.admUp === false ? " shutdown" : " no shutdown");
-    out.push("!");
-  }
-  for (const r of (d.routes || [])) {
-    if (r.type !== "C") out.push(`ip route ${r.dst} ${r.mask} ${r.via}`);
-  }
-  out.push("!", "end");
-  return out.join("\n");
+  return OPT_Engine.serializeConfig(d);
 }
 
 function ContextMenu({ x, y, device, onClose, onAction }) {
@@ -1270,6 +1537,24 @@ function hasLink(devId, iface, links) {
 }
 function randMac() {
   return "AA:" + Array.from({ length: 5 }, () => Math.floor(Math.random() * 256).toString(16).padStart(2, "0").toUpperCase()).join(":");
+}
+function parseAclEntry(action, spec, aclType) {
+  const words = spec.trim().split(/\s+/);
+  const parseHost = (idx) => {
+    if (words[idx] === "any") return { value: "any", wildcard: "255.255.255.255", next: idx + 1 };
+    if (words[idx] === "host") return { value: words[idx + 1], wildcard: "0.0.0.0", next: idx + 2 };
+    return { value: words[idx], wildcard: words[idx + 1] || "0.0.0.0", next: idx + 2 };
+  };
+  if (aclType === "standard") {
+    const src = parseHost(0);
+    return { action, spec, src: src.value, srcWildcard: src.wildcard };
+  }
+  let idx = 0;
+  let proto = "ip";
+  if (/^(ip|icmp|tcp|udp)$/i.test(words[0])) proto = words[idx++];
+  const src = parseHost(idx);
+  const dst = parseHost(src.next);
+  return { action, spec, proto, src: src.value, srcWildcard: src.wildcard, dst: dst.value, dstWildcard: dst.wildcard };
 }
 function networkAddress(ip, mask) {
   const ipI = OPT_Engine.ipToInt(ip), m = OPT_Engine.ipToInt(mask);
