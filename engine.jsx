@@ -4,12 +4,53 @@
 const uid = (p = "id") => `${p}_${Math.random().toString(36).slice(2, 8)}`;
 
 const PLATFORM_PROFILES = {
+  "2960-24tt": {
+    id: "2960-24tt",
+    label: "2960-24TT",
+    os: "Cisco IOS 15.0(2)SE",
+    image: "c2960-lanbasek9-mz.150-2.SE",
+    ifaces: [
+      ...Array.from({ length: 24 }, (_, i) => `FastEthernet0/${i + 1}`),
+      "GigabitEthernet0/1", "GigabitEthernet0/2",
+    ],
+  },
+  "3560-24ps": {
+    id: "3560-24ps",
+    label: "3560-24PS",
+    os: "Cisco IOS 15.0(2)SE",
+    image: "c3560-ipservicesk9-mz.150-2.SE",
+    ifaces: [
+      ...Array.from({ length: 24 }, (_, i) => `FastEthernet0/${i + 1}`),
+      "GigabitEthernet0/1", "GigabitEthernet0/2",
+    ],
+  },
+  "2911": {
+    id: "2911",
+    label: "2911",
+    os: "Cisco IOS 15.2(4)M",
+    image: "c2900-universalk9-mz.SPA.152-4.M",
+    ifaces: ["GigabitEthernet0/0", "GigabitEthernet0/1", "GigabitEthernet0/2", "Serial0/0/0", "Serial0/0/1", "Serial0/1/0", "Serial0/1/1"],
+  },
+  "1941": {
+    id: "1941",
+    label: "1941",
+    os: "Cisco IOS 15.2(4)M",
+    image: "c1900-universalk9-mz.SPA.152-4.M",
+    ifaces: ["GigabitEthernet0/0", "GigabitEthernet0/1", "Serial0/0/0", "Serial0/0/1"],
+  },
   isr4321: {
     id: "isr4321",
-    label: "Cisco ISR4321",
+    label: "ISR4321",
     os: "Cisco IOS XE Dublin 17.12.x",
     image: "isr4300-universalk9.17.12",
     ifaces: ["GigabitEthernet0/0/0", "GigabitEthernet0/0/1", "Serial0/1/0", "Serial0/1/1"],
+  },
+  isr4331: {
+    id: "isr4331",
+    label: "ISR4331",
+    os: "Cisco IOS XE Dublin 17.12.x",
+    image: "isr4300-universalk9.17.12",
+    ifaces: ["GigabitEthernet0/0/0", "GigabitEthernet0/0/1", "GigabitEthernet0/0/2", "Serial0/1/0", "Serial0/1/1"],
   },
   c9200l: {
     id: "c9200l",
@@ -21,19 +62,43 @@ const PLATFORM_PROFILES = {
       ...Array.from({ length: 4 }, (_, i) => `GigabitEthernet1/1/${i + 1}`),
     ],
   },
-  genericPc: { id: "genericPc", label: "Generic PC", os: "OpenPT host shell", image: "host", ifaces: ["eth0"] },
-  genericServer: { id: "genericServer", label: "Generic Server", os: "OpenPT server shell", image: "server", ifaces: ["eth0"] },
+  genericPc: { id: "genericPc", label: "PC", os: "OpenPT host shell", image: "host", ifaces: ["eth0"] },
+  laptop: { id: "laptop", label: "Laptop", os: "OpenPT host shell", image: "laptop", ifaces: ["eth0", "wlan0"] },
+  printer: { id: "printer", label: "Printer", os: "OpenPT host shell", image: "printer", ifaces: ["eth0"] },
+  ipphone: { id: "ipphone", label: "IP Phone", os: "OpenPT voice endpoint shell", image: "ip-phone", ifaces: ["eth0", "pc"] },
+  ap: { id: "ap", label: "Wireless AP", os: "OpenPT AP firmware", image: "ap", ifaces: ["eth0", "wlan0"] },
+  genericServer: { id: "genericServer", label: "Server-PT", os: "OpenPT Server-PT shell", image: "server", ifaces: ["eth0"] },
+  wrt300n: { id: "wrt300n", label: "WRT300N", os: "OpenPT home router firmware", image: "wrt300n", ifaces: ["Internet", "Ethernet1", "Ethernet2", "Ethernet3", "Ethernet4", "wlan0"] },
+  asa5506x: { id: "asa5506x", label: "ASA 5506-X", os: "ASA 9.x simulated", image: "asa5506x", ifaces: ["GigabitEthernet1/1", "GigabitEthernet1/2", "GigabitEthernet1/3", "GigabitEthernet1/4", "GigabitEthernet1/5", "GigabitEthernet1/6", "GigabitEthernet1/7", "GigabitEthernet1/8"] },
+  cloudpt: { id: "cloudpt", label: "Cloud-PT", os: "OpenPT provider cloud", image: "cloud", ifaces: ["eth0", "serial0", "dsl", "coax"] },
+  internet: { id: "internet", label: "Internet", os: "OpenPT internet cloud", image: "internet", ifaces: ["wan"] },
+  dslmodem: { id: "dslmodem", label: "DSL Modem", os: "OpenPT DSL modem", image: "dsl-modem", ifaces: ["Ethernet0", "DSL0"] },
+  cablemodem: { id: "cablemodem", label: "Cable Modem", os: "OpenPT cable modem", image: "cable-modem", ifaces: ["Ethernet0", "Coax0"] },
 };
 
-function platformForKind(kind) {
+function platformForKind(kind, platform) {
+  if (platform && PLATFORM_PROFILES[platform]) return PLATFORM_PROFILES[platform];
   if (kind === "router") return PLATFORM_PROFILES.isr4321;
-  if (kind === "l2switch" || kind === "l3switch") return PLATFORM_PROFILES.c9200l;
+  if (kind === "l2switch") return PLATFORM_PROFILES["2960-24tt"];
+  if (kind === "l3switch") return PLATFORM_PROFILES["3560-24ps"];
+  if (kind === "wrt") return PLATFORM_PROFILES.wrt300n;
+  if (kind === "asa") return PLATFORM_PROFILES.asa5506x;
+  if (kind === "laptop") return PLATFORM_PROFILES.laptop;
+  if (kind === "printer") return PLATFORM_PROFILES.printer;
+  if (kind === "phone") return PLATFORM_PROFILES.ipphone;
+  if (kind === "ap") return PLATFORM_PROFILES.ap;
+  if (kind === "cloud") return PLATFORM_PROFILES.cloudpt;
+  if (kind === "internet") return PLATFORM_PROFILES.internet;
+  if (kind === "dslmodem") return PLATFORM_PROFILES.dslmodem;
+  if (kind === "cablemodem") return PLATFORM_PROFILES.cablemodem;
   if (kind === "server") return PLATFORM_PROFILES.genericServer;
   return PLATFORM_PROFILES.genericPc;
 }
 
 function defaultStateFor(kind) {
-  const isSwitch = kind === "l2switch" || kind === "l3switch";
+  const isSwitch = kind === "l2switch" || kind === "l3switch" || kind === "wrt";
+  const isFirewall = kind === "asa";
+  const isServer = kind === "server";
   return {
     startupConfig: "",
     users: {},
@@ -42,7 +107,7 @@ function defaultStateFor(kind) {
       console: { password: "", login: false, loggingSync: false },
       vty: { password: "", login: false, transport: ["ssh", "telnet"] },
     },
-    services: { passwordEncryption: false, cdp: true, lldp: false, ssh: false, http: false },
+    services: { passwordEncryption: false, cdp: true, lldp: false, ssh: false, http: isServer, dns: isServer, tftp: isServer, aaa: isServer, radius: isServer, syslog: isServer, ntp: isServer },
     dhcp: { excluded: [], pools: {}, bindings: [] },
     ospf: {},
     rip: {},
@@ -50,6 +115,8 @@ function defaultStateFor(kind) {
     bgp: {},
     acls: {},
     nat: { rules: [], pools: {}, translations: [] },
+    wireless: kind === "wrt" ? { ssid: "OpenPT", security: "wpa2-psk", passphrase: "openpt123" } : undefined,
+    firewall: isFirewall ? { securityLevels: {}, accessRules: [], defaultRoute: null } : undefined,
     routeMaps: {},
     prefixLists: {},
     vrfs: {},
@@ -70,7 +137,7 @@ function defaultStateFor(kind) {
     loggingHosts: [],
     files: { "flash:packages.conf": "IOS XE package manifest" },
     stp: isSwitch ? { mode: "rapid-pvst", vlanPriority: { 1: 32768 } } : undefined,
-    ipRouting: kind === "router",
+    ipRouting: kind === "router" || kind === "wrt" || kind === "asa",
   };
 }
 
@@ -83,7 +150,7 @@ function macFrom(seed) {
 
 function makeInterfaces(kind, names, seeded = {}) {
   const out = {};
-  const isSwitch = kind === "l2switch" || kind === "l3switch";
+  const isSwitch = kind === "l2switch" || kind === "l3switch" || kind === "wrt";
   for (const n of names) {
     out[n] = {
       ip: null, mask: null, gw: null,
@@ -99,12 +166,21 @@ function makeInterfaces(kind, names, seeded = {}) {
       out[n].allowedVlans = "all";
       out[n].stp = { portfast: false, bpduguard: false, state: "forwarding" };
     }
+    if (kind === "wrt" && n === "Internet") {
+      delete out[n].mode;
+      out[n].natRole = "outside";
+    }
+    if (kind === "asa") {
+      out[n].securityLevel = n.endsWith("/1") ? 0 : n.endsWith("/2") ? 100 : 50;
+      out[n].nameif = n.endsWith("/1") ? "outside" : n.endsWith("/2") ? "inside" : "";
+      out[n].natRole = n.endsWith("/1") ? "outside" : n.endsWith("/2") ? "inside" : null;
+    }
   }
   return out;
 }
 
 function makeDevice(kind, name, x, y, seededIfaces = {}, extra = {}) {
-  const profile = platformForKind(kind);
+  const profile = platformForKind(kind, extra.platform);
   const d = {
     id: uid("d"),
     kind, name, x, y,
@@ -118,7 +194,7 @@ function makeDevice(kind, name, x, y, seededIfaces = {}, extra = {}) {
     routes: [],
     arp: {},
     mac: {},
-    vlans: (kind === "l2switch" || kind === "l3switch") ? { 1: "default" } : undefined,
+    vlans: (kind === "l2switch" || kind === "l3switch" || kind === "wrt") ? { 1: "default" } : undefined,
     ...defaultStateFor(kind),
     ...extra,
   };
@@ -139,15 +215,15 @@ function makeStarter() {
   R2.routes.push({ dst: "192.168.10.0", mask: "255.255.255.0", via: "10.0.0.1", iface: "GigabitEthernet0/0/1", type: "S" });
 
   const SW1 = makeDevice("l2switch", "SW1", 320, 420, {
-    "GigabitEthernet1/0/1": { up: true, admUp: true, vlan: 10, mode: "access", desc: "to R1" },
-    "GigabitEthernet1/0/2": { up: true, admUp: true, vlan: 10, mode: "access", desc: "to PC1" },
-    "GigabitEthernet1/0/3": { up: true, admUp: true, vlan: 10, mode: "access", desc: "to PC2" },
+    "FastEthernet0/1": { up: true, admUp: true, vlan: 10, mode: "access", desc: "to R1" },
+    "FastEthernet0/2": { up: true, admUp: true, vlan: 10, mode: "access", desc: "to PC1" },
+    "FastEthernet0/3": { up: true, admUp: true, vlan: 10, mode: "access", desc: "to PC2" },
   }, { vlans: { 1: "default", 10: "USERS", 20: "VOICE" } });
 
   const SW2 = makeDevice("l2switch", "SW2", 920, 420, {
-    "GigabitEthernet1/0/1": { up: true, admUp: true, vlan: 20, mode: "access", desc: "to R2" },
-    "GigabitEthernet1/0/2": { up: true, admUp: true, vlan: 20, mode: "access", desc: "to PC3" },
-    "GigabitEthernet1/0/3": { up: true, admUp: true, vlan: 20, mode: "access", desc: "to SRV" },
+    "FastEthernet0/1": { up: true, admUp: true, vlan: 20, mode: "access", desc: "to R2" },
+    "FastEthernet0/2": { up: true, admUp: true, vlan: 20, mode: "access", desc: "to PC3" },
+    "FastEthernet0/3": { up: true, admUp: true, vlan: 20, mode: "access", desc: "to SRV" },
   }, { vlans: { 1: "default", 20: "USERS", 30: "DMZ" } });
 
   const PC1 = makeDevice("pc", "PC1", 170, 560, { eth0: { ip: "192.168.10.10", mask: "255.255.255.0", gw: "192.168.10.1", up: true, admUp: true } });
@@ -158,13 +234,13 @@ function makeStarter() {
   let devices = { [R1.id]: R1, [R2.id]: R2, [SW1.id]: SW1, [SW2.id]: SW2, [PC1.id]: PC1, [PC2.id]: PC2, [PC3.id]: PC3, [SRV.id]: SRV };
   const lnk = (a, ai, b, bi, type = "copper") => ({ id: uid("l"), a, ai, b, bi, type, up: true });
   const links = [
-    lnk(R1.id, "GigabitEthernet0/0/0", SW1.id, "GigabitEthernet1/0/1"),
+    lnk(R1.id, "GigabitEthernet0/0/0", SW1.id, "FastEthernet0/1"),
     lnk(R1.id, "GigabitEthernet0/0/1", R2.id, "GigabitEthernet0/0/1", "serial"),
-    lnk(R2.id, "GigabitEthernet0/0/0", SW2.id, "GigabitEthernet1/0/1"),
-    lnk(SW1.id, "GigabitEthernet1/0/2", PC1.id, "eth0"),
-    lnk(SW1.id, "GigabitEthernet1/0/3", PC2.id, "eth0"),
-    lnk(SW2.id, "GigabitEthernet1/0/2", PC3.id, "eth0"),
-    lnk(SW2.id, "GigabitEthernet1/0/3", SRV.id, "eth0"),
+    lnk(R2.id, "GigabitEthernet0/0/0", SW2.id, "FastEthernet0/1"),
+    lnk(SW1.id, "FastEthernet0/2", PC1.id, "eth0"),
+    lnk(SW1.id, "FastEthernet0/3", PC2.id, "eth0"),
+    lnk(SW2.id, "FastEthernet0/2", PC3.id, "eth0"),
+    lnk(SW2.id, "FastEthernet0/3", SRV.id, "eth0"),
   ];
   devices = recomputeDynamicRoutes(devices, links);
   return { devices, links };
@@ -196,8 +272,9 @@ function sameSubnet(a, b, mask) {
 function inNet(ip, dst, mask) {
   return (ipToInt(ip) & ipToInt(mask)) === (ipToInt(dst) & ipToInt(mask));
 }
-function isSwitchLike(d) { return d?.kind === "l2switch" || d?.kind === "l3switch"; }
-function isRouterLike(d) { return d?.kind === "router" || d?.kind === "l3switch"; }
+function isSwitchLike(d) { return d?.kind === "l2switch" || d?.kind === "l3switch" || d?.kind === "wrt"; }
+function isRouterLike(d) { return d?.kind === "router" || d?.kind === "l3switch" || d?.kind === "wrt" || d?.kind === "asa"; }
+function isHostLike(d) { return ["pc", "server", "laptop", "printer", "phone"].includes(d?.kind); }
 function clone(obj) { return JSON.parse(JSON.stringify(obj)); }
 function shortIfaceName(n) {
   return String(n || "")
@@ -227,7 +304,7 @@ function shortIfaceNamesInText(text) {
 
 function normalizeDevice(d) {
   if (!d) return d;
-  const profile = platformForKind(d.kind);
+  const profile = platformForKind(d.kind, d.platform);
   const next = {
     ...defaultStateFor(d.kind),
     ...d,
@@ -239,6 +316,9 @@ function normalizeDevice(d) {
   };
   if (!next.name) next.name = next.hostname;
   if (isSwitchLike(next) && !next.vlans) next.vlans = { 1: "default" };
+  for (const iface of profile.ifaces || []) {
+    if (!next.interfaces[iface]) next.interfaces[iface] = {};
+  }
   for (const [name, ifc] of Object.entries(next.interfaces)) {
     const oldShort = name.match(/^G0\/([01])$/);
     if (next.kind === "router" && oldShort) {
@@ -249,7 +329,7 @@ function normalizeDevice(d) {
     }
     const oldSwitch = name.match(/^F0\/(\d+)$/);
     if (isSwitchLike(next) && oldSwitch) {
-      const real = `GigabitEthernet1/0/${oldSwitch[1]}`;
+      const real = next.platform === "2960-24tt" || next.platform === "3560-24ps" ? `FastEthernet0/${oldSwitch[1]}` : `GigabitEthernet1/0/${oldSwitch[1]}`;
       next.interfaces[real] = { ...ifc, mac: ifc.mac || macFrom(`${next.kind}:${real}`) };
       delete next.interfaces[name];
     }
@@ -265,6 +345,14 @@ function normalizeDevice(d) {
         ...next.interfaces[name],
       };
     }
+    if (next.kind === "wrt" && name === "Internet") {
+      delete next.interfaces[name].mode;
+      next.interfaces[name].natRole = next.interfaces[name].natRole || "outside";
+    }
+    if (next.kind === "asa") {
+      next.interfaces[name].securityLevel = next.interfaces[name].securityLevel ?? (name.endsWith("/1") ? 0 : name.endsWith("/2") ? 100 : 50);
+      next.interfaces[name].nameif = next.interfaces[name].nameif ?? (name.endsWith("/1") ? "outside" : name.endsWith("/2") ? "inside" : "");
+    }
   }
   return recalcConnectedRoutes(next);
 }
@@ -276,7 +364,7 @@ function normalizeTopology(devices, links) {
     if (dev.kind === "router" && iface === "G0/0") return "GigabitEthernet0/0/0";
     if (dev.kind === "router" && iface === "G0/1") return "GigabitEthernet0/0/1";
     const m = iface?.match(/^F0\/(\d+)$/);
-    if (isSwitchLike(dev) && m) return `GigabitEthernet1/0/${m[1]}`;
+    if (isSwitchLike(dev) && m) return dev.platform === "2960-24tt" || dev.platform === "3560-24ps" ? `FastEthernet0/${m[1]}` : `GigabitEthernet1/0/${m[1]}`;
     return iface;
   };
   const outLinks = (links || []).map((l) => ({
@@ -501,7 +589,7 @@ function planPath(devices, links, srcId, dstIp) {
       }
       chosen = candidates.find((c) => c.nif.ip === nextHopIp || c.nif.ip === dstIp);
       if (!chosen) chosen = candidates.find((c) => isRouterLike(c.nd));
-      if (!chosen) chosen = candidates.find((c) => (c.nd.kind === "pc" || c.nd.kind === "server") && c.nif.ip && sameSubnet(c.nif.ip, dstIp, c.nif.mask || "255.255.255.0"));
+      if (!chosen) chosen = candidates.find((c) => isHostLike(c.nd) && c.nif.ip && sameSubnet(c.nif.ip, dstIp, c.nif.mask || "255.255.255.0"));
       if (!chosen) return { ok: false, error: `${nb.hostname}: no forwarding path in VLAN ${vlan} toward ${dstIp}`, hops };
       hops.push({ devId: nb.id, action: "switch", iface: chosen.pname, note: `VLAN ${vlan} egress ${chosen.pname}` });
       curDev = nb; curIface = chosen.pname;
@@ -605,6 +693,8 @@ function serializeConfig(d) {
   }
   for (const [name, pool] of Object.entries(d.nat?.pools || {})) out.push(`ip nat pool ${name} ${pool.start} ${pool.end} netmask ${pool.mask}`);
   for (const rule of d.nat?.rules || []) out.push(rule.config);
+  if (d.wireless?.ssid) out.push(`wireless ssid ${d.wireless.ssid}`);
+  if (d.wireless?.security) out.push(`wireless security ${d.wireless.security}${d.wireless.passphrase ? ` ${d.wireless.passphrase}` : ""}`);
   for (const e of d.dhcp?.excluded || []) out.push(`ip dhcp excluded-address ${e.start}${e.end && e.end !== e.start ? ` ${e.end}` : ""}`);
   for (const [name, p] of Object.entries(d.dhcp?.pools || {})) {
     out.push(`ip dhcp pool ${name}`);
@@ -622,6 +712,8 @@ function serializeConfig(d) {
   for (const [n, ifc] of Object.entries(d.interfaces || {})) {
     out.push(`interface ${n}`);
     if (ifc.desc) out.push(` description ${ifc.desc}`);
+    if (ifc.nameif) out.push(` nameif ${ifc.nameif}`);
+    if (ifc.securityLevel !== undefined) out.push(` security-level ${ifc.securityLevel}`);
     if (ifc.routed) out.push(" no switchport");
     if (ifc.ip) out.push(` ip address ${ifc.ip} ${ifc.mask}`);
     if (ifc.mode) out.push(` switchport mode ${ifc.mode}`);
@@ -711,5 +803,5 @@ window.OPT_Engine = {
   normalizeDevice, normalizeTopology, serializeConfig,
   planPath, allocateDhcp, recomputeDynamicRoutes, recalcConnectedRoutes,
   ipToInt, intToIp, maskBits, wildcardToMask, networkAddress, sameSubnet, inNet,
-  findPeer, lookupRoute, ifaceForDest, ifaceForVia, shortIfaceName, shortIfaceNamesInText, isRouterLike, isSwitchLike,
+  findPeer, lookupRoute, ifaceForDest, ifaceForVia, shortIfaceName, shortIfaceNamesInText, isRouterLike, isSwitchLike, isHostLike,
 };

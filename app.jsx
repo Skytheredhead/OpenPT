@@ -22,11 +22,42 @@ const ifaceText = (text) => OPT_Engine.shortIfaceNamesInText ? OPT_Engine.shortI
 
 function packetTracerKind(device) {
   const text = `${device?.kind || ""} ${device?.model || ""} ${device?.name || ""}`.toLowerCase();
+  if (text.includes("2960")) return "l2switch";
+  if (text.includes("3560")) return "l3switch";
+  if (text.includes("2911") || text.includes("1941") || text.includes("4321") || text.includes("4331")) return "router";
+  if (text.includes("laptop")) return "laptop";
+  if (text.includes("printer")) return "printer";
+  if (text.includes("phone")) return "phone";
+  if (text.includes("wrt300n")) return "wrt";
+  if (text.includes("asa")) return "asa";
+  if (text.includes("dsl")) return "dslmodem";
+  if (text.includes("cable")) return "cablemodem";
+  if (text.includes("internet")) return "internet";
   if (text.includes("router")) return "router";
   if (text.includes("server")) return "server";
   if (text.includes("pc")) return "pc";
   if (text.includes("switch") || /^sw/i.test(device?.name || "")) return "l2switch";
   return device?.kind || "l2switch";
+}
+
+function packetTracerPlatform(device) {
+  const text = `${device?.kind || ""} ${device?.model || ""} ${device?.name || ""}`.toLowerCase();
+  if (text.includes("2960")) return "2960-24tt";
+  if (text.includes("3560")) return "3560-24ps";
+  if (text.includes("2911")) return "2911";
+  if (text.includes("1941")) return "1941";
+  if (text.includes("4331")) return "isr4331";
+  if (text.includes("4321")) return "isr4321";
+  if (text.includes("wrt300n")) return "wrt300n";
+  if (text.includes("asa")) return "asa5506x";
+  if (text.includes("laptop")) return "laptop";
+  if (text.includes("printer")) return "printer";
+  if (text.includes("phone")) return "ipphone";
+  if (text.includes("server")) return "genericServer";
+  if (text.includes("dsl")) return "dslmodem";
+  if (text.includes("cable")) return "cablemodem";
+  if (text.includes("internet")) return "internet";
+  return null;
 }
 
 function packetTracerEndpoint(endpoint) {
@@ -35,7 +66,7 @@ function packetTracerEndpoint(endpoint) {
 }
 
 function packetTracerIfaceSeed(kind, name, deviceName) {
-  const isSwitch = kind === "l2switch" || kind === "l3switch";
+  const isSwitch = kind === "l2switch" || kind === "l3switch" || kind === "wrt";
   const iface = {
     ip: null,
     mask: null,
@@ -60,7 +91,9 @@ function buildTopologyFromPacketTracer(activity) {
   const devices = {};
   for (const src of activity?.devices || []) {
     const kind = packetTracerKind(src);
+    const platform = packetTracerPlatform(src);
     const dev = OPT_Engine.makeDevice(kind, src.name || "PT-Device", Number(src.x) || 300, Number(src.y) || 240, {}, {
+      platform,
       packetTracer: {
         model: src.model || null,
         power: src.power || null,
@@ -78,7 +111,7 @@ function buildTopologyFromPacketTracer(activity) {
       dev.interfaces[iface] = packetTracerIfaceSeed(dev.kind, iface, dev.hostname);
     } else {
       dev.interfaces[iface] = { ...dev.interfaces[iface], up: true, admUp: true };
-      if ((dev.kind === "l2switch" || dev.kind === "l3switch") && !String(iface).toLowerCase().startsWith("vlan")) {
+      if ((dev.kind === "l2switch" || dev.kind === "l3switch" || dev.kind === "wrt") && !String(iface).toLowerCase().startsWith("vlan")) {
         dev.interfaces[iface] = {
           mode: "trunk",
           vlan: 1,
@@ -418,7 +451,7 @@ function App() {
       links: norm.links,
       selectedIds: [],
       openConsoles: [],
-      activeBottom: "events",
+      activeBottom: "pka-report",
       ptActivity: activity,
     };
     setTabs((ts) => [...ts, { id, name: `${title}.pka`, source: "packet-tracer" }]);
@@ -427,13 +460,19 @@ function App() {
     setLinks(norm.links);
     setSelectedIds([]);
     setOpenConsoles([]);
-    setActiveBottom("events");
+    setActiveBottom("pka-report");
     setPtActivity(activity);
     setEvents([]);
     setPackets([]);
-    setToast({ kind: activity?.unsupported ? "warn" : "ok", msg: `Imported ${filename}` });
+    if (activity?.unsupported) {
+      const shortHash = activity.sourceSha256 ? activity.sourceSha256.slice(0, 12) : activity.sourceHeadHex;
+      setToast({ kind: "warn", msg: `No extractor profile for ${filename}` });
+      log("warn", "import", `Packet Tracer file recognized, but no extractor profile is packaged for ${filename}${shortHash ? ` (${shortHash})` : ""}`);
+      return;
+    }
+    setToast({ kind: "ok", msg: `Imported ${filename}` });
     const detail = activity?.progress?.score ? ` score ${activity.progress.score}` : `${norm.links.length} links`;
-    log(activity?.unsupported ? "warn" : "ok", "import", `loaded Packet Tracer assignment ${filename} (${detail})`);
+    log("ok", "import", `loaded Packet Tracer assignment ${filename} (${detail})`);
   };
 
   const importPacketTracerActivity = async (file) => {
@@ -509,20 +548,24 @@ function App() {
   }, []);
 
   // ── Device + link operations ─────────────────────────
-  const addDevice = (kind, x, y) => {
-    const cat = DeviceCatalog.find(c => c.kind === kind);
+  const addDevice = (catalogId, x, y) => {
+    const cat = DeviceCatalog.find(c => c.id === catalogId) || DeviceCatalog.find(c => c.kind === catalogId);
+    const kind = cat?.kind || catalogId;
     // pick a friendly name
-    const existing = Object.values(devices).filter(d => d.kind === kind).length + 1;
-    const baseName = { router: "R", l2switch: "SW", l3switch: "MLS", pc: "PC", server: "SRV", ap: "AP", cloud: "NET" }[kind] || "DEV";
-    const d = OPT_Engine.makeDevice(kind, `${baseName}${existing}`, x, y);
+    const existing = Object.values(devices).filter(d => (cat?.platform ? d.platform === cat.platform : d.kind === kind)).length + 1;
+    const baseName = { router: "R", l2switch: "SW", l3switch: "MLS", pc: "PC", laptop: "LAP", server: "SRV", wrt: "WRT", asa: "ASA", printer: "PRN", phone: "IPPHONE", ap: "AP", cloud: "CLOUD", internet: "INET", dslmodem: "DSL", cablemodem: "CABLE" }[kind] || "DEV";
+    const d = OPT_Engine.makeDevice(kind, `${baseName}${existing}`, x, y, {}, { platform: cat?.platform });
     const id = d.id;
-    if (kind === "pc" || kind === "server") {
-      d.interfaces.eth0.up = true;
-      d.interfaces.eth0.admUp = true;
+    if (OPT_Engine.isHostLike?.(d) || kind === "server") {
+      const hostIface = d.interfaces.eth0 ? "eth0" : Object.keys(d.interfaces)[0];
+      if (hostIface) {
+        d.interfaces[hostIface].up = true;
+        d.interfaces[hostIface].admUp = true;
+      }
     }
-    d.powered = cat.pwr;
+    d.powered = cat?.pwr ?? true;
     setDevices((m) => ({ ...m, [id]: d }));
-    log("ok", "topology", `added ${cat.label} ${d.hostname}`);
+    log("ok", "topology", `added ${(cat?.label || d.model)} ${d.hostname}`);
     setSelectedId(id);
   };
 
@@ -627,6 +670,8 @@ function App() {
         vtp: JSON.parse(JSON.stringify(m[devId].vtp || { mode: "transparent", domain: "" })),
         dhcpSnooping: JSON.parse(JSON.stringify(m[devId].dhcpSnooping || { enabled: false, vlans: [], trusted: [] })),
         dai: JSON.parse(JSON.stringify(m[devId].dai || { vlans: [], trusted: [] })),
+        wireless: JSON.parse(JSON.stringify(m[devId].wireless || null)),
+        firewall: JSON.parse(JSON.stringify(m[devId].firewall || null)),
         loggingHosts: [...(m[devId].loggingHosts || [])],
         files: { ...(m[devId].files || {}) },
       };
@@ -654,6 +699,11 @@ function App() {
         case "service":
           d.services[cmd.name] = cmd.value;
           log("ok", d.hostname, `${cmd.value ? "" : "no "}service ${cmd.name}`);
+          break;
+        case "wireless":
+          d.wireless = d.wireless || {};
+          d.wireless[cmd.field] = cmd.value;
+          log("ok", d.hostname, `wireless ${cmd.field} ${cmd.value}`);
           break;
         case "username":
           d.users[cmd.user] = { secret: cmd.secret };
@@ -698,6 +748,12 @@ function App() {
           break;
         case "desc":
           ifaces[cmd.iface] = { ...ifaces[cmd.iface], desc: cmd.value };
+          break;
+        case "nameif":
+          ifaces[cmd.iface] = { ...ifaces[cmd.iface], nameif: cmd.value };
+          break;
+        case "security-level":
+          ifaces[cmd.iface] = { ...ifaces[cmd.iface], securityLevel: cmd.value };
           break;
         case "swmode":
           ifaces[cmd.iface] = { ...ifaces[cmd.iface], routed: false, mode: cmd.value };
@@ -1178,9 +1234,9 @@ function App() {
 
   const selected = selectedId ? devices[selectedId] : null;
   const cnt = {
-    routers: Object.values(devices).filter(d => d.kind === "router").length,
-    switches: Object.values(devices).filter(d => d.kind === "l2switch" || d.kind === "l3switch").length,
-    hosts: Object.values(devices).filter(d => d.kind === "pc" || d.kind === "server").length,
+    routers: Object.values(devices).filter(d => OPT_Engine.isRouterLike?.(d) && !OPT_Engine.isSwitchLike?.(d)).length,
+    switches: Object.values(devices).filter(d => OPT_Engine.isSwitchLike?.(d)).length,
+    hosts: Object.values(devices).filter(d => OPT_Engine.isHostLike?.(d)).length,
     links: links.length,
   };
 
@@ -1333,6 +1389,7 @@ function App() {
               })}
               {openConsoles.length > 0 && <div style={{ width: 1, background: "var(--line)" }}/>}
               {[
+                ...(ptActivity ? [["pka-report", "PKA Report", ptActivity.unsupported ? "RE" : "OK"]] : []),
                 ["events", "Events", events.length || null],
                 ["packets", "Packets", null],
               ].map(([k, lbl, badge]) => (
@@ -1360,10 +1417,15 @@ function App() {
                   />
                 </div>
               ))}
-              {openConsoles.length === 0 && activeBottom !== "events" && activeBottom !== "packets" && (
+              {openConsoles.length === 0 && activeBottom !== "events" && activeBottom !== "packets" && activeBottom !== "pka-report" && (
                 <div style={{ position: "absolute", inset: 0, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", color: "var(--fg-3)", gap: 8 }}>
                   <div style={{ fontSize: 13, color: "var(--fg-2)" }}>No consoles open</div>
                   <div style={{ fontSize: 11.5 }}>Right-click a device on the canvas → Open Console</div>
+                </div>
+              )}
+              {ptActivity && (
+                <div style={{ position: "absolute", inset: 0, display: activeBottom === "pka-report" ? "block" : "none" }}>
+                  <PacketTracerReverseReport activity={ptActivity} />
                 </div>
               )}
               <div style={{ position: "absolute", inset: 0, display: activeBottom === "events" ? "block" : "none" }}>
@@ -1589,11 +1651,11 @@ function TitleMenus(props) {
                 <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 4, padding: "0 4px 6px" }}>
                   {DeviceCatalog.map((d) => (
                     <div
-                      key={d.kind}
+                      key={d.id || d.kind}
                       draggable
                       onDragStart={(e) => {
                         e.dataTransfer.effectAllowed = "copy";
-                        e.dataTransfer.setData("text/x-openpt-device", d.kind);
+                        e.dataTransfer.setData("text/x-openpt-device", d.id || d.kind);
                         // close menu shortly after drag start so the drop target receives
                         setTimeout(close, 80);
                       }}
@@ -1670,12 +1732,12 @@ function TitleMenus(props) {
 function computeDiagnostics(devices, links) {
   const items = [];
   for (const d of Object.values(devices)) {
-    if (d.kind === "pc" || d.kind === "server") {
+    if (OPT_Engine.isHostLike?.(d)) {
       const e = d.interfaces?.eth0;
       if (!e || !e.ip) items.push({ label: `⚠ ${d.hostname}: no IP on eth0`, disabled: true });
       else if (!e.gw) items.push({ label: `⚠ ${d.hostname}: no default gateway`, disabled: true });
     }
-    if (d.kind === "router" && (!d.routes || d.routes.length === 0)) {
+    if (OPT_Engine.isRouterLike?.(d) && !OPT_Engine.isSwitchLike?.(d) && (!d.routes || d.routes.length === 0)) {
       items.push({ label: `⚠ ${d.hostname}: routing table empty`, disabled: true });
     }
   }
@@ -1711,7 +1773,7 @@ function ContextMenu({ x, y, device, onClose, onAction }) {
     return () => { document.removeEventListener("mousedown", onDocDown); document.removeEventListener("keydown", onKey); };
   }, []);
   if (!device) return null;
-  const m = DeviceCatalog.find(c => c.kind === device.kind) || DeviceCatalog[0];
+  const m = DeviceCatalog.find(c => c.platform === device.platform && c.kind === device.kind) || DeviceCatalog.find(c => c.platform === device.platform) || DeviceCatalog.find(c => c.kind === device.kind) || DeviceCatalog[0];
   // clamp to viewport
   const vw = window.innerWidth, vh = window.innerHeight;
   const W = 240, H = 320;
@@ -1743,19 +1805,19 @@ function ContextMenu({ x, y, device, onClose, onAction }) {
         <span className="icn">⌘</span>
         <span>Show interfaces</span>
       </div>
-      {(device.kind === "router" || device.kind === "l3switch") && (
+      {OPT_Engine.isRouterLike?.(device) && (
         <div className="ctxmenu-item" onClick={() => onAction("show-route")}>
           <span className="icn">⌘</span>
           <span>Show routing table</span>
         </div>
       )}
-      {(device.kind === "l2switch" || device.kind === "l3switch") && (
+      {OPT_Engine.isSwitchLike?.(device) && (
         <div className="ctxmenu-item" onClick={() => onAction("show-vlan")}>
           <span className="icn">⌘</span>
           <span>Show VLANs</span>
         </div>
       )}
-      {(device.kind === "l2switch" || device.kind === "l3switch") && (
+      {OPT_Engine.isSwitchLike?.(device) && (
         <div className="ctxmenu-item" onClick={() => onAction("show-mac")}>
           <span className="icn">⌘</span>
           <span>Show MAC address table</span>
@@ -1799,6 +1861,117 @@ function Events({ events }) {
           <span className="t">{e.t}</span>
           <span className={`s ${e.s}`}>{e.src}</span>
           <span className="m">{e.m}</span>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function PacketTracerReverseReport({ activity }) {
+  const report = activity?.reverseReport || activity?.diagnostics || {};
+  const signatures = report.signatures || [];
+  const strings = (report.interestingStrings && report.interestingStrings.length ? report.interestingStrings : report.strings || []).slice(0, 28);
+  const entropyRows = (report.entropyByWindow || []).slice(0, 8);
+  const download = () => downloadJSON(activity, `${(activity.title || activity.sourceName || "packet-tracer").replace(/[^\w.-]+/g, "-")}-reverse-report.json`);
+  const downloadRaw = async () => {
+    const record = await PacketTracerImporter?.getRawPacketTracerFile?.(activity.rawFile?.sha256 || activity.sourceSha256);
+    if (!record?.bytes) return;
+    const blob = new Blob([record.bytes], { type: record.type || "application/octet-stream" });
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = record.name || activity.sourceName || "packet-tracer-file.pka";
+    a.click();
+    URL.revokeObjectURL(a.href);
+  };
+  return (
+    <div className="events" style={{ padding: 16, overflow: "auto" }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 12 }}>
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div style={{ color: "var(--fg-0)", fontSize: 13, fontWeight: 600 }}>{activity.title || activity.sourceName || "Packet Tracer file"}</div>
+          <div style={{ color: "var(--fg-2)", fontFamily: "var(--font-mono)", fontSize: 11, marginTop: 3 }}>
+            {activity.unsupported ? "Reverse-engineering report" : "Extractor profile matched"} · {activity.sourceSize || report.size || 0} bytes
+          </div>
+        </div>
+        {activity.rawFile?.storage?.stored && (
+          <button className="hud-btn" style={{ width: "auto", padding: "0 10px", fontSize: 11 }} onClick={downloadRaw}>PKA</button>
+        )}
+        <button className="hud-btn" style={{ width: "auto", padding: "0 10px", fontSize: 11 }} onClick={download}>JSON</button>
+      </div>
+
+      <div style={{ display: "grid", gridTemplateColumns: "130px 1fr", gap: "6px 12px", fontSize: 11.5, marginBottom: 14 }}>
+        <div style={{ color: "var(--fg-3)" }}>SHA-256</div>
+        <code style={{ color: "var(--fg-1)", overflowWrap: "anywhere" }}>{activity.sourceSha256 || report.sha256 || "unavailable"}</code>
+        <div style={{ color: "var(--fg-3)" }}>Header</div>
+        <code style={{ color: "var(--fg-1)" }}>{activity.sourceHeadHex || report.headHex || "n/a"}</code>
+        <div style={{ color: "var(--fg-3)" }}>Tail</div>
+        <code style={{ color: "var(--fg-1)" }}>{report.tailHex || "n/a"}</code>
+        <div style={{ color: "var(--fg-3)" }}>Entropy</div>
+        <span style={{ color: "var(--fg-1)" }}>{report.entropy != null ? `${report.entropy} bits/byte` : "n/a"}</span>
+        <div style={{ color: "var(--fg-3)" }}>Raw PKA</div>
+        <span style={{ color: activity.rawFile?.storage?.stored ? "var(--ok)" : "var(--warn)" }}>
+          {activity.rawFile?.storage?.stored ? `preserved in ${activity.rawFile.storage.backend}` : `not preserved${activity.rawFile?.storage?.reason ? `: ${activity.rawFile.storage.reason}` : ""}`}
+        </span>
+        <div style={{ color: "var(--fg-3)" }}>Semantic coverage</div>
+        <span style={{ color: activity.unsupported ? "var(--warn)" : "var(--fg-1)" }}>
+          {activity.featureCoverage?.semanticExtraction || (activity.unsupported ? "not-decoded" : "profile-derived")}
+        </span>
+        {activity.progress?.score && (
+          <>
+            <div style={{ color: "var(--fg-3)" }}>Progress</div>
+            <span style={{ color: "var(--ok)" }}>{activity.progress.score} · {activity.progress.itemCount}</span>
+          </>
+        )}
+      </div>
+
+      {activity.unsupported && (
+        <div style={{ color: "var(--warn)", marginBottom: 14, fontSize: 12 }}>
+          No full extractor profile is packaged for this hash yet. The original file is preserved raw when browser storage is available, and unsupported Packet Tracer-only features are tracked below.
+        </div>
+      )}
+
+      {activity.featureCoverage?.preservedButUnsupported?.length > 0 && (
+        <>
+          <div style={{ color: "var(--fg-2)", fontWeight: 600, margin: "10px 0 6px" }}>Preserved But Not Decoded</div>
+          {activity.featureCoverage.preservedButUnsupported.map((item, i) => (
+            <div key={i} className="event" style={{ gridTemplateColumns: "130px 1fr" }}>
+              <span className="s warn">raw payload</span>
+              <span className="m">{item}</span>
+            </div>
+          ))}
+        </>
+      )}
+
+      <div style={{ color: "var(--fg-2)", fontWeight: 600, margin: "10px 0 6px" }}>Embedded Signatures</div>
+      <div className="event" style={{ gridTemplateColumns: "130px 90px 1fr" }}>
+        <span className="s dim">type</span><span className="s dim">offset</span><span className="m">signature</span>
+      </div>
+      {signatures.length === 0 ? (
+        <div style={{ color: "var(--fg-3)", padding: "6px 0 12px" }}>No PDF, ZIP, RTF, HTML, or image signatures found.</div>
+      ) : signatures.slice(0, 40).map((s, i) => (
+        <div key={i} className="event" style={{ gridTemplateColumns: "130px 90px 1fr" }}>
+          <span className="s ok">{s.label}</span>
+          <span className="t">0x{s.offset.toString(16)}</span>
+          <span className="m"><code>{s.hex}</code></span>
+        </div>
+      ))}
+
+      <div style={{ color: "var(--fg-2)", fontWeight: 600, margin: "12px 0 6px" }}>Entropy Windows</div>
+      {entropyRows.map((row, i) => (
+        <div key={i} className="event" style={{ gridTemplateColumns: "90px 90px 1fr" }}>
+          <span className="t">0x{row.offset.toString(16)}</span>
+          <span className="s dim">{row.length}b</span>
+          <span className="m">{row.entropy} bits/byte</span>
+        </div>
+      ))}
+
+      <div style={{ color: "var(--fg-2)", fontWeight: 600, margin: "12px 0 6px" }}>String Sample</div>
+      {strings.length === 0 ? (
+        <div style={{ color: "var(--fg-3)", padding: "6px 0" }}>No printable strings found.</div>
+      ) : strings.map((s, i) => (
+        <div key={i} className="event" style={{ gridTemplateColumns: "90px 58px 1fr" }}>
+          <span className="t">0x{s.offset.toString(16)}</span>
+          <span className="s dim">{s.length}</span>
+          <span className="m"><code>{s.text}</code></span>
         </div>
       ))}
     </div>
@@ -1867,12 +2040,12 @@ function AnalysisPanel({ devices, links, events }) {
   const issues = [];
   // simple checks
   for (const d of Object.values(devices)) {
-    if (d.kind === "pc" || d.kind === "server") {
+    if (OPT_Engine.isHostLike?.(d)) {
       const e = d.interfaces.eth0;
       if (!e || !e.ip) issues.push({ s: "err", host: d.hostname, m: `no IP configured on eth0` });
       else if (!e.gw) issues.push({ s: "warn", host: d.hostname, m: `no default gateway` });
     }
-    if (d.kind === "router" && (!d.routes || d.routes.length === 0))
+    if (OPT_Engine.isRouterLike?.(d) && !OPT_Engine.isSwitchLike?.(d) && (!d.routes || d.routes.length === 0))
       issues.push({ s: "warn", host: d.hostname, m: `no routing table entries` });
   }
   // check unconnected interfaces with IPs
@@ -1919,7 +2092,7 @@ function freeIface(d, links, devId) {
 }
 function autoLinkType(a, b) {
   if ((a.kind === "router" && b.kind === "router")) return "serial";
-  if ((a.kind === "pc" || b.kind === "pc") && (a.kind === "router" || b.kind === "router")) return "cross";
+  if ((OPT_Engine.isHostLike?.(a) || OPT_Engine.isHostLike?.(b)) && (OPT_Engine.isRouterLike?.(a) || OPT_Engine.isRouterLike?.(b))) return "cross";
   return "copper";
 }
 function hasLink(devId, iface, links) {

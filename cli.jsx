@@ -3,7 +3,7 @@
 const { OPT_Engine } = window;
 
 const COMMAND_HINTS = {
-  user: ["enable", "show", "ping", "traceroute", "exit"],
+  user: ["enable", "show", "ping", "traceroute", "ipconfig", "services", "service", "exit"],
   priv: ["configure terminal", "show running-config", "show startup-config", "show version", "show ip interface brief", "show ip route", "show vlan brief", "show interfaces trunk", "show mac address-table", "show spanning-tree", "show etherchannel summary", "show port-security", "show ip dhcp snooping", "show ip arp inspection", "show ip ospf neighbor", "show ip protocols", "show access-lists", "show ip dhcp binding", "show ip nat translations", "show vrf", "show route-map", "show policy-map", "show ip sla summary", "show platform", "show inventory", "show license", "dir", "copy running-config startup-config", "write memory", "disable", "exit"],
   conf: ["hostname", "interface", "interface range", "vlan", "router ospf", "router eigrp", "router rip", "router bgp", "ip route", "ip routing", "ip dhcp pool", "ip dhcp excluded-address", "ip access-list", "access-list", "ip prefix-list", "route-map", "vrf definition", "ip nat pool", "ip nat inside source", "aaa new-model", "crypto key generate rsa", "ntp server", "snmp-server community", "logging host", "ip dhcp snooping", "ip arp inspection vlan", "monitor session", "class-map", "policy-map", "ip sla", "track", "username", "enable secret", "line console 0", "line vty 0 4", "service password-encryption", "end", "exit"],
   "conf-if": ["description", "ip address", "no ip address", "switchport mode access", "switchport mode trunk", "switchport access vlan", "switchport voice vlan", "switchport trunk allowed vlan", "switchport trunk native vlan", "switchport port-security", "channel-group", "ip dhcp snooping trust", "ip arp inspection trust", "ip access-group", "ip policy route-map", "ip nat inside", "ip nat outside", "service-policy input", "service-policy output", "encapsulation ppp", "encapsulation hdlc", "tunnel source", "tunnel destination", "storm-control", "spanning-tree portfast", "spanning-tree guard root", "shutdown", "no shutdown", "exit"],
@@ -19,6 +19,109 @@ const COMMAND_HINTS = {
   "conf-policy-class": ["set dscp", "police", "bandwidth percent", "priority", "exit"],
   "conf-ip-sla": ["icmp-echo", "frequency", "exit"],
 };
+
+const IOS_ABBREVIATION_SPECS = [
+  ...[
+    "enable", "disable", "exit", "end", "show", "ping <word>", "traceroute <word>", "do <rest>",
+    "show running-config", "show startup-config", "show version", "show ip interface brief", "show interfaces trunk", "show interfaces", "show interfaces <word>",
+    "show ip route", "show vlan brief", "show vlan", "show mac address-table", "show mac", "show spanning-tree", "show etherchannel summary", "show port-security",
+    "show ip dhcp snooping", "show ip arp inspection", "show ip ospf neighbor", "show ip protocols", "show ip eigrp neighbors",
+    "show ip bgp summary", "show ip rip database", "show access-lists", "show ip access-lists", "show ip dhcp binding", "show ip dhcp pool",
+    "show ip nat translations", "show ip nat statistics", "show arp", "show ip arp", "show cdp neighbors", "show lldp neighbors",
+    "show logging", "show vrf", "show route-map", "show ip prefix-list", "show policy-map interface", "show policy-map", "show class-map",
+    "show ip sla summary", "show track", "show snmp community", "show ntp associations", "show standby brief", "show standby",
+    "show ip pim neighbor", "show ip mroute", "show platform", "show inventory", "show license", "show processes", "show flash:",
+    "show wireless",
+    "dir", "dir flash:", "more <rest>", "delete <rest>",
+  ].map((pattern) => ({ modes: ["all"], pattern })),
+  ...[
+    "ip address <word> <word> <word>", "ip dhcp", "dhcp", "ipconfig", "ipconfig /all", "show ip", "arp -a", "services", "service <word> <word>",
+  ].map((pattern) => ({ modes: ["user"], pattern })),
+  ...[
+    "configure terminal", "write memory", "write", "copy running-config startup-config", "copy run start", "erase startup-config",
+    "write erase", "terminal length <word>",
+  ].map((pattern) => ({ modes: ["priv"], pattern })),
+  ...[
+    "hostname <word>", "enable secret <rest>", "service password-encryption", "no service password-encryption",
+    "ip routing", "no ip routing", "ip multicast-routing", "no ip multicast-routing", "username <word> secret <rest>",
+    "interface range <rest>", "interface <rest>", "vlan <word>", "no vlan <word>", "ip route <word> <word> <word>",
+    "no ip route <word> <word> <word>", "router ospf <word>", "router eigrp <word>", "router rip", "router bgp <word>",
+    "ip dhcp pool <word>", "ip dhcp excluded-address <rest>", "no ip dhcp excluded-address <rest>",
+    "ip access-list standard <word>", "ip access-list extended <word>", "access-list <word> permit <rest>", "access-list <word> deny <rest>",
+    "line console 0", "line vty 0 4", "ip prefix-list <word> permit <rest>", "ip prefix-list <word> deny <rest>",
+    "route-map <word> permit <word?>", "route-map <word> deny <word?>", "vrf definition <word>",
+    "ip nat pool <word> <word> <word> netmask <word>", "ip nat inside source static <word> <word>",
+    "ip nat inside source list <word> interface <word> overload", "ip nat inside source list <word> pool <word> overload",
+    "aaa new-model", "no aaa new-model", "aaa authentication login <word> <rest>", "crypto key generate rsa modulus <word>",
+    "crypto key generate rsa", "ntp server <word>", "snmp-server community <rest>", "snmp-server host <rest>", "logging host <word>",
+    "ip dhcp snooping", "ip dhcp snooping vlan <rest>", "ip arp inspection vlan <rest>",
+    "monitor session <word> source interface <word>", "monitor session <word> destination interface <word>",
+    "vtp mode server", "vtp mode client", "vtp mode transparent", "vtp mode off", "vtp domain <word>",
+    "spanning-tree vlan <word> root primary", "spanning-tree vlan <word> root secondary", "spanning-tree vlan <word> priority <word>",
+    "class-map match-any <word>", "class-map match-all <word>", "class-map <word>", "policy-map <word>", "ip sla <word>", "track <word> <rest>",
+    "wireless ssid <rest>", "wireless security <word> <rest?>",
+  ].map((pattern) => ({ modes: ["conf"], pattern })),
+  ...[
+    "description <rest>", "no description", "ip address <word> <word>", "no ip address", "shutdown", "no shutdown",
+    "nameif <word>", "security-level <word>",
+    "switchport", "no switchport", "switchport mode access", "switchport mode trunk", "switchport access vlan <word>",
+    "switchport voice vlan <word>", "switchport trunk native vlan <word>", "switchport trunk allowed vlan <rest>",
+    "switchport port-security", "no switchport port-security", "switchport port-security maximum <word>",
+    "switchport port-security violation protect", "switchport port-security violation restrict", "switchport port-security violation shutdown",
+    "switchport port-security mac-address <word>", "channel-group <word> mode active", "channel-group <word> mode passive",
+    "channel-group <word> mode on", "channel-group <word> mode auto", "channel-group <word> mode desirable",
+    "storm-control broadcast level <word>", "storm-control action shutdown", "storm-control action trap",
+    "ip dhcp snooping trust", "no ip dhcp snooping trust", "ip arp inspection trust", "no ip arp inspection trust",
+    "spanning-tree portfast", "no spanning-tree portfast", "spanning-tree guard root", "spanning-tree guard loop", "spanning-tree guard none",
+    "spanning-tree bpduguard enable", "spanning-tree bpduguard disable", "ip access-group <word> in", "ip access-group <word> out",
+    "no ip access-group <word> in", "no ip access-group <word> out", "ip policy route-map <word>",
+    "ip nat inside", "ip nat outside", "no ip nat inside", "no ip nat outside", "speed auto", "speed 10", "speed 100", "speed 1000",
+    "duplex auto", "duplex full", "duplex half", "encapsulation ppp", "encapsulation hdlc", "encapsulation dot1q <word>",
+    "tunnel source <word>", "tunnel destination <word>", "service-policy input <word>", "service-policy output <word>",
+    "ip pim sparse-mode", "ip pim dense-mode", "ip igmp join-group <word>", "standby <word> ip <word>", "standby <word> priority <word>",
+  ].map((pattern) => ({ modes: ["conf-if", "conf-if-range"], pattern })),
+  ...["name <rest>"].map((pattern) => ({ modes: ["conf-vlan"], pattern })),
+  ...[
+    "router-id <word>", "version <word>", "network <word> <word> area <word>", "neighbor <word> remote-as <word>",
+    "network <word> mask <word>", "network <word> <word?>", "passive-interface <rest>", "no passive-interface <rest>",
+    "default-information originate",
+  ].map((pattern) => ({ modes: ["conf-router"], pattern })),
+  ...["network <word> <word>", "default-router <word>", "dns-server <word>", "lease <word>"].map((pattern) => ({ modes: ["conf-dhcp"], pattern })),
+  ...["password <rest>", "login", "no login", "transport input <rest>", "logging synchronous", "exec-timeout <word> <word?>"].map((pattern) => ({ modes: ["conf-line"], pattern })),
+  ...["permit <rest>", "deny <rest>", "remark <rest>"].map((pattern) => ({ modes: ["conf-acl"], pattern })),
+  ...["match <rest>", "set <rest>"].map((pattern) => ({ modes: ["conf-route-map", "conf-class-map"], pattern })),
+  ...["rd <rest>", "address-family ipv4"].map((pattern) => ({ modes: ["conf-vrf"], pattern })),
+  ...["class <word>"].map((pattern) => ({ modes: ["conf-policy-map"], pattern })),
+  ...["set <rest>", "police <rest>", "bandwidth percent <word>", "bandwidth <rest>", "priority <rest?>", "shape <rest>", "queue-limit <rest>"].map((pattern) => ({ modes: ["conf-policy-class"], pattern })),
+  ...["icmp-echo <word>", "frequency <word>"].map((pattern) => ({ modes: ["conf-ip-sla"], pattern })),
+].map((spec) => ({
+  ...spec,
+  tokens: spec.pattern.split(/\s+/),
+  literalCount: spec.pattern.split(/\s+/).filter((t) => !t.startsWith("<")).length,
+})).sort((a, b) => b.literalCount - a.literalCount || b.tokens.length - a.tokens.length);
+
+const CONFIG_PARENT_COMMAND_PATTERNS = [
+  /^(?:interface|int) (?:range )?.+$/,
+  /^vlan \d+$/,
+  /^no vlan \d+$/,
+  /^router (?:ospf|eigrp|rip|bgp)\b/,
+  /^ip dhcp pool \S+$/,
+  /^ip access-list (?:standard|extended) \S+$/,
+  /^line (?:console 0|vty 0 4)$/,
+  /^route-map \S+ (?:permit|deny)(?: \d+)?$/,
+  /^vrf definition \S+$/,
+  /^class-map(?: match-(?:any|all))? \S+$/,
+  /^policy-map \S+$/,
+  /^ip sla \d+$/,
+];
+
+function isConfigSubmode(modeName) {
+  return /^conf-.+/.test(modeName || "");
+}
+
+function isParentConfigCommand(cmd) {
+  return CONFIG_PARENT_COMMAND_PATTERNS.some((pattern) => pattern.test(cmd));
+}
 
 function CLI({ device, devices = {}, links = [], onApply, onPing, pendingCmd, active }) {
   const ref = React.useRef(null);
@@ -120,8 +223,9 @@ function CLI({ device, devices = {}, links = [], onApply, onPing, pendingCmd, ac
   }
 
   function handle(raw, opts = {}) {
-    const cmd = raw.trim().replace(/\s+/g, " ");
-    if (!opts.silent) setLines((l) => [...l, { cls: "input", text: `${promptFor()} ${cmd}` }]);
+    const typed = raw.trim().replace(/\s+/g, " ");
+    const cmd = expandIosAbbreviations(typed, mode);
+    if (!opts.silent) setLines((l) => [...l, { cls: "input", text: `${promptFor()} ${typed}` }]);
     if (!cmd) return;
     if (cmd === "?" || cmd.endsWith(" ?")) return showHelp();
     if (cmd === "end") return setMode({ name: "priv" });
@@ -134,9 +238,11 @@ function CLI({ device, devices = {}, links = [], onApply, onPing, pendingCmd, ac
       return runPriv(inner);
     }
 
+    if (mode.name === "user" && (OPT_Engine.isHostLike?.(device) || device.kind === "server") && (cmd === "show ip" || cmd === "ipconfig" || cmd === "ipconfig /all" || cmd === "arp -a" || cmd === "ip dhcp" || cmd === "dhcp" || /^ip(?: address)? \S+ \S+ \S+$/.test(cmd))) return runHost(cmd);
     if (cmd.startsWith("show ") || cmd === "show") return runShow(cmd);
     if (cmd.startsWith("ping ")) return doPing(cmd.split(/\s+/)[1]);
     if (cmd.startsWith("traceroute ") || cmd.startsWith("trace ")) return doPing(cmd.split(/\s+/)[1], true);
+    if (isConfigSubmode(mode.name) && isParentConfigCommand(cmd)) return runGlobal(cmd);
 
     if (mode.name === "user") return runUser(cmd);
     if (mode.name === "priv") return runPriv(cmd);
@@ -166,7 +272,7 @@ function CLI({ device, devices = {}, links = [], onApply, onPing, pendingCmd, ac
 
   function runUser(cmd) {
     if (cmd === "enable" || cmd === "en") return setMode({ name: "priv" });
-    if (device.kind === "pc" || device.kind === "server") return runHost(cmd);
+    if (OPT_Engine.isHostLike?.(device) || device.kind === "server") return runHost(cmd);
     invalid(cmd, "(try 'enable')");
   }
 
@@ -215,6 +321,16 @@ function CLI({ device, devices = {}, links = [], onApply, onPing, pendingCmd, ac
       entries.forEach(([ip, mac]) => push("", `${ip.padEnd(16)} ${mac}`));
       return;
     }
+    if (cmd === "services" && device.kind === "server") {
+      for (const name of ["dhcp", "dns", "http", "tftp", "aaa", "radius", "syslog", "ntp"]) {
+        push("", `${name.padEnd(8)} ${device.services?.[name] ? "on" : "off"}`);
+      }
+      return;
+    }
+    if ((m = cmd.match(/^service (dhcp|dns|http|tftp|aaa|radius|syslog|ntp) (on|off)$/)) && device.kind === "server") {
+      apply({ kind: "service", name: m[1], value: m[2] === "on" });
+      return push("ok", `${m[1]} ${m[2]}`);
+    }
     invalid(cmd);
   }
 
@@ -231,12 +347,12 @@ function CLI({ device, devices = {}, links = [], onApply, onPing, pendingCmd, ac
     if (cmd === "ip multicast-routing") return apply({ kind: "service", name: "multicastRouting", value: true });
     if (cmd === "no ip multicast-routing") return apply({ kind: "service", name: "multicastRouting", value: false });
     if ((m = cmd.match(/^username (\S+) secret (.+)$/))) return apply({ kind: "username", user: m[1], secret: m[2] });
-    if ((m = cmd.match(/^interface range (.+)$/))) {
+    if ((m = cmd.match(/^(?:interface|int) range (.+)$/))) {
       const ifaces = expandIfaceRange(m[1], device);
       if (!ifaces.length) return push("err", `% Invalid interface range '${m[1]}'`);
       return setMode({ name: "conf-if-range", ifaces });
     }
-    if ((m = cmd.match(/^interface (.+)$/))) {
+    if ((m = cmd.match(/^(?:interface|int) (.+)$/))) {
       const iface = normalizeIface(m[1], device);
       if (!iface) return push("err", `% Invalid interface '${m[1]}'`);
       if (!device.interfaces[iface]) apply({ kind: "interface-create", iface });
@@ -296,6 +412,8 @@ function CLI({ device, devices = {}, links = [], onApply, onPing, pendingCmd, ac
     if ((m = cmd.match(/^policy-map (\S+)$/))) { apply({ kind: "policy-map-create", name: m[1] }); return setMode({ name: "conf-policy-map", policyMap: m[1] }); }
     if ((m = cmd.match(/^ip sla (\d+)$/))) { apply({ kind: "ip-sla-create", id: m[1] }); return setMode({ name: "conf-ip-sla", sla: m[1] }); }
     if ((m = cmd.match(/^track (\d+) (.+)$/))) return apply({ kind: "track", id: m[1], object: m[2] });
+    if ((m = cmd.match(/^wireless ssid (.+)$/))) return apply({ kind: "wireless", field: "ssid", value: m[1] });
+    if ((m = cmd.match(/^wireless security (\S+)(?: (.+))?$/))) { apply({ kind: "wireless", field: "security", value: m[1] }); if (m[2]) apply({ kind: "wireless", field: "passphrase", value: m[2] }); return; }
     invalid(cmd);
   }
 
@@ -303,6 +421,8 @@ function CLI({ device, devices = {}, links = [], onApply, onPing, pendingCmd, ac
     let m;
     if ((m = cmd.match(/^description (.+)$/))) return applyIface("desc", { value: m[1] });
     if (cmd === "no description") return applyIface("desc", { value: "" });
+    if ((m = cmd.match(/^nameif (\S+)$/))) return applyIface("nameif", { value: m[1] });
+    if ((m = cmd.match(/^security-level (\d+)$/))) return applyIface("security-level", { value: Number(m[1]) });
     if ((m = cmd.match(/^ip address (\S+) (\S+)$/))) return applyIface("ip-address", { ip: m[1], mask: m[2] });
     if (cmd === "no ip address") return applyIface("ip-address", { ip: null, mask: null });
     if (cmd === "shutdown" || cmd === "shut") return applyIface("admin", { up: false });
@@ -442,10 +562,10 @@ function CLI({ device, devices = {}, links = [], onApply, onPing, pendingCmd, ac
     if (cmd === "show startup-config" || cmd === "show start") return pushMany((device.startupConfig || "startup-config is not present").split("\n"));
     if (cmd === "show version" || cmd === "show ver") return showVersion();
     if (cmd === "show ip interface brief" || cmd === "show ip int br") return showIpBrief();
-    if (cmd === "show interfaces" || cmd.startsWith("show interfaces ")) return showInterfaces(cmd);
     if (cmd === "show ip route" || cmd === "sh ip route") return showRoute();
     if (cmd === "show vlan brief" || cmd === "show vlan") return showVlan();
     if (cmd === "show interfaces trunk") return showTrunks();
+    if (cmd === "show interfaces" || cmd.startsWith("show interfaces ")) return showInterfaces(cmd);
     if (cmd === "show mac address-table" || cmd === "show mac") return showMac();
     if (cmd === "show spanning-tree" || cmd.startsWith("show spanning-tree")) return showStp();
     if (cmd === "show etherchannel summary") return showEtherchannel();
@@ -477,6 +597,7 @@ function CLI({ device, devices = {}, links = [], onApply, onPing, pendingCmd, ac
     if (cmd === "show standby" || cmd === "show standby brief") return showStandby();
     if (cmd === "show ip pim neighbor") return showPim();
     if (cmd === "show ip mroute") return showMroute();
+    if (cmd === "show wireless") return showWireless();
     if (cmd === "show platform" || cmd === "show inventory" || cmd === "show license" || cmd === "show processes") return showPlatform(cmd);
     if (cmd === "dir" || cmd === "dir flash:" || cmd === "show flash:") return showDir();
     invalid(cmd);
@@ -708,6 +829,12 @@ function CLI({ device, devices = {}, links = [], onApply, onPing, pendingCmd, ac
     if (!device.services?.multicastRouting) return push("dim", "IP multicast routing is disabled.");
     push("", "(*, 224.0.0.0/4), uptime 00:01:00, flags: simulated");
   }
+  function showWireless() {
+    if (!device.wireless) return push("err", "% Wireless radio is not available on this device");
+    push("", `SSID: ${device.wireless.ssid || "-"}`);
+    push("", `Security: ${device.wireless.security || "open"}`);
+    push("", `Radio: ${device.interfaces?.wlan0?.admUp === false ? "down" : "up"}`);
+  }
   function showPlatform(cmd) {
     if (cmd === "show inventory") return push("", `NAME: "${device.hostname}", DESCR: "${device.model}"\nPID: ${device.platform || device.kind}, SN: OPENPT${device.id.slice(-6).toUpperCase()}`);
     if (cmd === "show license") return push("", "License Usage: network-advantage (simulated), Status: IN USE");
@@ -803,6 +930,63 @@ function normalizeIface(s, device) {
   else if (pre.startsWith("vl")) candidate = `Vlan${m[2]}`;
   for (const k of Object.keys(device.interfaces || {})) if (k.toLowerCase() === String(candidate).toLowerCase()) return k;
   if (candidate?.startsWith("Vlan")) return candidate;
+  return null;
+}
+
+function expandIosAbbreviations(input, mode) {
+  const cmd = String(input || "").trim().replace(/\s+/g, " ");
+  if (!cmd || cmd === "?" || cmd.endsWith(" ?")) return cmd;
+  const modeName = mode?.name === "conf-if-range" ? "conf-if-range" : mode?.name;
+  const expanded = matchIosSpec(cmd, modeName);
+  if (expanded) {
+    if (expanded.startsWith("do ")) {
+      const inner = expanded.slice(3);
+      return `do ${matchIosSpec(inner, "priv") || inner}`;
+    }
+    return expanded;
+  }
+  if (isConfigSubmode(modeName)) {
+    const parentExpanded = matchIosSpec(cmd, "conf");
+    if (parentExpanded && isParentConfigCommand(parentExpanded)) return parentExpanded;
+  }
+  return cmd;
+}
+
+function matchIosSpec(cmd, modeName) {
+  const inputTokens = cmd.split(/\s+/);
+  const candidates = IOS_ABBREVIATION_SPECS.filter((s) => s.modes.includes("all") || s.modes.includes(modeName));
+  for (const spec of candidates) {
+    const out = [];
+    let i = 0;
+    let ok = true;
+    for (let j = 0; j < spec.tokens.length; j++) {
+      const token = spec.tokens[j];
+      if (token === "<rest>" || token === "<rest?>") {
+        const rest = inputTokens.slice(i);
+        if (token === "<rest>" && !rest.length) ok = false;
+        if (rest.length) out.push(...rest);
+        i = inputTokens.length;
+        break;
+      }
+      if (token === "<word>" || token === "<word?>") {
+        if (inputTokens[i]) {
+          out.push(inputTokens[i]);
+          i++;
+        } else if (token === "<word>") {
+          ok = false;
+        }
+        continue;
+      }
+      const typed = inputTokens[i];
+      if (!typed || !token.toLowerCase().startsWith(typed.toLowerCase())) {
+        ok = false;
+        break;
+      }
+      out.push(token);
+      i++;
+    }
+    if (ok && i === inputTokens.length) return out.join(" ");
+  }
   return null;
 }
 

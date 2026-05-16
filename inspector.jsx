@@ -16,9 +16,9 @@ function Inspector({ device, onTogglePower, onDelete, onRename, onConsole }) {
     );
   }
 
-  const m = window.DeviceCatalog.find(c => c.kind === device.kind);
-  const isRouterLike = device.kind === "router" || device.kind === "l3switch";
-  const isSwitchLike = device.kind === "l2switch" || device.kind === "l3switch";
+  const m = window.DeviceCatalog.find(c => c.platform === device.platform && c.kind === device.kind) || window.DeviceCatalog.find(c => c.platform === device.platform) || window.DeviceCatalog.find(c => c.kind === device.kind) || window.DeviceCatalog[0];
+  const isRouterLike = window.OPT_Engine.isRouterLike ? window.OPT_Engine.isRouterLike(device) : device.kind === "router" || device.kind === "l3switch";
+  const isSwitchLike = window.OPT_Engine.isSwitchLike ? window.OPT_Engine.isSwitchLike(device) : device.kind === "l2switch" || device.kind === "l3switch";
   const ifaceName = window.OPT_Engine.shortIfaceName;
 
   return (
@@ -116,7 +116,7 @@ function Inspector({ device, onTogglePower, onDelete, onRename, onConsole }) {
           </div>
         )}
 
-        {(device.kind === "pc" || device.kind === "server") && device.interfaces.eth0 && (
+        {(window.OPT_Engine.isHostLike?.(device) || device.kind === "server") && device.interfaces.eth0 && (
           <div className="ins-section">
             <h4>IPv4 Settings</h4>
             <div className="ins-row"><span className="k">address</span><span className="v">{device.interfaces.eth0.ip || "—"}</span></div>

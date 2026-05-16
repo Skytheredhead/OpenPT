@@ -195,31 +195,252 @@ End of document`;
     return Array.from(bytes.slice(0, count)).map((b) => b.toString(16).padStart(2, "0")).join(" ");
   }
 
+  function bytesToHex(bytes) {
+    return Array.from(bytes).map((b) => b.toString(16).padStart(2, "0")).join("");
+  }
+
+  function shannonEntropy(bytes) {
+    if (!bytes.length) return 0;
+    const counts = new Array(256).fill(0);
+    for (const b of bytes) counts[b]++;
+    let entropy = 0;
+    for (const count of counts) {
+      if (!count) continue;
+      const p = count / bytes.length;
+      entropy -= p * Math.log2(p);
+    }
+    return Number(entropy.toFixed(4));
+  }
+
+  function windowEntropy(bytes, windowSize = 4096, limit = 16) {
+    const out = [];
+    for (let offset = 0; offset < bytes.length && out.length < limit; offset += windowSize) {
+      const chunk = bytes.slice(offset, Math.min(bytes.length, offset + windowSize));
+      out.push({ offset, length: chunk.length, entropy: shannonEntropy(chunk) });
+    }
+    return out;
+  }
+
+  function findNeedle(bytes, needle, start = 0) {
+    outer: for (let i = start; i <= bytes.length - needle.length; i++) {
+      for (let j = 0; j < needle.length; j++) {
+        if (bytes[i + j] !== needle[j]) continue outer;
+      }
+      return i;
+    }
+    return -1;
+  }
+
+  function findSignatures(bytes) {
+    const signatures = [
+      { label: "PDF", bytes: [0x25, 0x50, 0x44, 0x46, 0x2d] },
+      { label: "ZIP local file", bytes: [0x50, 0x4b, 0x03, 0x04] },
+      { label: "ZIP end record", bytes: [0x50, 0x4b, 0x05, 0x06] },
+      { label: "GZIP", bytes: [0x1f, 0x8b, 0x08] },
+      { label: "PNG", bytes: [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a] },
+      { label: "JPEG", bytes: [0xff, 0xd8, 0xff] },
+      { label: "RTF", bytes: [0x7b, 0x5c, 0x72, 0x74, 0x66] },
+      { label: "HTML", bytes: [0x3c, 0x68, 0x74, 0x6d, 0x6c] },
+      { label: "SQLite", bytes: [0x53, 0x51, 0x4c, 0x69, 0x74, 0x65, 0x20, 0x66, 0x6f, 0x72, 0x6d, 0x61, 0x74, 0x20, 0x33, 0x00] },
+    ];
+    const hits = [];
+    for (const sig of signatures) {
+      let offset = findNeedle(bytes, sig.bytes);
+      while (offset !== -1 && hits.length < 200) {
+        hits.push({ label: sig.label, offset, hex: bytesToHex(sig.bytes) });
+        offset = findNeedle(bytes, sig.bytes, offset + 1);
+      }
+    }
+    return hits.sort((a, b) => a.offset - b.offset);
+  }
+
+  function extractAsciiStrings(bytes, minLength = 8, limit = 120) {
+    const strings = [];
+    let start = -1;
+    let chars = [];
+    const flush = (offset) => {
+      if (chars.length >= minLength) strings.push({ offset: start, length: chars.length, text: chars.join("") });
+      start = -1;
+      chars = [];
+    };
+    for (let i = 0; i < bytes.length && strings.length < limit; i++) {
+      const b = bytes[i];
+      if (b >= 32 && b <= 126) {
+        if (start === -1) start = i;
+        chars.push(String.fromCharCode(b));
+      } else {
+        flush(i);
+      }
+    }
+    flush(bytes.length);
+    return strings.slice(0, limit);
+  }
+
+  function buildReverseReport(file, bytes, sha256, head) {
+    const strings = extractAsciiStrings(bytes);
+    const interestingPatterns = /(packet|tracer|cisco|html|pdf|rtf|assessment|rubric|score|device|router|switch|interface|config|activity|instruction)/i;
+    return {
+      fileName: file.name || "packet-tracer-file",
+      size: file.size,
+      sha256,
+      headHex: head,
+      tailHex: headHex(bytes.slice(Math.max(0, bytes.length - 16)), 16),
+      entropy: shannonEntropy(bytes),
+      entropyByWindow: windowEntropy(bytes),
+      signatures: findSignatures(bytes),
+      strings,
+      interestingStrings: strings.filter((s) => interestingPatterns.test(s.text)).slice(0, 40),
+      notes: [
+        "The original PKA/PKT bytes are preserved in browser storage by SHA-256 when IndexedDB is available.",
+        "Modern Packet Tracer activity files usually look high-entropy and do not expose raw PDFs or HTML by file signature.",
+        "This browser report is useful for fingerprinting and profile matching; full assignment extraction still needs a known profile or a Packet Tracer-assisted local extraction pass.",
+      ],
+    };
+  }
+
   async function sha256Hex(buffer) {
     if (!window.crypto?.subtle) return null;
     const digest = await window.crypto.subtle.digest("SHA-256", buffer);
     return Array.from(new Uint8Array(digest)).map((b) => b.toString(16).padStart(2, "0")).join("");
   }
 
-  function makeUnsupportedActivity(file, sha256, head) {
+  function openPacketTracerDb() {
+    if (!window.indexedDB) return Promise.resolve(null);
+    return new Promise((resolve, reject) => {
+      const req = window.indexedDB.open("OpenPTPacketTracer", 1);
+      req.onupgradeneeded = () => {
+        const db = req.result;
+        if (!db.objectStoreNames.contains("rawFiles")) {
+          db.createObjectStore("rawFiles", { keyPath: "sha256" });
+        }
+      };
+      req.onsuccess = () => resolve(req.result);
+      req.onerror = () => reject(req.error);
+    });
+  }
+
+  async function storeRawPacketTracerFile(file, buffer, sha256) {
+    if (!sha256) return { stored: false, backend: null, reason: "sha256 unavailable" };
+    const db = await openPacketTracerDb();
+    if (!db) return { stored: false, backend: null, reason: "IndexedDB unavailable" };
+    const record = {
+      sha256,
+      name: file.name || "packet-tracer-file",
+      size: file.size,
+      type: file.type || "application/octet-stream",
+      lastModified: file.lastModified || null,
+      storedAt: new Date().toISOString(),
+      bytes: buffer.slice(0),
+    };
+    return new Promise((resolve, reject) => {
+      const tx = db.transaction("rawFiles", "readwrite");
+      tx.objectStore("rawFiles").put(record);
+      tx.oncomplete = () => {
+        db.close();
+        resolve({ stored: true, backend: "indexeddb", key: sha256, size: file.size });
+      };
+      tx.onerror = () => {
+        db.close();
+        reject(tx.error);
+      };
+    });
+  }
+
+  async function getRawPacketTracerFile(sha256) {
+    if (!sha256) return null;
+    const db = await openPacketTracerDb();
+    if (!db) return null;
+    return new Promise((resolve, reject) => {
+      const tx = db.transaction("rawFiles", "readonly");
+      const req = tx.objectStore("rawFiles").get(sha256);
+      req.onsuccess = () => resolve(req.result || null);
+      req.onerror = () => reject(req.error);
+      tx.oncomplete = () => db.close();
+      tx.onerror = () => db.close();
+    });
+  }
+
+  function reverseReportText(report) {
+    const signatureLines = report.signatures.length
+      ? report.signatures.slice(0, 20).map((s) => `- ${s.label} at 0x${s.offset.toString(16)}`).join("\n")
+      : "- No embedded PDF/ZIP/RTF/HTML/image signatures found.";
+    const stringLines = (report.interestingStrings.length ? report.interestingStrings : report.strings.slice(0, 20))
+      .map((s) => `- 0x${s.offset.toString(16)} ${s.text}`)
+      .join("\n") || "- No printable strings of interest found.";
+    return `Packet Tracer reverse-engineering report
+
+File: ${report.fileName}
+Size: ${report.size} bytes
+SHA-256: ${report.sha256 || "unavailable"}
+Header: ${report.headHex}
+Tail: ${report.tailHex}
+Entropy: ${report.entropy} bits/byte
+
+Embedded signature scan:
+${signatureLines}
+
+String sample:
+${stringLines}
+
+Notes:
+${report.notes.map((n) => `- ${n}`).join("\n")}`;
+  }
+
+  function reverseReportHtml(title, report) {
+    const signatureRows = report.signatures.length
+      ? report.signatures.slice(0, 40).map((s) => `<tr><td>${escapeHtml(s.label)}</td><td>0x${s.offset.toString(16)}</td><td><code>${escapeHtml(s.hex)}</code></td></tr>`).join("")
+      : `<tr><td colspan="3">No embedded PDF/ZIP/RTF/HTML/image signatures found.</td></tr>`;
+    const strings = report.interestingStrings.length ? report.interestingStrings : report.strings.slice(0, 30);
+    const stringRows = strings.length
+      ? strings.map((s) => `<tr><td>0x${s.offset.toString(16)}</td><td>${s.length}</td><td><code>${escapeHtml(s.text)}</code></td></tr>`).join("")
+      : `<tr><td colspan="3">No printable strings of interest found.</td></tr>`;
+    return `
+      <article class="pt-assignment">
+        <h1>${escapeHtml(title)}</h1>
+        <p>This Packet Tracer file was fingerprinted in the browser, but no full extractor profile is packaged for it yet.</p>
+        <h2>Fingerprint</h2>
+        <table>
+          <tbody>
+            <tr><th>Size</th><td>${report.size} bytes</td></tr>
+            <tr><th>SHA-256</th><td><code>${escapeHtml(report.sha256 || "unavailable")}</code></td></tr>
+            <tr><th>Header</th><td><code>${escapeHtml(report.headHex)}</code></td></tr>
+            <tr><th>Tail</th><td><code>${escapeHtml(report.tailHex)}</code></td></tr>
+            <tr><th>Entropy</th><td>${report.entropy} bits/byte</td></tr>
+          </tbody>
+        </table>
+        <h2>Embedded Signature Scan</h2>
+        <table><thead><tr><th>Type</th><th>Offset</th><th>Signature</th></tr></thead><tbody>${signatureRows}</tbody></table>
+        <h2>Printable String Sample</h2>
+        <table><thead><tr><th>Offset</th><th>Length</th><th>Text</th></tr></thead><tbody>${stringRows}</tbody></table>
+      </article>
+    `;
+  }
+
+  function makeUnsupportedActivity(file, sha256, head, report) {
     const title = stripPacketTracerExt(file.name);
     return {
       format: "packet-tracer-activity",
       importerVersion: 1,
       unsupported: true,
       title,
-      instructionsText: `Packet Tracer file recognized: ${file.name}\n\nThis activity has not been extracted into OpenPT yet. The importer captured file metadata so a decoder or Packet Tracer UI extraction pass can be added for this hash.`,
-      instructionsHtml: `
-        <article class="pt-assignment">
-          <h1>${escapeHtml(title)}</h1>
-          <p>This Packet Tracer file was recognized and opened as an assignment tab, but no extractor profile is packaged for it yet.</p>
-          <p>Add an extraction profile for this hash to populate instructions, rubric, devices, links, and answer commands.</p>
-        </article>
-      `,
+      instructionsText: reverseReportText(report),
+      instructionsHtml: reverseReportHtml(title, report),
       progress: null,
       devices: [],
       links: [],
       answerCommands: {},
+      reverseReport: report,
+      featureCoverage: {
+        rawFilePreserved: false,
+        semanticExtraction: "not-decoded",
+        preservedButUnsupported: [
+          "Packet Tracer encrypted/proprietary activity payload",
+          "Device configurations hidden inside the activity payload",
+          "Assessment tree hidden inside the activity payload",
+          "Workspace objects hidden inside the activity payload",
+          "Instruction assets hidden inside the activity payload",
+        ],
+      },
       diagnostics: {
         sha256,
         headHex: head,
@@ -245,7 +466,34 @@ End of document`;
     const head = headHex(bytes, 16);
     const knownByHash = sha256 === ETHERCHANNEL_SHA256;
     const knownByFallback = !sha256 && file.size === 641292 && /15\.2\.7 packet tracer - etherchannel review/i.test(file.name || "");
-    const activity = (knownByHash || knownByFallback) ? clone(etherchannelActivity) : makeUnsupportedActivity(file, sha256, head);
+    const report = buildReverseReport(file, bytes, sha256, head);
+    const rawStorage = await storeRawPacketTracerFile(file, buffer, sha256).catch((err) => ({
+      stored: false,
+      backend: "indexeddb",
+      reason: err?.message || String(err),
+    }));
+    const activity = (knownByHash || knownByFallback) ? clone(etherchannelActivity) : makeUnsupportedActivity(file, sha256, head, report);
+    activity.reverseReport = report;
+    activity.rawFile = {
+      name: file.name || "packet-tracer-file",
+      size: file.size,
+      type: file.type || "application/octet-stream",
+      lastModified: file.lastModified || null,
+      sha256,
+      storage: rawStorage,
+    };
+    activity.featureCoverage = {
+      rawFilePreserved: !!rawStorage.stored,
+      semanticExtraction: activity.unsupported ? "not-decoded" : "profile-derived",
+      profileMatched: !activity.unsupported,
+      preservedButUnsupported: activity.unsupported ? [
+        "Packet Tracer encrypted/proprietary activity payload",
+        "Device configurations hidden inside the activity payload",
+        "Assessment tree hidden inside the activity payload",
+        "Workspace objects hidden inside the activity payload",
+        "Instruction assets hidden inside the activity payload",
+      ] : [],
+    };
     activity.sourceName = file.name || "packet-tracer-file";
     activity.sourceSize = file.size;
     activity.sourceSha256 = sha256;
@@ -255,6 +503,7 @@ End of document`;
 
   window.PacketTracerImporter = {
     importPacketTracerFile,
+    getRawPacketTracerFile,
     profiles: {
       [ETHERCHANNEL_SHA256]: etherchannelActivity.title,
     },

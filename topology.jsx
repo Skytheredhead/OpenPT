@@ -152,7 +152,7 @@ function Topology(props) {
 
   const G = window.Glyph;
   const cat = window.DeviceCatalog;
-  const meta = (k) => cat.find(c => c.kind === k) || cat[0];
+  const meta = (d) => cat.find(c => c.platform === d.platform && c.kind === d.kind) || cat.find(c => c.platform === d.platform) || cat.find(c => c.kind === d.kind) || cat[0];
   const ifaceName = window.OPT_Engine.shortIfaceName;
 
   const fit = () => {
@@ -286,7 +286,7 @@ function Topology(props) {
 
         {/* Devices */}
         {Object.values(devices).map(d => {
-          const m = meta(d.kind);
+          const m = meta(d);
           const isActiveHop = activeHopDeviceId === d.id;
           const ipIface = d.interfaces && Object.values(d.interfaces).find(i => i.ip);
           return (

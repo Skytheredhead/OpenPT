@@ -75,14 +75,35 @@ const Glyph = {
     </svg>
   ),
 };
+Glyph.laptop = Glyph.pc;
+Glyph.printer = Glyph.pc;
+Glyph.phone = Glyph.pc;
+Glyph.wrt = Glyph.ap;
+Glyph.asa = Glyph.router;
+Glyph.internet = Glyph.cloud;
+Glyph.dslmodem = Glyph.cloud;
+Glyph.cablemodem = Glyph.cloud;
 window.Glyph = Glyph;
 
 window.DeviceCatalog = [
-  { kind: "router",   label: "ISR4321 Router", short: "Router 4321", ifaces: ["GigabitEthernet0/0/0","GigabitEthernet0/0/1","Serial0/1/0","Serial0/1/1"], pwr: true, color: "var(--accent)" },
-  { kind: "l3switch", label: "Catalyst 9200L L3", short: "Switch C9200L", ifaces: [...Array.from({ length: 24 }, (_, i) => `GigabitEthernet1/0/${i + 1}`), ...Array.from({ length: 4 }, (_, i) => `GigabitEthernet1/1/${i + 1}`)], pwr: true, color: "var(--violet)" },
-  { kind: "l2switch", label: "Catalyst 9200L", short: "Switch C9200L", ifaces: [...Array.from({ length: 24 }, (_, i) => `GigabitEthernet1/0/${i + 1}`), ...Array.from({ length: 4 }, (_, i) => `GigabitEthernet1/1/${i + 1}`)], pwr: true, color: "var(--fg-1)" },
-  { kind: "pc",       label: "PC",         short: "PC",  ifaces: ["eth0"], pwr: true, color: "var(--ok)" },
-  { kind: "server",   label: "Server",     short: "SRV", ifaces: ["eth0"], pwr: true, color: "var(--magenta)" },
-  { kind: "ap",       label: "Wireless AP",short: "AP",  ifaces: ["eth0","wlan0"], pwr: true, color: "var(--accent)" },
-  { kind: "cloud",    label: "Cloud",      short: "NET", ifaces: ["wan"], pwr: false, color: "var(--fg-2)" },
+  { id: "2960-24tt", kind: "l2switch", platform: "2960-24tt", label: "2960-24TT", short: "2960", ifaces: [...Array.from({ length: 24 }, (_, i) => `FastEthernet0/${i + 1}`), "GigabitEthernet0/1", "GigabitEthernet0/2"], pwr: true, color: "var(--fg-1)" },
+  { id: "3560-24ps", kind: "l3switch", platform: "3560-24ps", label: "3560-24PS", short: "3560", ifaces: [...Array.from({ length: 24 }, (_, i) => `FastEthernet0/${i + 1}`), "GigabitEthernet0/1", "GigabitEthernet0/2"], pwr: true, color: "var(--violet)" },
+  { id: "2911", kind: "router", platform: "2911", label: "2911", short: "2911", ifaces: ["GigabitEthernet0/0","GigabitEthernet0/1","GigabitEthernet0/2","Serial0/0/0","Serial0/0/1","Serial0/1/0","Serial0/1/1"], pwr: true, color: "var(--accent)" },
+  { id: "1941", kind: "router", platform: "1941", label: "1941", short: "1941", ifaces: ["GigabitEthernet0/0","GigabitEthernet0/1","Serial0/0/0","Serial0/0/1"], pwr: true, color: "var(--accent)" },
+  { id: "isr4321", kind: "router", platform: "isr4321", label: "ISR4321", short: "4321", ifaces: ["GigabitEthernet0/0/0","GigabitEthernet0/0/1","Serial0/1/0","Serial0/1/1"], pwr: true, color: "var(--accent)" },
+  { id: "isr4331", kind: "router", platform: "isr4331", label: "ISR4331", short: "4331", ifaces: ["GigabitEthernet0/0/0","GigabitEthernet0/0/1","GigabitEthernet0/0/2","Serial0/1/0","Serial0/1/1"], pwr: true, color: "var(--accent)" },
+  { id: "c9200l", kind: "l2switch", platform: "c9200l", label: "Catalyst 9200L", short: "C9200L", ifaces: [...Array.from({ length: 24 }, (_, i) => `GigabitEthernet1/0/${i + 1}`), ...Array.from({ length: 4 }, (_, i) => `GigabitEthernet1/1/${i + 1}`)], pwr: true, color: "var(--fg-1)" },
+  { id: "c9200l-l3", kind: "l3switch", platform: "c9200l", label: "Catalyst 9200L L3", short: "C9200L L3", ifaces: [...Array.from({ length: 24 }, (_, i) => `GigabitEthernet1/0/${i + 1}`), ...Array.from({ length: 4 }, (_, i) => `GigabitEthernet1/1/${i + 1}`)], pwr: true, color: "var(--violet)" },
+  { id: "pc", kind: "pc", platform: "genericPc", label: "PC", short: "PC",  ifaces: ["eth0"], pwr: true, color: "var(--ok)" },
+  { id: "laptop", kind: "laptop", platform: "laptop", label: "Laptop", short: "Laptop", ifaces: ["eth0", "wlan0"], pwr: true, color: "var(--ok)" },
+  { id: "server-pt", kind: "server", platform: "genericServer", label: "Server-PT", short: "Server-PT", ifaces: ["eth0"], pwr: true, color: "var(--magenta)" },
+  { id: "wrt300n", kind: "wrt", platform: "wrt300n", label: "WRT300N", short: "WRT300N", ifaces: ["Internet", "Ethernet1", "Ethernet2", "Ethernet3", "Ethernet4", "wlan0"], pwr: true, color: "var(--accent)" },
+  { id: "asa5506x", kind: "asa", platform: "asa5506x", label: "ASA 5506-X", short: "5506-X", ifaces: ["GigabitEthernet1/1","GigabitEthernet1/2","GigabitEthernet1/3","GigabitEthernet1/4","GigabitEthernet1/5","GigabitEthernet1/6","GigabitEthernet1/7","GigabitEthernet1/8"], pwr: true, color: "var(--warn)" },
+  { id: "printer", kind: "printer", platform: "printer", label: "Printer", short: "Printer", ifaces: ["eth0"], pwr: true, color: "var(--ok)" },
+  { id: "ipphone", kind: "phone", platform: "ipphone", label: "IP Phone", short: "IP Phone", ifaces: ["eth0", "pc"], pwr: true, color: "var(--accent)" },
+  { id: "ap", kind: "ap", label: "Wireless AP", short: "AP",  ifaces: ["eth0","wlan0"], pwr: true, color: "var(--accent)" },
+  { id: "cloudpt", kind: "cloud", platform: "cloudpt", label: "Cloud-PT", short: "Cloud-PT", ifaces: ["eth0", "serial0", "dsl", "coax"], pwr: false, color: "var(--fg-2)" },
+  { id: "internet", kind: "internet", platform: "internet", short: "Internet", label: "Internet", ifaces: ["wan"], pwr: true, color: "var(--fg-2)" },
+  { id: "dslmodem", kind: "dslmodem", platform: "dslmodem", label: "DSL Modem", short: "DSL", ifaces: ["Ethernet0", "DSL0"], pwr: true, color: "var(--fg-2)" },
+  { id: "cablemodem", kind: "cablemodem", platform: "cablemodem", label: "Cable Modem", short: "Cable", ifaces: ["Ethernet0", "Coax0"], pwr: true, color: "var(--fg-2)" },
 ];
