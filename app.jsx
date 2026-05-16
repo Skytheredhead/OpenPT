@@ -170,7 +170,7 @@ const ACCENTS = {
 };
 
 const Sync = window.OpenPTSync;
-const OPENPT_VERSION = "0.2.1-sync.20260516";
+const OPENPT_VERSION = "0.2.2-sync.20260516";
 const SYNC_AUTOSAVE_CHANGES = 20;
 const SYNC_AUTOSAVE_MS = 60_000;
 const SYNC_MIN_SAVE_MS = 10_000;
@@ -1692,7 +1692,7 @@ function App() {
             <button className="tb-btn" onClick={() => setShareOpen(true)}>Share</button>
           )}
           <button className="tb-btn" onClick={() => cloudUser ? setProjectsOpen(true) : setAuthOpen(true)}>
-            {cloudUser ? cloudUser.email.split("@")[0] : "Sign in"}
+            {cloudUser ? cloudUser.email.split("@")[0] : "Login / Sign up"}
           </button>
         </div>
       </div>

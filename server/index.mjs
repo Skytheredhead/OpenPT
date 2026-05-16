@@ -1,5 +1,6 @@
 import Fastify from "fastify";
 import cookie from "@fastify/cookie";
+import cors from "@fastify/cors";
 import staticPlugin from "@fastify/static";
 import argon2 from "argon2";
 import { dirname, join, resolve } from "node:path";
@@ -12,6 +13,10 @@ const root = resolve(__dirname, "..");
 const dataDir = resolve(process.env.OPENPT_DATA_DIR || join(root, ".openpt-data"));
 const port = Number(process.env.PORT || 5173);
 const host = process.env.HOST || "127.0.0.1";
+const allowedOrigins = (process.env.OPENPT_ALLOWED_ORIGINS || "http://127.0.0.1:5173,http://localhost:5173,https://open-pt.vercel.app")
+  .split(",")
+  .map((origin) => origin.trim())
+  .filter(Boolean);
 
 const app = Fastify({ logger: true, bodyLimit: 520 * 1024 * 1024 });
 const store = new OpenPTStore({
@@ -21,6 +26,17 @@ const store = new OpenPTStore({
 
 await app.register(cookie, {
   secret: process.env.OPENPT_COOKIE_SECRET || "openpt-dev-cookie-secret-change-me"
+});
+
+await app.register(cors, {
+  credentials: true,
+  origin(origin, cb) {
+    if (!origin || allowedOrigins.includes(origin)) return cb(null, true);
+    cb(null, false);
+  },
+  methods: ["GET", "POST", "PATCH", "DELETE", "OPTIONS"],
+  allowedHeaders: ["content-type", "x-openpt-csrf"],
+  exposedHeaders: ["x-openpt-csrf"]
 });
 
 app.decorateRequest("user", null);
@@ -54,12 +70,13 @@ function requireCsrf(req) {
 }
 
 function setSessionCookie(reply, session) {
+  const secureCookies = process.env.OPENPT_SECURE_COOKIES === "1";
   reply
     .setCookie("openpt_session", session.id, {
       path: "/",
       httpOnly: true,
-      sameSite: "lax",
-      secure: process.env.OPENPT_SECURE_COOKIES === "1",
+      sameSite: secureCookies ? "none" : "lax",
+      secure: secureCookies,
       expires: new Date(session.expires_at),
       signed: false
     })

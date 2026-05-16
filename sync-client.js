@@ -3,6 +3,12 @@
   const LABEL_KEY = "openpt:sync:client-label";
   const DB_NAME = "openpt-sync";
   const DB_VERSION = 1;
+  const DEFAULT_API_BASE = location.hostname.endsWith("vercel.app") ? "https://openptapi.skylarenns.com" : "";
+
+  function apiBase() {
+    const configured = window.OPENPT_API_BASE || localStorage.getItem("openpt:api-base") || DEFAULT_API_BASE;
+    return String(configured || "").replace(/\/+$/, "");
+  }
 
   function uuid() {
     if (crypto.randomUUID) return crypto.randomUUID();
@@ -123,7 +129,9 @@
     const headers = { "content-type": "application/json", ...(options.headers || {}) };
     const csrf = sessionStorage.getItem("openpt:csrf");
     if (csrf) headers["x-openpt-csrf"] = csrf;
-    const res = await fetch(path, { credentials: "same-origin", ...options, headers });
+    const base = apiBase();
+    const url = `${base}${path}`;
+    const res = await fetch(url, { credentials: "include", ...options, headers });
     const nextCsrf = res.headers.get("x-openpt-csrf");
     if (nextCsrf) sessionStorage.setItem("openpt:csrf", nextCsrf);
     const data = await res.json().catch(() => ({}));
