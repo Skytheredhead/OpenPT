@@ -59,7 +59,7 @@ function setSessionCookie(reply, session) {
       path: "/",
       httpOnly: true,
       sameSite: "lax",
-      secure: process.env.NODE_ENV === "production",
+      secure: process.env.OPENPT_SECURE_COOKIES === "1",
       expires: new Date(session.expires_at),
       signed: false
     })

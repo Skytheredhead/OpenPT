@@ -21,8 +21,8 @@ Check this file before deployment, server work, or Vercel verification.
 - SSH target: `skylarenns@192.168.1.174`
 - Password location on this Mac: `~/Desktop/192.168.1.174.rtf`
 - Do not commit, paste, print, or summarize the password.
-- Remote project parent: `/Documents/GitHub/`
-- Expected remote app path: `/Documents/GitHub/OpenPT`
+- Requested remote project parent: `/Documents/GitHub/`
+- Actual server path in use: `/home/skylarenns/Documents/GitHub/OpenPT`
 
 ## Remote Service
 
@@ -30,6 +30,8 @@ Check this file before deployment, server work, or Vercel verification.
 - App command: `npm run dev`
 - Default local port on the remote server: `5173`
 - Data directory default: `<repo>/.openpt-data`
+- The LAN service currently uses HTTP, so do not set `OPENPT_SECURE_COOKIES=1`
+  unless the service is behind HTTPS.
 
 ## Local Verification
 
