@@ -170,7 +170,7 @@ const ACCENTS = {
 };
 
 const Sync = window.OpenPTSync;
-const OPENPT_VERSION = "0.2.0-sync.20260516";
+const OPENPT_VERSION = "0.2.1-sync.20260516";
 const SYNC_AUTOSAVE_CHANGES = 20;
 const SYNC_AUTOSAVE_MS = 60_000;
 const SYNC_MIN_SAVE_MS = 10_000;
