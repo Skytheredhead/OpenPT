@@ -9,6 +9,9 @@ Check this file before deployment, server work, or Vercel verification.
 - Current expected version: `0.2.0-sync.20260516`.
 - Vercel redeploys automatically after pushes to `main`.
 - When testing Vercel, verify the visible title-bar version before testing behavior.
+- Vercel currently serves the static frontend only. Sync API routes are provided
+  by the systemd server URL, not by Vercel, unless a future HTTPS proxy/rewrite is
+  added.
 
 ## GitHub
 
