@@ -139,6 +139,9 @@
     background: var(--ok); box-shadow: 0 0 8px var(--ok);
   }
   .tb-status-chip.sim .dot { background: var(--warn); box-shadow: 0 0 8px var(--warn); animation: pulse 1.4s infinite; }
+  .tb-status-chip.dirty .dot, .tb-status-chip.saving .dot { background: var(--warn); box-shadow: 0 0 8px var(--warn); }
+  .tb-status-chip.err .dot, .tb-status-chip.conflict .dot { background: var(--err); box-shadow: 0 0 8px var(--err); }
+  .tb-status-chip.offline .dot, .tb-status-chip.readonly .dot { background: var(--fg-3); box-shadow: none; }
   @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.4; } }
   .tb-actions { display: flex; gap: 6px; }
   .tb-btn {
@@ -154,6 +157,136 @@
     font-family: var(--font-mono); font-size: 10.5px;
     background: var(--bg-1); padding: 1px 4px; border-radius: 3px;
     color: var(--fg-2); border: 1px solid var(--line);
+  }
+
+  .modal-backdrop {
+    position: fixed;
+    inset: 0;
+    z-index: 260;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: color-mix(in oklab, var(--bg-0) 72%, transparent);
+  }
+  .modal {
+    width: min(520px, calc(100vw - 32px));
+    max-height: calc(100vh - 48px);
+    overflow: hidden;
+    display: grid;
+    grid-template-rows: 42px 1fr;
+    background: var(--bg-1);
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    box-shadow: 0 20px 60px rgba(0,0,0,0.55);
+  }
+  .modal-head {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 0 12px 0 16px;
+    border-bottom: 1px solid var(--line);
+  }
+  .modal-title {
+    flex: 1;
+    font-weight: 600;
+  }
+  .modal-body {
+    padding: 16px;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    overflow: auto;
+  }
+  .modal-body label {
+    display: grid;
+    gap: 6px;
+    color: var(--fg-2);
+    font-size: 12px;
+  }
+  .modal-body input {
+    background: var(--bg-0);
+    border: 1px solid var(--line);
+    border-radius: 6px;
+    color: var(--fg-0);
+    padding: 8px 10px;
+    font: inherit;
+  }
+  .icon-btn {
+    appearance: none;
+    border: 0;
+    background: transparent;
+    color: var(--fg-2);
+    font-size: 18px;
+    width: 26px;
+    height: 26px;
+    border-radius: 5px;
+  }
+  .icon-btn:hover { background: var(--bg-2); color: var(--fg-0); }
+  .segmented {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    background: var(--bg-0);
+    border: 1px solid var(--line);
+    border-radius: 6px;
+    padding: 3px;
+  }
+  .segmented button {
+    border: 0;
+    background: transparent;
+    color: var(--fg-2);
+    border-radius: 4px;
+    padding: 7px;
+  }
+  .segmented button.active {
+    background: var(--bg-2);
+    color: var(--fg-0);
+  }
+  .modal-error {
+    border: 1px solid color-mix(in oklab, var(--err) 45%, var(--line));
+    background: color-mix(in oklab, var(--err) 12%, transparent);
+    color: var(--err);
+    border-radius: 6px;
+    padding: 9px 10px;
+    font-size: 12px;
+  }
+  .account-row, .modal-actions, .rollback-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+  }
+  .account-row span { flex: 1; color: var(--fg-1); }
+  .sync-line {
+    font-family: var(--font-mono);
+    color: var(--fg-2);
+    font-size: 11px;
+  }
+  .project-list {
+    display: grid;
+    gap: 6px;
+  }
+  .project-row {
+    appearance: none;
+    border: 1px solid var(--line);
+    background: var(--bg-2);
+    color: var(--fg-1);
+    border-radius: 6px;
+    padding: 10px;
+    display: flex;
+    justify-content: space-between;
+    gap: 12px;
+    text-align: left;
+  }
+  .project-row:hover { background: var(--bg-3); color: var(--fg-0); }
+  .project-row small { color: var(--fg-3); font-family: var(--font-mono); }
+  .empty-row {
+    color: var(--fg-3);
+    padding: 12px;
+    text-align: center;
+  }
+  .modal-sep {
+    height: 1px;
+    background: var(--line);
   }
 
   /* ── Workspace ─────────────────────────────────────────── */
@@ -556,6 +689,7 @@
 <script type="text/babel" src="cli.jsx"></script>
 <script type="text/babel" src="inspector.jsx"></script>
 <script src="packet-tracer-importer.js"></script>
+<script src="sync-client.js"></script>
 <script type="text/babel" src="app.jsx"></script>
 </body>
 </html>

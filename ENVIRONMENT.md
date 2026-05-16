@@ -1,0 +1,46 @@
+# OpenPT Environment Notes For Agents
+
+Check this file before deployment, server work, or Vercel verification.
+
+## Versioning
+
+- The visible frontend version is defined in `app.jsx` as `OPENPT_VERSION`.
+- Bump that value before deployment tests that need to prove Vercel is serving the newest push.
+- Current expected version: `0.2.0-sync.20260516`.
+- Vercel redeploys automatically after pushes to `main`.
+- When testing Vercel, verify the visible title-bar version before testing behavior.
+
+## GitHub
+
+- Repository: `https://github.com/Skytheredhead/OpenPT.git`
+- Production branch for this project: `main`
+- User currently expects direct pushes to `main` for this MVP.
+
+## Remote Server
+
+- SSH target: `skylarenns@192.168.1.174`
+- Password location on this Mac: `~/Desktop/192.168.1.174.rtf`
+- Do not commit, paste, print, or summarize the password.
+- Remote project parent: `/Documents/GitHub/`
+- Expected remote app path: `/Documents/GitHub/OpenPT`
+
+## Remote Service
+
+- Service name: `openpt.service`
+- App command: `npm run dev`
+- Default local port on the remote server: `5173`
+- Data directory default: `<repo>/.openpt-data`
+
+## Local Verification
+
+```sh
+npm install
+npm test
+node --check server/index.mjs
+```
+
+Start locally:
+
+```sh
+npm run dev
+```

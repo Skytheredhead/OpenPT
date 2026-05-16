@@ -5,12 +5,13 @@ function Topology(props) {
     devices, links, selectedIds, onSelect,
     onMoveDevices, onAddDevice, onDeleteLink,
     linkMode, setLinkMode, packetMode, setPacketMode,
-    onLinkRequest, simRunning, packets, activeHopDeviceId,
+    onLinkRequest, onPacketRequest, simRunning, packets, activeHopDeviceId,
+    viewState, onViewStateChange,
   } = props;
   const selSet = React.useMemo(() => new Set(selectedIds || []), [selectedIds]);
 
   const wrapRef = React.useRef(null);
-  const [pan, setPan] = React.useState({ x: 0, y: 0, k: 1 });
+  const [pan, setPan] = React.useState(viewState?.pan || { x: 0, y: 0, k: 1 });
   const [drag, setDrag] = React.useState(null);   // { id, ox, oy }
   const [linkPick, setLinkPick] = React.useState(null);  // { devId, iface? }
   const [hover, setHover] = React.useState({ x: 0, y: 0 });
@@ -21,6 +22,14 @@ function Topology(props) {
     const t = setTimeout(() => setToast(null), 2400);
     return () => clearTimeout(t);
   }, [toast]);
+
+  React.useEffect(() => {
+    if (viewState?.pan) setPan(viewState.pan);
+  }, [viewState?.pan?.x, viewState?.pan?.y, viewState?.pan?.k]);
+
+  React.useEffect(() => {
+    onViewStateChange && onViewStateChange({ pan });
+  }, [pan.x, pan.y, pan.k]);
 
   const screenToWorld = (px, py) => {
     const r = wrapRef.current.getBoundingClientRect();
@@ -92,6 +101,19 @@ function Topology(props) {
         setLinkPick(null);
       } else {
         setLinkPick(null);
+      }
+      e.stopPropagation();
+      return;
+    }
+    if (packetMode) {
+      if (packetMode.stage === "src") {
+        setPacketMode({ stage: "dst", src: d.id });
+        setToast({ msg: `Selected ${d.hostname} — pick a destination`, kind: "" });
+      } else if (packetMode.stage === "dst" && packetMode.src && packetMode.src !== d.id) {
+        onPacketRequest && onPacketRequest(packetMode.src, d.id);
+        setPacketMode(null);
+      } else {
+        setPacketMode({ stage: "src" });
       }
       e.stopPropagation();
       return;
@@ -216,7 +238,7 @@ function Topology(props) {
       {packetMode && (
         <div className="canvas-modehint">
           <span style={{ width: 6, height: 6, borderRadius: 3, background: "var(--ok)" }}/>
-          Packet mode — pick a source device <span className="esc">Esc</span>
+          Packet mode — pick a {packetMode.stage === "dst" ? "destination" : "source"} device <span className="esc">Esc</span>
         </div>
       )}
 

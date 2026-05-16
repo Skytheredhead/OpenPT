@@ -169,6 +169,36 @@ const ACCENTS = {
   amber:   { a: "oklch(0.80 0.15 75)",  dim: "oklch(0.50 0.12 75)" },
 };
 
+const Sync = window.OpenPTSync;
+const OPENPT_VERSION = "0.2.0-sync.20260516";
+const SYNC_AUTOSAVE_CHANGES = 20;
+const SYNC_AUTOSAVE_MS = 60_000;
+const SYNC_MIN_SAVE_MS = 10_000;
+
+function projectDocFromState({ title, devices, links, uiState, metadata = {} }) {
+  return {
+    schemaVersion: 1,
+    title: title || "Untitled OpenPT project",
+    devices: OPT_Engine.normalizeTopology(devices || {}, links || []).devices,
+    links: OPT_Engine.normalizeTopology(devices || {}, links || []).links,
+    uiState: uiState || {},
+    metadata: { app: "OpenPT", ...metadata },
+  };
+}
+
+function terminalScrollPayload(scrolls) {
+  const out = {};
+  for (const [id, state] of Object.entries(scrolls || {})) {
+    if (state && !state.atBottom) out[id] = { top: state.top || 0 };
+  }
+  return out;
+}
+
+function mergeProjectIntoTabs(tabs, activeWid, project) {
+  const title = project?.title || "Synced project";
+  return tabs.map((tab) => tab.id === activeWid ? { ...tab, name: `${title}.opt`, cloudProjectId: project?.id || tab.cloudProjectId } : tab);
+}
+
 function App() {
   const [t, setTweak] = useTweaks(TWEAK_DEFAULTS);
   const dragDepth = useRef(0);
@@ -301,6 +331,7 @@ function App() {
     setTabs((ts) => [...ts, { id, name: `untitled-${ts.length}.opt` }]);
     setActiveWid(id);
     setDevices({}); setLinks([]); setSelectedId(null); setOpenConsoles([]); setActiveBottom("events"); setPtActivity(null);
+    setCloudProjectId(null); setCloudVersion(0); setCloudBaseDoc(null); setCloudLease(null); setShareToken(null); setShareMode(null); setSyncStatus({ state: cloudUser ? "local" : "local", message: cloudUser ? "Signed in" : "Local only" });
   };
   const newStarterTab = () => {
     snapshotsRef.current[activeWid] = { devices, links, selectedIds, openConsoles, activeBottom, ptActivity };
@@ -310,6 +341,7 @@ function App() {
     setTabs((ts) => [...ts, { id, name: `lab-${ts.length + 1}.opt` }]);
     setActiveWid(id);
     setDevices(s.devices); setLinks(s.links); setSelectedId(null); setOpenConsoles([]); setActiveBottom("events"); setPtActivity(null);
+    setCloudProjectId(null); setCloudVersion(0); setCloudBaseDoc(null); setCloudLease(null); setShareToken(null); setShareMode(null); setSyncStatus({ state: cloudUser ? "local" : "local", message: cloudUser ? "Signed in" : "Local only" });
   };
   const closeTab = (id) => {
     setTabs((ts) => {
@@ -393,6 +425,251 @@ function App() {
   const [fileDropActive, setFileDropActive] = useState(false);
   const [ctx, setCtx] = useState(null);  // { x, y, devId }
   const [pendingCmd, setPendingCmd] = useState(null);  // { devId, cmd, nonce }
+  const syncClient = useMemo(() => Sync ? new Sync.OpenPTSyncClient() : null, []);
+  const [cloudUser, setCloudUser] = useState(null);
+  const [cloudProjects, setCloudProjects] = useState([]);
+  const [cloudProjectId, setCloudProjectId] = useState(null);
+  const [cloudVersion, setCloudVersion] = useState(0);
+  const [cloudBaseDoc, setCloudBaseDoc] = useState(null);
+  const [cloudLease, setCloudLease] = useState(null);
+  const [shareToken, setShareToken] = useState(null);
+  const [shareMode, setShareMode] = useState(null);
+  const [syncStatus, setSyncStatus] = useState({ state: "local", message: "Local only" });
+  const [authOpen, setAuthOpen] = useState(false);
+  const [projectsOpen, setProjectsOpen] = useState(false);
+  const [shareOpen, setShareOpen] = useState(false);
+  const [conflict, setConflict] = useState(null);
+  const [meaningfulChanges, setMeaningfulChanges] = useState(0);
+  const [firstDirtyAt, setFirstDirtyAt] = useState(null);
+  const [topologyViewState, setTopologyViewState] = useState({});
+  const [terminalScrolls, setTerminalScrolls] = useState({});
+  const lastSaveAtRef = useRef(0);
+  const saveInFlightRef = useRef(false);
+
+  const readOnlyReason = (() => {
+    if (shareMode === "read") return "This share link is read-only.";
+    if ((cloudProjectId || shareToken) && !cloudLease) return "Acquire the edit lease before editing.";
+    return "";
+  })();
+  const canEditProject = !readOnlyReason;
+
+  const markProjectChanged = (reason) => {
+    if (!canEditProject) {
+      setToast({ kind: "warn", msg: readOnlyReason });
+      return false;
+    }
+    setMeaningfulChanges((n) => n + 1);
+    setFirstDirtyAt((t) => t || Date.now());
+    if (cloudProjectId || shareToken) setSyncStatus({ state: "dirty", message: "Unsaved changes" });
+    return true;
+  };
+
+  const currentProjectTitle = (tabs.find((tab) => tab.id === activeWid)?.name || "Untitled OpenPT project").replace(/\.opt$/i, "");
+  const currentProjectDoc = useMemo(() => projectDocFromState({
+    title: currentProjectTitle,
+    devices,
+    links,
+    uiState: {
+      selectedIds,
+      openConsoles,
+      activeBottom,
+      ptActivity,
+      topologyViewState,
+      terminalScrolls: terminalScrollPayload(terminalScrolls),
+    },
+  }), [currentProjectTitle, devices, links, selectedIds, openConsoles, activeBottom, ptActivity, topologyViewState, terminalScrolls]);
+
+  const applyProjectDocument = (document, project = null) => {
+    const norm = OPT_Engine.normalizeTopology(document?.devices || {}, document?.links || []);
+    setDevices(norm.devices);
+    setLinks(norm.links);
+    setSelectedIds(document?.uiState?.selectedIds || []);
+    setOpenConsoles(document?.uiState?.openConsoles || []);
+    setActiveBottom(document?.uiState?.activeBottom || "events");
+    setPtActivity(document?.uiState?.ptActivity || null);
+    setTopologyViewState(document?.uiState?.topologyViewState || {});
+    setTerminalScrolls(document?.uiState?.terminalScrolls || {});
+    if (project) setTabs((ts) => mergeProjectIntoTabs(ts, activeWid, project));
+  };
+
+  const refreshProjects = async () => {
+    if (!syncClient || !cloudUser) return;
+    const data = await syncClient.listProjects();
+    setCloudProjects(data.projects || []);
+  };
+
+  const saveCloudNow = async () => {
+    if (!syncClient || saveInFlightRef.current || meaningfulChanges <= 0) return;
+    if (!cloudProjectId || !cloudBaseDoc || !cloudLease) return;
+    const now = Date.now();
+    if (now - lastSaveAtRef.current < SYNC_MIN_SAVE_MS) return;
+    const patches = Sync.buildProjectPatches(cloudBaseDoc, currentProjectDoc);
+    const uiStatePatch = Sync.buildUiPatches(cloudBaseDoc, currentProjectDoc);
+    if (!patches.length && !uiStatePatch.length) {
+      setMeaningfulChanges(0);
+      setFirstDirtyAt(null);
+      return;
+    }
+    const batch = {
+      baseVersion: cloudVersion,
+      leaseId: cloudLease.id,
+      patches,
+      uiStatePatch,
+    };
+    saveInFlightRef.current = true;
+    setSyncStatus({ state: "saving", message: "Saving..." });
+    try {
+      const data = shareToken
+        ? await syncClient.saveSharePatch(shareToken, batch)
+        : await syncClient.savePatch(cloudProjectId, batch);
+      lastSaveAtRef.current = Date.now();
+      setCloudVersion(data.project.version);
+      setCloudBaseDoc(data.document);
+      setMeaningfulChanges(0);
+      setFirstDirtyAt(null);
+      setSyncStatus({ state: "synced", message: `Saved v${data.project.version}` });
+      await Sync.saveLocalDocument(`project:${cloudProjectId}`, data.document, { version: data.project.version });
+    } catch (err) {
+      if (err.status === 409) {
+        setConflict(err.data || { error: err.message });
+        setSyncStatus({ state: "conflict", message: "Server has a newer version" });
+      } else if (err.status === 423) {
+        setCloudLease(null);
+        setSyncStatus({ state: "readonly", message: err.data?.lease?.clientLabel ? `Editing on ${err.data.lease.clientLabel}` : "Edit lease required" });
+      } else if (!navigator.onLine || err.status === 0 || !err.status) {
+        await Sync.enqueue({ projectId: cloudProjectId, shareToken, batch });
+        setSyncStatus({ state: "offline", message: "Offline changes queued" });
+      } else if (err.status === 429) {
+        setSyncStatus({ state: "dirty", message: "Waiting for autosave limit" });
+        setTimeout(() => saveCloudNow(), SYNC_MIN_SAVE_MS);
+      } else {
+        setSyncStatus({ state: "err", message: err.message || "Save failed" });
+      }
+    } finally {
+      saveInFlightRef.current = false;
+    }
+  };
+
+  useEffect(() => {
+    if (!syncClient) return;
+    Sync.saveLocalDocument(`local:${activeWid}`, currentProjectDoc, { activeWid }).catch(() => {});
+  }, [syncClient, activeWid, currentProjectDoc]);
+
+  useEffect(() => {
+    if (!syncClient || meaningfulChanges <= 0 || (!cloudProjectId && !shareToken) || !cloudLease) return;
+    const elapsed = firstDirtyAt ? Date.now() - firstDirtyAt : 0;
+    const saveDelay = meaningfulChanges >= SYNC_AUTOSAVE_CHANGES ? 0 : Math.max(0, SYNC_AUTOSAVE_MS - elapsed);
+    const minDelay = Math.max(0, SYNC_MIN_SAVE_MS - (Date.now() - lastSaveAtRef.current));
+    const t = setTimeout(() => saveCloudNow(), Math.max(saveDelay, minDelay));
+    return () => clearTimeout(t);
+  }, [syncClient, meaningfulChanges, firstDirtyAt, cloudProjectId, shareToken, cloudLease?.id, cloudVersion, currentProjectDoc]);
+
+  useEffect(() => {
+    if (!syncClient) return;
+    const replay = async () => {
+      if (!navigator.onLine) return;
+      const rows = await Sync.queued().catch(() => []);
+      for (const row of rows) {
+        try {
+          if (row.shareToken) await syncClient.saveSharePatch(row.shareToken, row.batch);
+          else await syncClient.savePatch(row.projectId, row.batch);
+          await Sync.dequeue(row.id);
+        } catch (err) {
+          if (err.status === 409) setConflict(err.data || { error: err.message });
+          break;
+        }
+      }
+    };
+    window.addEventListener("online", replay);
+    replay();
+    return () => window.removeEventListener("online", replay);
+  }, [syncClient]);
+
+  const createSyncedProject = async () => {
+    if (!syncClient || !cloudUser) return setAuthOpen(true);
+    try {
+      setSyncStatus({ state: "saving", message: "Creating cloud project..." });
+      const data = await syncClient.createProject(currentProjectTitle, currentProjectDoc);
+      setCloudProjectId(data.project.id);
+      setCloudVersion(data.project.version);
+      setCloudBaseDoc(data.document);
+      lastSaveAtRef.current = Date.now();
+      setMeaningfulChanges(0);
+      setFirstDirtyAt(null);
+      const lease = await syncClient.acquireLease(data.project.id, true);
+      setCloudLease(lease.lease);
+      setTabs((ts) => mergeProjectIntoTabs(ts, activeWid, data.project));
+      setSyncStatus({ state: "synced", message: `Cloud project saved v${data.project.version}` });
+      await refreshProjects();
+    } catch (err) {
+      setSyncStatus({ state: "err", message: err.message || "Could not create project" });
+    }
+  };
+
+  const openCloudProject = async (projectId) => {
+    if (!syncClient) return;
+    try {
+      const data = await syncClient.loadProject(projectId);
+      setCloudProjectId(data.project.id);
+      setShareToken(null);
+      setShareMode(null);
+      setCloudVersion(data.project.version);
+      setCloudBaseDoc(data.document);
+      applyProjectDocument(data.document, data.project);
+      try {
+        const lease = await syncClient.acquireLease(projectId, false);
+        setCloudLease(lease.lease);
+        setSyncStatus({ state: "synced", message: `Opened v${data.project.version}` });
+      } catch (err) {
+        setCloudLease(null);
+        setSyncStatus({ state: "readonly", message: err.data?.lease?.clientLabel ? `Read-only: editing on ${err.data.lease.clientLabel}` : "Read-only: lease unavailable" });
+      }
+      setProjectsOpen(false);
+    } catch (err) {
+      setToast({ kind: "err", msg: err.message || "Could not open project" });
+    }
+  };
+
+  const acquireCurrentLease = async (takeover = false) => {
+    if (!syncClient || !cloudProjectId) return;
+    try {
+      const data = shareToken
+        ? await syncClient.acquireShareLease(shareToken, takeover)
+        : await syncClient.acquireLease(cloudProjectId, takeover);
+      setCloudLease(data.lease);
+      setSyncStatus({ state: "synced", message: takeover ? "Edit lease taken" : "Edit lease acquired" });
+    } catch (err) {
+      setSyncStatus({ state: "readonly", message: err.data?.lease?.clientLabel ? `Editing on ${err.data.lease.clientLabel}` : err.message });
+    }
+  };
+
+  const createShareLink = async (mode) => {
+    if (!syncClient || !cloudProjectId) return;
+    try {
+      if (meaningfulChanges > 0) await saveCloudNow();
+      const data = await syncClient.shareProject(cloudProjectId, mode);
+      const absolute = `${location.origin}${data.share.url}`;
+      await navigator.clipboard?.writeText(absolute).catch(() => {});
+      setToast({ kind: "ok", msg: `${mode === "edit" ? "Editable" : "Read-only"} link copied` });
+    } catch (err) {
+      setToast({ kind: "err", msg: err.message || "Could not create share link" });
+    }
+  };
+
+  const restoreRollback = async (target) => {
+    if (!syncClient || !cloudProjectId || shareToken) return;
+    try {
+      const data = await syncClient.rollback(cloudProjectId, target);
+      setCloudVersion(data.project.version);
+      setCloudBaseDoc(data.document);
+      applyProjectDocument(data.document, data.project);
+      setMeaningfulChanges(0);
+      setFirstDirtyAt(null);
+      setSyncStatus({ state: "synced", message: `Restored ${target} rollback` });
+    } catch (err) {
+      setToast({ kind: "err", msg: err.message || "Rollback failed" });
+    }
+  };
 
   // Run a show-command in a device's console (opens if needed)
   const runConsoleCmd = (devId, cmd) => {
@@ -405,6 +682,62 @@ function App() {
     const x = setTimeout(() => setToast(null), 2200);
     return () => clearTimeout(x);
   }, [toast]);
+
+  useEffect(() => {
+    if (!syncClient) return;
+    syncClient.me().then((data) => {
+      setCloudUser(data.user || null);
+      if (data.user) setSyncStatus({ state: "local", message: "Signed in" });
+    }).catch(() => setSyncStatus({ state: "local", message: "Local only" }));
+  }, [syncClient]);
+
+  useEffect(() => {
+    if (!syncClient || !cloudUser) return;
+    refreshProjects().catch(() => {});
+  }, [syncClient, cloudUser?.id]);
+
+  useEffect(() => {
+    if (!syncClient) return;
+    const match = location.pathname.match(/^\/share\/([^/]+)/);
+    if (!match) return;
+    const token = decodeURIComponent(match[1]);
+    syncClient.loadShare(token).then((data) => {
+      setShareToken(token);
+      setShareMode(data.project.mode);
+      setCloudProjectId(data.project.id);
+      setCloudVersion(data.project.version);
+      setCloudBaseDoc(data.document);
+      applyProjectDocument(data.document, data.project);
+      setSyncStatus({ state: data.project.mode === "edit" ? "readonly" : "readonly", message: data.project.mode === "edit" ? "Shared project opened. Acquire edit lease to save." : "Read-only share" });
+    }).catch((err) => {
+      setToast({ kind: "err", msg: err.message || "Could not open share link" });
+    });
+  }, [syncClient]);
+
+  useEffect(() => {
+    if (!syncClient || !cloudProjectId || !cloudLease || shareToken) return;
+    const t = setInterval(() => {
+      syncClient.renewLease(cloudProjectId, cloudLease.id).then((data) => {
+        setCloudLease(data.lease);
+      }).catch(() => {
+        setCloudLease(null);
+        setSyncStatus({ state: "readonly", message: "Edit lease expired" });
+      });
+    }, 15_000);
+    return () => clearInterval(t);
+  }, [syncClient, cloudProjectId, cloudLease?.id, shareToken]);
+
+  useEffect(() => {
+    if (!syncClient || !shareToken || !cloudLease) return;
+    const t = setInterval(() => {
+      // Shared editable sessions renew by reacquiring the same lease.
+      syncClient.acquireShareLease(shareToken, false).then((data) => setCloudLease(data.lease)).catch(() => {
+        setCloudLease(null);
+        setSyncStatus({ state: "readonly", message: "Edit lease expired" });
+      });
+    }, 15_000);
+    return () => clearInterval(t);
+  }, [syncClient, shareToken, cloudLease?.id]);
 
   const log = (severity, source, message) => {
     setEvents((e) => [
@@ -434,6 +767,7 @@ function App() {
     setOpenConsoles([]);
     setActiveBottom("events");
     setPtActivity(null);
+    setCloudProjectId(null); setCloudVersion(0); setCloudBaseDoc(null); setCloudLease(null); setShareToken(null); setShareMode(null);
     setEvents([]);
     setPackets([]);
     setToast({ kind: "ok", msg: `Imported ${filename}` });
@@ -462,6 +796,7 @@ function App() {
     setOpenConsoles([]);
     setActiveBottom("pka-report");
     setPtActivity(activity);
+    setCloudProjectId(null); setCloudVersion(0); setCloudBaseDoc(null); setCloudLease(null); setShareToken(null); setShareMode(null);
     setEvents([]);
     setPackets([]);
     if (activity?.unsupported) {
@@ -549,6 +884,7 @@ function App() {
 
   // ── Device + link operations ─────────────────────────
   const addDevice = (catalogId, x, y) => {
+    if (!markProjectChanged("add-device")) return;
     const cat = DeviceCatalog.find(c => c.id === catalogId) || DeviceCatalog.find(c => c.kind === catalogId);
     const kind = cat?.kind || catalogId;
     // pick a friendly name
@@ -570,10 +906,12 @@ function App() {
   };
 
   const moveDevice = (id, x, y) => {
+    if (!markProjectChanged("move-device")) return;
     setDevices((m) => ({ ...m, [id]: { ...m[id], x, y } }));
   };
 
   const deleteDevice = (id) => {
+    if (!markProjectChanged("delete-device")) return;
     setLinks((ls) => ls.filter(l => l.a !== id && l.b !== id));
     setDevices((m) => {
       const next = { ...m }; const name = next[id]?.hostname; delete next[id];
@@ -586,6 +924,7 @@ function App() {
   };
 
   const togglePower = (id) => {
+    if (!markProjectChanged("power")) return;
     setDevices((m) => {
       const d = m[id];
       const powered = !d.powered;
@@ -596,11 +935,13 @@ function App() {
   };
 
   const renameDevice = (id, name) => {
+    if (!markProjectChanged("rename-device")) return;
     setDevices((m) => ({ ...m, [id]: { ...m[id], hostname: name || m[id].hostname } }));
   };
 
   // ── Link creation
   const onLinkRequest = (aId, bId) => {
+    if (!markProjectChanged("add-link")) return;
     const a = devices[aId], b = devices[bId];
     const aFree = freeIface(a, links, aId);
     const bFree = freeIface(b, links, bId);
@@ -623,6 +964,7 @@ function App() {
   };
 
   const onDeleteLink = (id) => {
+    if (!markProjectChanged("delete-link")) return;
     const l = links.find(x => x.id === id);
     setLinks((ls) => ls.filter(x => x.id !== id));
     if (l) log("warn", "topology", `removed cable ${devices[l.a]?.hostname} ↔ ${devices[l.b]?.hostname}`);
@@ -631,6 +973,7 @@ function App() {
   // ── Apply CLI configuration command to a specific device
   const onApplyToDevice = (devId, cmd) => {
     if (!devId) return;
+    if (!markProjectChanged("cli-command")) return;
     setDevices((m) => {
       if (cmd.kind === "host-dhcp") {
         const result = OPT_Engine.allocateDhcp(m, links, devId);
@@ -1095,11 +1438,13 @@ function App() {
   const animatePath = (plan, snapshot, onDone) => {
     if (!plan.hops.length) { onDone?.(); return; }
     setSimRunning(true);
-    const pid = OPT_Engine.uid("p");
     const speed = 1 / Math.max(0.25, t.packetSpeed || 1);
-    const segMs = 360 * speed;
-    const legPauseMs = 55 * speed;
-    const turnPauseMs = 130 * speed;
+    const packetCount = 5;
+    const packetGapMs = Math.max(35, 85 * speed);
+    const segMs = Math.max(45, 110 * speed);
+    const legPauseMs = Math.max(8, 14 * speed);
+    const turnPauseMs = Math.max(18, 36 * speed);
+    const dropHoldMs = 600;
 
     // Deduped device waypoint sequence
     const waypoints = [];
@@ -1107,6 +1452,11 @@ function App() {
       const d = snapshot[h.devId];
       if (!d) continue;
       if (waypoints.length === 0 || waypoints[waypoints.length - 1].id !== d.id) waypoints.push(d);
+    }
+    if (!waypoints.length) {
+      setSimRunning(false);
+      onDone?.();
+      return;
     }
     // For failures, stop forward at the drop device
     let stopIdx = waypoints.length - 1;
@@ -1116,7 +1466,7 @@ function App() {
       if (idx >= 0) stopIdx = idx;
     }
 
-    const placePacket = (x, y, proto) => {
+    const placePacket = (pid, x, y, proto) => {
       setPackets((arr) => {
         const exists = arr.find(p => p.id === pid);
         if (exists) return arr.map(p => p.id === pid ? { ...p, x, y, proto } : p);
@@ -1124,53 +1474,67 @@ function App() {
       });
     };
 
-    placePacket(waypoints[0].x, waypoints[0].y, "icmp");
-    setActiveHopDeviceId(waypoints[0].id);
+    const removePacket = (pid) => setPackets((arr) => arr.filter(p => p.id !== pid));
+    let remaining = packetCount;
+    const finishPacket = () => {
+      remaining -= 1;
+      if (remaining > 0) return;
+      setActiveHopDeviceId(null);
+      setSimRunning(false);
+      onDone?.();
+    };
 
-    let isReply = false;
-    let seq = waypoints.slice(0, stopIdx + 1);
-    let i = 0;
+    const runPacket = (delayMs) => {
+      const pid = OPT_Engine.uid("p");
+      let isReply = false;
+      let seq = waypoints.slice(0, stopIdx + 1);
+      let i = 0;
 
-    const step = () => {
-      if (i >= seq.length - 1) {
-        // end of leg
-        if (!isReply && plan.ok) {
-          // Start reply animation
-          isReply = true;
-          seq = waypoints.slice().reverse();
-          i = 0;
-          setTimeout(step, turnPauseMs);
+      const step = () => {
+        if (i >= seq.length - 1) {
+          if (!isReply && plan.ok) {
+            isReply = true;
+            seq = waypoints.slice().reverse();
+            i = 0;
+            setTimeout(step, turnPauseMs);
+            return;
+          }
+          if (!plan.ok) {
+            const drop = seq[seq.length - 1];
+            placePacket(pid, drop.x, drop.y, "drop");
+          }
+          setTimeout(() => {
+            removePacket(pid);
+            finishPacket();
+          }, plan.ok ? 80 : dropHoldMs);
           return;
         }
-        // All done
-        setActiveHopDeviceId(null);
-        if (!plan.ok) {
-          placePacket(seq[seq.length - 1].x, seq[seq.length - 1].y, "drop");
-        }
-        setTimeout(() => {
-          setPackets((arr) => arr.filter(p => p.id !== pid));
-          setSimRunning(false);
-          onDone?.();
-        }, plan.ok ? 220 : 600);
-        return;
-      }
-      const from = seq[i], to = seq[i + 1];
-      const start = performance.now();
-      const animate = (now) => {
-        const u = Math.min(1, (now - start) / segMs);
-        const x = from.x + (to.x - from.x) * u;
-        const y = from.y + (to.y - from.y) * u;
-        placePacket(x, y, isReply ? "icmp" : "icmp");
-        if (u < 1) requestAnimationFrame(animate);
-        else {
-          setActiveHopDeviceId(to.id);
-          i++;
-          setTimeout(step, legPauseMs);
-        }
+        const from = seq[i], to = seq[i + 1];
+        const start = performance.now();
+        const animate = (now) => {
+          const u = Math.min(1, (now - start) / segMs);
+          const x = from.x + (to.x - from.x) * u;
+          const y = from.y + (to.y - from.y) * u;
+          placePacket(pid, x, y, "icmp");
+          if (u < 1) requestAnimationFrame(animate);
+          else {
+            setActiveHopDeviceId(to.id);
+            i++;
+            setTimeout(step, legPauseMs);
+          }
+        };
+        requestAnimationFrame(animate);
       };
-      requestAnimationFrame(animate);
+      setTimeout(() => {
+        placePacket(pid, waypoints[0].x, waypoints[0].y, "icmp");
+        setActiveHopDeviceId(waypoints[0].id);
+        step();
+      }, delayMs);
     };
-    setTimeout(step, turnPauseMs);
+
+    for (let n = 0; n < packetCount; n++) {
+      runPacket(n * packetGapMs);
+    }
   };
 
   const handlePing = (srcId, target, opts = {}, onComplete) => {
@@ -1251,7 +1615,7 @@ function App() {
       <input
         ref={importFileInputRef}
         type="file"
-        accept=".pka,.pkt"
+        accept=".json,.opt,.pka,.pkt"
         style={{ display: "none" }}
         onChange={(e) => {
           const file = e.target.files?.[0];
@@ -1264,7 +1628,7 @@ function App() {
         <div className="tb-logo">
           <div className="glyph"/>
           OpenPT
-          <span style={{ color: "var(--fg-3)", fontWeight: 400, fontSize: 11, marginLeft: 6 }}>v0.1</span>
+          <span style={{ color: "var(--fg-3)", fontWeight: 400, fontSize: 11, marginLeft: 6 }}>{OPENPT_VERSION}</span>
         </div>
         <TitleMenus
           devices={devices}
@@ -1276,12 +1640,13 @@ function App() {
           onNewStarterTab={newStarterTab}
           onImportPacketTracer={openPacketTracerFilePicker}
           onReset={() => {
+            if (!markProjectChanged("reset")) return;
             const s = OPT_Engine.makeStarter();
             setDevices(s.devices); setLinks(s.links); setSelectedId(null);
             setEvents([]); setPackets([]); setPtActivity(null);
             log("ok", "system", "scenario reset to starter");
           }}
-          onClearAll={() => { setDevices({}); setLinks([]); setSelectedId(null); setEvents([]); setPackets([]); setPtActivity(null); log("warn", "system", "topology cleared"); }}
+          onClearAll={() => { if (!markProjectChanged("clear")) return; setDevices({}); setLinks([]); setSelectedId(null); setEvents([]); setPackets([]); setPtActivity(null); log("warn", "system", "topology cleared"); }}
           onDeleteSelected={() => selectedId && deleteDevice(selectedId)}
           onPing={(srcName, dst) => {
             const src = Object.values(devices).find(d => d.hostname === srcName);
@@ -1289,6 +1654,7 @@ function App() {
           }}
           onLab={(key) => {
             if (key === "starter") {
+              if (!markProjectChanged("load-lab")) return;
               const s = OPT_Engine.makeStarter();
               setDevices(s.devices); setLinks(s.links); setSelectedId(null);
               setPtActivity(null);
@@ -1298,6 +1664,7 @@ function App() {
           onLinkR1G01={() => {
             const r1 = Object.values(devices).find(d => d.hostname === "R1");
             if (!r1) return;
+            if (!markProjectChanged("fault")) return;
             const iface = r1.interfaces["GigabitEthernet0/0/1"] ? "GigabitEthernet0/0/1" : "G0/1";
             setDevices((m) => ({ ...m, [r1.id]: { ...m[r1.id], interfaces: { ...m[r1.id].interfaces, [iface]: { ...m[r1.id].interfaces[iface], admUp: false, up: false } } } }));
             setLinks((ls) => ls.map(l => (l.a === r1.id && l.ai === iface) || (l.b === r1.id && l.bi === iface) ? { ...l, up: false } : l));
@@ -1306,8 +1673,27 @@ function App() {
           onEnterLinkMode={(type) => { setLinkMode(true); setForceLinkType(type); }}
         />
         <div className="tb-center">
+          <div className={`tb-status-chip ${syncStatus.state}`}>
+            <span className="dot"/>
+            {syncStatus.message}
+          </div>
         </div>
         <div className="tb-actions">
+          {(cloudProjectId || shareToken) && !cloudLease && shareMode !== "read" && (
+            <button className="tb-btn primary" onClick={() => acquireCurrentLease(false)}>Edit</button>
+          )}
+          {cloudUser && !cloudProjectId && !shareToken && (
+            <button className="tb-btn primary" onClick={createSyncedProject}>Save to cloud</button>
+          )}
+          {cloudUser && (
+            <button className="tb-btn" onClick={() => setProjectsOpen(true)}>Projects</button>
+          )}
+          {(cloudProjectId && !shareToken) && (
+            <button className="tb-btn" onClick={() => setShareOpen(true)}>Share</button>
+          )}
+          <button className="tb-btn" onClick={() => cloudUser ? setProjectsOpen(true) : setAuthOpen(true)}>
+            {cloudUser ? cloudUser.email.split("@")[0] : "Sign in"}
+          </button>
         </div>
       </div>
 
@@ -1351,6 +1737,7 @@ function App() {
             selectedIds={selectedIds}
             onSelect={(id, additive) => selectDevice(id, additive)}
             onMoveDevices={(idDeltas) => {
+              if (!markProjectChanged("move-devices")) return;
               setDevices((m) => {
                 const next = { ...m };
                 for (const { id, x, y } of idDeltas) {
@@ -1366,9 +1753,17 @@ function App() {
             packetMode={packetMode}
             setPacketMode={setPacketMode}
             onLinkRequest={onLinkRequest}
+            onPacketRequest={(srcId, dstId) => {
+              const dst = devices[dstId];
+              const target = Object.values(dst?.interfaces || {}).find(i => i.ip)?.ip;
+              if (!target) return log("err", "packet", `${dst?.hostname || "destination"} has no IP address`);
+              handlePing(srcId, target);
+            }}
             simRunning={simRunning}
             packets={packets}
             activeHopDeviceId={activeHopDeviceId}
+            viewState={topologyViewState}
+            onViewStateChange={setTopologyViewState}
             onOpenConsole={openConsole}
             onContextMenu={(e, d) => setCtx({ x: e.clientX, y: e.clientY, devId: d.id })}
           />
@@ -1414,6 +1809,8 @@ function App() {
                     onPing={handlePing}
                     pendingCmd={pendingCmd && pendingCmd.devId === id ? pendingCmd : null}
                     active={activeBottom === id}
+                    scrollState={terminalScrolls[id]}
+                    onScrollStateChange={(devId, state) => setTerminalScrolls((m) => ({ ...m, [devId]: state }))}
                   />
                 </div>
               ))}
@@ -1459,6 +1856,75 @@ function App() {
         </div>
       )}
 
+      {authOpen && (
+        <AuthDialog
+          syncClient={syncClient}
+          onClose={() => setAuthOpen(false)}
+          onSignedIn={(user) => {
+            setCloudUser(user);
+            setAuthOpen(false);
+            setSyncStatus({ state: "local", message: "Signed in" });
+          }}
+        />
+      )}
+
+      {projectsOpen && (
+        <ProjectsDialog
+          projects={cloudProjects}
+          cloudUser={cloudUser}
+          syncStatus={syncStatus}
+          onClose={() => setProjectsOpen(false)}
+          onOpen={openCloudProject}
+          onCreate={createSyncedProject}
+          onRefresh={refreshProjects}
+          onLogout={async () => {
+            await syncClient?.logout().catch(() => {});
+            setCloudUser(null);
+            setCloudProjects([]);
+            setCloudProjectId(null);
+            setCloudLease(null);
+            setCloudBaseDoc(null);
+            setProjectsOpen(false);
+            setSyncStatus({ state: "local", message: "Local only" });
+          }}
+          onRollback={restoreRollback}
+          canRollback={!!cloudProjectId && !shareToken}
+        />
+      )}
+
+      {shareOpen && (
+        <ShareDialog
+          onClose={() => setShareOpen(false)}
+          onShare={createShareLink}
+        />
+      )}
+
+      {conflict && (
+        <ConflictDialog
+          message={conflict.error || "Server has a newer project version."}
+          onClose={() => setConflict(null)}
+          onLoadServer={async () => {
+            if (cloudProjectId) await openCloudProject(cloudProjectId);
+            setConflict(null);
+          }}
+          onDuplicate={() => {
+            const id = `w-${Date.now()}`;
+            snapshotsRef.current[id] = { devices, links, selectedIds, openConsoles, activeBottom, ptActivity };
+            setTabs((ts) => [...ts, { id, name: `${currentProjectTitle}-local-copy.opt` }]);
+            setActiveWid(id);
+            setCloudProjectId(null);
+            setCloudLease(null);
+            setCloudBaseDoc(null);
+            setConflict(null);
+            setSyncStatus({ state: "local", message: "Local duplicate" });
+          }}
+          onTakeOver={() => {
+            acquireCurrentLease(true);
+            setConflict(null);
+          }}
+        />
+      )}
+
       <TweaksPanel>
         <TweakSection label="Theme" />
         <TweakColor label="Accent" value={ACCENTS[t.accent]?.a || ACCENTS.cyan.a}
@@ -1483,6 +1949,7 @@ function App() {
         <TweakButton label="Shutdown R1 G0/1" onClick={() => {
           const r1 = Object.values(devices).find(d => d.hostname === "R1");
           if (!r1) return;
+          if (!markProjectChanged("fault")) return;
           const iface = r1.interfaces["GigabitEthernet0/0/1"] ? "GigabitEthernet0/0/1" : "G0/1";
           setDevices((m) => ({ ...m, [r1.id]: { ...m[r1.id], interfaces: { ...m[r1.id].interfaces, [iface]: { ...m[r1.id].interfaces[iface], admUp: false, up: false } } } }));
           setLinks((ls) => ls.map(l => (l.a === r1.id && l.ai === iface) || (l.b === r1.id && l.bi === iface) ? { ...l, up: false } : l));
@@ -1503,7 +1970,7 @@ function App() {
               case "console":
                 openConsole(id); break;
               case "show-int":
-                runConsoleCmd(id, "show ip interface brief"); break;
+                runConsoleCmd(id, "show interfaces"); break;
               case "show-route":
                 runConsoleCmd(id, "show ip route"); break;
               case "show-vlan":
@@ -1530,6 +1997,7 @@ function App() {
                 handlePing(id, prompt("Ping target IP:", "192.168.20.20") || "");
                 break;
               case "duplicate": {
+                if (!markProjectChanged("duplicate")) break;
                 const newD = { ...d, id: OPT_Engine.uid("d"), x: d.x + 60, y: d.y + 40, hostname: d.hostname + "-copy" };
                 setDevices((m) => ({ ...m, [newD.id]: newD }));
                 log("ok", "topology", `duplicated ${d.hostname}`);
@@ -1726,6 +2194,114 @@ function TitleMenus(props) {
         </div>
       ))}
     </div>
+  );
+}
+
+function ModalShell({ title, onClose, children }) {
+  return (
+    <div className="modal-backdrop">
+      <div className="modal">
+        <div className="modal-head">
+          <div className="modal-title">{title}</div>
+          <button className="icon-btn" onClick={onClose}>×</button>
+        </div>
+        {children}
+      </div>
+    </div>
+  );
+}
+
+function AuthDialog({ syncClient, onClose, onSignedIn }) {
+  const [mode, setMode] = useState("login");
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [error, setError] = useState("");
+  const submit = async (e) => {
+    e.preventDefault();
+    setError("");
+    try {
+      const data = mode === "login"
+        ? await syncClient.login(email, password)
+        : await syncClient.register(email, password);
+      onSignedIn(data.user);
+    } catch (err) {
+      setError(err.message || "Sign in failed");
+    }
+  };
+  return (
+    <ModalShell title="OpenPT account" onClose={onClose}>
+      <form className="modal-body" onSubmit={submit}>
+        <div className="segmented">
+          <button type="button" className={mode === "login" ? "active" : ""} onClick={() => setMode("login")}>Sign in</button>
+          <button type="button" className={mode === "register" ? "active" : ""} onClick={() => setMode("register")}>Create account</button>
+        </div>
+        <label>Email<input value={email} onChange={(e) => setEmail(e.target.value)} type="email" required /></label>
+        <label>Password<input value={password} onChange={(e) => setPassword(e.target.value)} type="password" minLength={8} required /></label>
+        {error && <div className="modal-error">{error}</div>}
+        <button className="tb-btn primary" type="submit">{mode === "login" ? "Sign in" : "Create account"}</button>
+      </form>
+    </ModalShell>
+  );
+}
+
+function ProjectsDialog({ projects, cloudUser, syncStatus, onClose, onOpen, onCreate, onRefresh, onLogout, onRollback, canRollback }) {
+  return (
+    <ModalShell title="Synced projects" onClose={onClose}>
+      <div className="modal-body">
+        <div className="account-row">
+          <span>{cloudUser?.email}</span>
+          <button className="tb-btn" onClick={onLogout}>Logout</button>
+        </div>
+        <div className="sync-line">{syncStatus.message}</div>
+        <div className="modal-actions">
+          <button className="tb-btn primary" onClick={onCreate}>Save current project to cloud</button>
+          <button className="tb-btn" onClick={onRefresh}>Refresh</button>
+        </div>
+        <div className="project-list">
+          {!projects.length && <div className="empty-row">No synced projects yet.</div>}
+          {projects.map((p) => (
+            <button key={p.id} className="project-row" onClick={() => onOpen(p.id)}>
+              <span>{p.title}</span>
+              <small>v{p.version} · {Math.round((p.bytes || 0) / 1024)} KB</small>
+            </button>
+          ))}
+        </div>
+        {canRollback && (
+          <>
+            <div className="modal-sep"/>
+            <div className="rollback-row">
+              {["1m", "5m", "10m", "30m", "1h"].map((target) => (
+                <button key={target} className="tb-btn" onClick={() => onRollback(target)}>Rollback {target}</button>
+              ))}
+            </div>
+          </>
+        )}
+      </div>
+    </ModalShell>
+  );
+}
+
+function ShareDialog({ onClose, onShare }) {
+  return (
+    <ModalShell title="Share project" onClose={onClose}>
+      <div className="modal-body">
+        <button className="tb-btn" onClick={() => onShare("read")}>Create read-only link</button>
+        <button className="tb-btn primary" onClick={() => onShare("edit")}>Create editable link</button>
+      </div>
+    </ModalShell>
+  );
+}
+
+function ConflictDialog({ message, onClose, onLoadServer, onDuplicate, onTakeOver }) {
+  return (
+    <ModalShell title="Sync conflict" onClose={onClose}>
+      <div className="modal-body">
+        <div className="modal-error">{message}</div>
+        <button className="tb-btn" onClick={onLoadServer}>Load server copy</button>
+        <button className="tb-btn" onClick={onDuplicate}>Keep local as duplicate</button>
+        <button className="tb-btn primary" onClick={onTakeOver}>Take edit lease</button>
+      </div>
+    </ModalShell>
   );
 }
 

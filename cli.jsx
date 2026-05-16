@@ -123,7 +123,7 @@ function isParentConfigCommand(cmd) {
   return CONFIG_PARENT_COMMAND_PATTERNS.some((pattern) => pattern.test(cmd));
 }
 
-function CLI({ device, devices = {}, links = [], onApply, onPing, pendingCmd, active }) {
+function CLI({ device, devices = {}, links = [], onApply, onPing, pendingCmd, active, scrollState, onScrollStateChange }) {
   const ref = React.useRef(null);
   const inputRef = React.useRef(null);
   const [lines, setLines] = React.useState([]);
@@ -144,6 +144,18 @@ function CLI({ device, devices = {}, links = [], onApply, onPing, pendingCmd, ac
   React.useEffect(() => {
     if (ref.current) ref.current.scrollTop = ref.current.scrollHeight;
   }, [lines]);
+
+  React.useEffect(() => {
+    if (!ref.current || !scrollState || scrollState.atBottom) return;
+    ref.current.scrollTop = scrollState.top || 0;
+  }, [device?.id, scrollState?.top]);
+
+  const reportScroll = () => {
+    if (!ref.current || !onScrollStateChange || !device?.id) return;
+    const el = ref.current;
+    const atBottom = Math.abs(el.scrollHeight - el.clientHeight - el.scrollTop) < 4;
+    onScrollStateChange(device.id, atBottom ? { atBottom: true } : { atBottom: false, top: el.scrollTop });
+  };
 
   React.useEffect(() => {
     if (!pendingCmd || !device || pendingCmd.devId !== device.id || pendingCmd.nonce === lastPendingNonce.current) return;
@@ -904,7 +916,7 @@ function CLI({ device, devices = {}, links = [], onApply, onPing, pendingCmd, ac
 
   return (
     <div className="cli" onClick={() => inputRef.current?.focus()}>
-      <div className="cli-stack" ref={ref}>
+      <div className="cli-stack" ref={ref} onScroll={reportScroll}>
         {lines.map((l, i) => <div key={i} className={`cli-line ${l.cls}`}>{l.text}</div>)}
         <form className="cli-prompt-row" onSubmit={submit}>
           <span className="cli-prompt">{promptFor()}</span>
