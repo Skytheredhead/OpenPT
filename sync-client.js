@@ -158,7 +158,7 @@
     }
 
     async me() { return request("/api/me"); }
-    async register(email, password) { return request("/api/auth/register", { method: "POST", body: JSON.stringify({ email, password }) }); }
+    async register(email, password, proof = {}) { return request("/api/auth/register", { method: "POST", body: JSON.stringify({ email, password, ...proof }) }); }
     async login(email, password) { return request("/api/auth/login", { method: "POST", body: JSON.stringify({ email, password }) }); }
     async logout() { return request("/api/auth/logout", { method: "POST" }); }
     async listProjects() { return request("/api/projects"); }

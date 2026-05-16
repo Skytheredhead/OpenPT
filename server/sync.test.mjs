@@ -6,6 +6,7 @@ import { join } from "node:path";
 import { ObjectStore } from "./object-store.mjs";
 import { OpenPTStore } from "./storage.mjs";
 import { applyJsonPatch } from "./json-patch.mjs";
+import { AbuseGuard } from "./abuse-guard.mjs";
 
 async function makeStore() {
   const dir = await mkdtemp(join(tmpdir(), "openpt-sync-"));
@@ -68,4 +69,15 @@ test("blocks a second client unless takeover is requested", async () => {
   } finally {
     await rm(dir, { recursive: true, force: true });
   }
+});
+
+test("abuse guard rate limits repeated keys with retry-after", () => {
+  const guard = new AbuseGuard({ tiny: { limit: 2, windowMs: 60_000 } });
+  guard.check("tiny", "ip:1");
+  guard.check("tiny", "ip:1");
+  assert.throws(() => guard.check("tiny", "ip:1"), (err) => {
+    assert.equal(err.statusCode, 429);
+    assert.ok(err.retryAfter > 0);
+    return true;
+  });
 });

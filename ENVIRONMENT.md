@@ -6,7 +6,7 @@ Check this file before deployment, server work, or Vercel verification.
 
 - The visible frontend version is defined in `app.jsx` as `OPENPT_VERSION`.
 - Bump that value before deployment tests that need to prove Vercel is serving the newest push.
-- Current expected version: `0.2.2-sync.20260516`.
+- Current expected version: `0.2.3-sync.20260516`.
 - Vercel redeploys automatically after pushes to `main`.
 - When testing Vercel, verify the visible title-bar version before testing behavior.
 - Vercel serves the static frontend. It uses `https://openptapi.skylarenns.com`
@@ -37,6 +37,9 @@ Check this file before deployment, server work, or Vercel verification.
   `http://127.0.0.1:5173`.
 - The public tunnel uses HTTPS, so the remote service should set
   `OPENPT_SECURE_COOKIES=1`.
+- Spam proofing is handled in-process by `server/abuse-guard.mjs`: Cloudflare-aware
+  IP detection, auth/project/share/save throttles, retry-after responses, and a
+  hidden signup honeypot field. Restarting the service resets in-memory counters.
 
 ## Local Verification
 

@@ -7,6 +7,7 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { ObjectStore } from "./object-store.mjs";
 import { OpenPTStore, LIMITS } from "./storage.mjs";
+import { AbuseGuard, clientIp } from "./abuse-guard.mjs";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const root = resolve(__dirname, "..");
@@ -23,6 +24,8 @@ const store = new OpenPTStore({
   dbPath: join(dataDir, "openpt.sqlite"),
   objectStore: new ObjectStore(join(dataDir, "objects"))
 });
+const abuse = new AbuseGuard();
+setInterval(() => abuse.sweep(), 10 * 60_000).unref();
 
 await app.register(cookie, {
   secret: process.env.OPENPT_COOKIE_SECRET || "openpt-dev-cookie-secret-change-me"
@@ -41,6 +44,7 @@ await app.register(cors, {
 
 app.decorateRequest("user", null);
 app.addHook("preHandler", async (req) => {
+  if (req.raw.url?.startsWith("/api/")) abuse.check("global", clientIp(req));
   const user = store.sessionUser(req.cookies.openpt_session);
   req.user = user;
 });
@@ -98,6 +102,7 @@ function projectSummary(row, extra = {}) {
 app.setErrorHandler((err, req, reply) => {
   const status = err.statusCode || 500;
   req.log[status >= 500 ? "error" : "warn"](err);
+  if (err.retryAfter) reply.header("retry-after", String(err.retryAfter));
   reply.status(status).send({
     error: err.message || "Server error",
     statusCode: status,
@@ -115,6 +120,12 @@ app.get("/api/health", async () => ({ ok: true, limits: LIMITS }));
 app.post("/api/auth/register", async (req, reply) => {
   const email = String(req.body?.email || "").trim().toLowerCase();
   const password = String(req.body?.password || "");
+  if (String(req.body?.company || "").trim()) {
+    reply.status(202);
+    return { ok: true };
+  }
+  abuse.check("registerIp", clientIp(req));
+  abuse.check("registerEmail", email || "missing");
   if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
     reply.status(400);
     return { error: "Enter a valid email address." };
@@ -133,6 +144,8 @@ app.post("/api/auth/register", async (req, reply) => {
 app.post("/api/auth/login", async (req, reply) => {
   const email = String(req.body?.email || "").trim().toLowerCase();
   const password = String(req.body?.password || "");
+  abuse.check("loginIp", clientIp(req));
+  abuse.check("loginEmail", email || "missing");
   const privateUser = store.getUserByEmail(email);
   if (!privateUser || !(await argon2.verify(privateUser.password_hash, password))) {
     reply.status(401);
@@ -163,6 +176,7 @@ app.get("/api/projects", async (req) => {
 app.post("/api/projects", async (req) => {
   const user = requireUser(req);
   requireCsrf(req);
+  abuse.check("projectCreateUser", user.id);
   const project = await store.createProject(user.id, req.body?.title, req.body?.document);
   const document = await store.loadProjectDocument(project);
   return { project: projectSummary(project), document };
@@ -227,6 +241,7 @@ app.delete("/api/projects/:id/lease", async (req) => {
 app.patch("/api/projects/:id", async (req) => {
   const user = requireUser(req);
   requireCsrf(req);
+  abuse.check("patchUser", user.id);
   const project = store.getProject(req.params.id, user.id);
   if (!project) {
     const err = new Error("Project not found.");
@@ -240,6 +255,7 @@ app.patch("/api/projects/:id", async (req) => {
 app.post("/api/projects/:id/share", async (req) => {
   const user = requireUser(req);
   requireCsrf(req);
+  abuse.check("shareCreateUser", user.id);
   const project = store.getProject(req.params.id, user.id);
   if (!project) {
     const err = new Error("Project not found.");
@@ -297,6 +313,7 @@ app.post("/api/share/:token/lease", async (req) => {
 });
 
 app.patch("/api/share/:token", async (req) => {
+  abuse.check("sharePatchToken", req.params.token);
   const project = store.getProjectByShare(req.params.token);
   if (!project || project.mode !== "edit") {
     const err = new Error("Editable share link not found.");

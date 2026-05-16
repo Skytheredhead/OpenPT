@@ -170,7 +170,7 @@ const ACCENTS = {
 };
 
 const Sync = window.OpenPTSync;
-const OPENPT_VERSION = "0.2.2-sync.20260516";
+const OPENPT_VERSION = "0.2.3-sync.20260516";
 const SYNC_AUTOSAVE_CHANGES = 20;
 const SYNC_AUTOSAVE_MS = 60_000;
 const SYNC_MIN_SAVE_MS = 10_000;
@@ -2215,6 +2215,8 @@ function AuthDialog({ syncClient, onClose, onSignedIn }) {
   const [mode, setMode] = useState("login");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [company, setCompany] = useState("");
+  const [startedAt] = useState(Date.now());
   const [error, setError] = useState("");
   const submit = async (e) => {
     e.preventDefault();
@@ -2222,7 +2224,7 @@ function AuthDialog({ syncClient, onClose, onSignedIn }) {
     try {
       const data = mode === "login"
         ? await syncClient.login(email, password)
-        : await syncClient.register(email, password);
+        : await syncClient.register(email, password, { company, startedAt });
       onSignedIn(data.user);
     } catch (err) {
       setError(err.message || "Sign in failed");
@@ -2237,6 +2239,7 @@ function AuthDialog({ syncClient, onClose, onSignedIn }) {
         </div>
         <label>Email<input value={email} onChange={(e) => setEmail(e.target.value)} type="email" required /></label>
         <label>Password<input value={password} onChange={(e) => setPassword(e.target.value)} type="password" minLength={8} required /></label>
+        <label className="hp-field">Company<input value={company} onChange={(e) => setCompany(e.target.value)} tabIndex="-1" autoComplete="off" /></label>
         {error && <div className="modal-error">{error}</div>}
         <button className="tb-btn primary" type="submit">{mode === "login" ? "Sign in" : "Create account"}</button>
       </form>
