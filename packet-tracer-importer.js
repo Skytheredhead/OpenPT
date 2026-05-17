@@ -292,8 +292,8 @@ End of document`;
       interestingStrings: strings.filter((s) => interestingPatterns.test(s.text)).slice(0, 40),
       notes: [
         "The original PKA/PKT bytes are preserved in browser storage by SHA-256 when IndexedDB is available.",
-        "Modern Packet Tracer activity files usually look high-entropy and do not expose raw PDFs or HTML by file signature.",
-        "This browser report is useful for fingerprinting and profile matching; full assignment extraction still needs a known profile or a Packet Tracer-assisted local extraction pass.",
+        "Modern Packet Tracer activity files use a high-entropy save wrapper, so PDFs/HTML usually are not visible until the save payload is decoded.",
+        "The packaged browser decoder mirrors Packet Tracer 9's Twofish-EAX save wrapper and Qt/zlib XML expansion when the browser exposes the required primitives.",
       ],
     };
   }
@@ -302,6 +302,184 @@ End of document`;
     if (!window.crypto?.subtle) return null;
     const digest = await window.crypto.subtle.digest("SHA-256", buffer);
     return Array.from(new Uint8Array(digest)).map((b) => b.toString(16).padStart(2, "0")).join("");
+  }
+
+  function packetTracerOuterDecode(bytes) {
+    const n = bytes.length;
+    const out = new Uint8Array(n);
+    for (let i = 0; i < n; i++) {
+      out[i] = bytes[n - 1 - i] ^ (((1 - i) * n) & 0xff);
+    }
+    return out;
+  }
+
+  function packetTracerPayloadDeobfuscate(bytes) {
+    const n = bytes.length;
+    const out = new Uint8Array(n);
+    for (let i = 0; i < n; i++) {
+      out[i] = bytes[i] ^ ((n - i) & 0xff);
+    }
+    return out;
+  }
+
+  function xor16(a, b) {
+    const out = new Uint8Array(16);
+    for (let i = 0; i < 16; i++) out[i] = a[i] ^ b[i];
+    return out;
+  }
+
+  function twofishEncryptBlock(session, block) {
+    const out = new Uint8Array(16);
+    window.OpenPTTwofish.encrypt(block, 0, out, 0, session);
+    return out;
+  }
+
+  function cmacDouble(block) {
+    const out = new Uint8Array(16);
+    let carry = 0;
+    for (let i = 15; i >= 0; i--) {
+      const nextCarry = (block[i] & 0x80) ? 1 : 0;
+      out[i] = ((block[i] << 1) & 0xff) | carry;
+      carry = nextCarry;
+    }
+    if (block[0] & 0x80) out[15] ^= 0x87;
+    return out;
+  }
+
+  function twofishCmac(session, message) {
+    const zero = new Uint8Array(16);
+    const l = twofishEncryptBlock(session, zero);
+    const k1 = cmacDouble(l);
+    const k2 = cmacDouble(k1);
+    const blockCount = Math.max(1, Math.ceil(message.length / 16));
+    const lastBlockComplete = message.length > 0 && message.length % 16 === 0;
+    let state = new Uint8Array(16);
+
+    for (let block = 0; block < blockCount - 1; block++) {
+      const offset = block * 16;
+      for (let i = 0; i < 16; i++) state[i] ^= message[offset + i];
+      state = twofishEncryptBlock(session, state);
+    }
+
+    const last = new Uint8Array(16);
+    const lastOffset = (blockCount - 1) * 16;
+    const remaining = message.length - lastOffset;
+    last.set(message.slice(lastOffset));
+    if (lastBlockComplete) {
+      for (let i = 0; i < 16; i++) last[i] ^= k1[i];
+    } else {
+      last[remaining] = 0x80;
+      for (let i = 0; i < 16; i++) last[i] ^= k2[i];
+    }
+
+    for (let i = 0; i < 16; i++) state[i] ^= last[i];
+    return twofishEncryptBlock(session, state);
+  }
+
+  function twofishEaxOmac(session, domain, data) {
+    const message = new Uint8Array(16 + data.length);
+    message[15] = domain;
+    message.set(data, 16);
+    return twofishCmac(session, message);
+  }
+
+  function incrementCounter(counter) {
+    for (let i = 15; i >= 0; i--) {
+      counter[i] = (counter[i] + 1) & 0xff;
+      if (counter[i]) break;
+    }
+  }
+
+  function timingSafeEqual16(a, b) {
+    let diff = 0;
+    for (let i = 0; i < 16; i++) diff |= a[i] ^ b[i];
+    return diff === 0;
+  }
+
+  function decryptPacketTracerSave(bytes) {
+    if (!window.OpenPTTwofish?.makeSession || !window.OpenPTTwofish?.encrypt) {
+      throw new Error("Packet Tracer decoder did not load its Twofish block cipher.");
+    }
+    if (bytes.length <= 16) throw new Error("Packet Tracer payload is too short to contain an EAX tag.");
+
+    const stage1 = packetTracerOuterDecode(bytes);
+    const key = new Uint8Array(16).fill(0x89);
+    const nonce = new Uint8Array(16).fill(0x10);
+    const session = window.OpenPTTwofish.makeSession(key);
+    const ciphertext = stage1.slice(0, stage1.length - 16);
+    const tag = stage1.slice(stage1.length - 16);
+    const nonceTag = twofishEaxOmac(session, 0, nonce);
+    const headerTag = twofishEaxOmac(session, 1, new Uint8Array(0));
+    const ciphertextTag = twofishEaxOmac(session, 2, ciphertext);
+    const expectedTag = xor16(xor16(nonceTag, headerTag), ciphertextTag);
+    if (!timingSafeEqual16(tag, expectedTag)) {
+      throw new Error("Packet Tracer EAX authentication tag did not verify.");
+    }
+
+    const decrypted = new Uint8Array(ciphertext.length);
+    const counter = new Uint8Array(nonceTag);
+    const stream = new Uint8Array(16);
+    for (let offset = 0; offset < ciphertext.length; offset += 16) {
+      window.OpenPTTwofish.encrypt(counter, 0, stream, 0, session);
+      const count = Math.min(16, ciphertext.length - offset);
+      for (let i = 0; i < count; i++) decrypted[offset + i] = ciphertext[offset + i] ^ stream[i];
+      incrementCounter(counter);
+    }
+
+    return {
+      profile: "ptsave-eax-twofish-v1",
+      stage1Length: stage1.length,
+      decryptedLength: decrypted.length,
+      payload: packetTracerPayloadDeobfuscate(decrypted),
+      tag: bytesToHex(tag),
+    };
+  }
+
+  async function qtUncompress(bytes) {
+    if (bytes.length < 6) throw new Error("Decoded Packet Tracer payload is too short for qUncompress.");
+    const expectedLength = (
+      (bytes[0] << 24) |
+      (bytes[1] << 16) |
+      (bytes[2] << 8) |
+      bytes[3]
+    ) >>> 0;
+    if (!window.DecompressionStream) {
+      throw new Error("This browser does not expose DecompressionStream for Qt/zlib payloads.");
+    }
+    const stream = new Blob([bytes.slice(4)]).stream().pipeThrough(new DecompressionStream("deflate"));
+    const inflated = new Uint8Array(await new Response(stream).arrayBuffer());
+    if (expectedLength && inflated.length !== expectedLength) {
+      throw new Error(`Qt/zlib payload inflated to ${inflated.length} bytes, expected ${expectedLength}.`);
+    }
+    return inflated;
+  }
+
+  async function decodePacketTracerXml(bytes) {
+    const directText = new TextDecoder("utf-8", { fatal: false }).decode(bytes.slice(0, Math.min(bytes.length, 1024)));
+    if (/^\s*<PACKETTRACER/i.test(directText)) {
+      return {
+        profile: "plain-xml",
+        xmlBytes: bytes,
+        xmlText: new TextDecoder("utf-8", { fatal: false }).decode(bytes),
+        stages: { rawLength: bytes.length },
+      };
+    }
+
+    const decrypted = decryptPacketTracerSave(bytes);
+    const xmlBytes = await qtUncompress(decrypted.payload);
+    return {
+      profile: decrypted.profile,
+      xmlBytes,
+      xmlText: new TextDecoder("utf-8", { fatal: false }).decode(xmlBytes),
+      stages: {
+        rawLength: bytes.length,
+        stage1Length: decrypted.stage1Length,
+        decryptedLength: decrypted.decryptedLength,
+        qUncompressInputLength: decrypted.payload.length,
+        xmlLength: xmlBytes.length,
+        tag: decrypted.tag,
+      },
+    };
   }
 
   function openPacketTracerDb() {
@@ -416,6 +594,238 @@ ${report.notes.map((n) => `- ${n}`).join("\n")}`;
     `;
   }
 
+  function parseXmlDocument(xmlText) {
+    const doc = new DOMParser().parseFromString(xmlText, "application/xml");
+    const parserError = doc.getElementsByTagName("parsererror")[0];
+    if (parserError) throw new Error(parserError.textContent || "Decoded Packet Tracer XML could not be parsed.");
+    return doc;
+  }
+
+  function directChildren(element, tagName) {
+    if (!element) return [];
+    return Array.from(element.children || []).filter((child) => child.tagName === tagName);
+  }
+
+  function directChild(element, tagName) {
+    return directChildren(element, tagName)[0] || null;
+  }
+
+  function pathChild(element, path) {
+    return path.reduce((node, tagName) => directChild(node, tagName), element);
+  }
+
+  function childText(element, tagName) {
+    const child = directChild(element, tagName);
+    return child ? child.textContent.trim() : "";
+  }
+
+  function firstDescendantText(element, tagName) {
+    const child = element?.getElementsByTagName(tagName)?.[0];
+    return child ? child.textContent.trim() : "";
+  }
+
+  function attrsObject(element) {
+    const out = {};
+    for (const attr of Array.from(element?.attributes || [])) out[attr.name] = attr.value;
+    return out;
+  }
+
+  function htmlToPlainText(html) {
+    const doc = new DOMParser().parseFromString(html || "", "text/html");
+    return (doc.body?.textContent || "").replace(/\u00a0/g, " ").replace(/[ \t]+\n/g, "\n").replace(/\n{3,}/g, "\n\n").trim();
+  }
+
+  function titleFromHtml(html) {
+    const doc = new DOMParser().parseFromString(html || "", "text/html");
+    return (doc.querySelector("title")?.textContent || doc.querySelector("h1")?.textContent || "").trim();
+  }
+
+  function elementOuterXml(element) {
+    return element ? new XMLSerializer().serializeToString(element) : "";
+  }
+
+  function parseAssessmentNode(node) {
+    const nameEl = directChild(node, "NAME");
+    const children = directChildren(node, "NODE").map(parseAssessmentNode).filter(Boolean);
+    if (!nameEl && children.length === 0) return null;
+    return {
+      name: nameEl?.textContent?.trim() || childText(node, "ID") || "Assessment Item",
+      id: childText(node, "ID"),
+      components: childText(node, "COMPONENTS"),
+      points: childText(node, "POINTS"),
+      value: nameEl?.getAttribute("nodeValue") || "",
+      checkType: nameEl?.getAttribute("checkType") || "",
+      eclass: nameEl?.getAttribute("eclass") || "",
+      attrs: attrsObject(nameEl),
+      children,
+    };
+  }
+
+  function flattenAssessment(nodes, prefix = []) {
+    const out = [];
+    for (const node of nodes || []) {
+      const path = [...prefix, node.name].filter(Boolean);
+      if (!node.children?.length) {
+        out.push({
+          path: path.join(" / "),
+          id: node.id,
+          components: node.components,
+          points: node.points,
+          value: node.value,
+        });
+      } else {
+        out.push(...flattenAssessment(node.children, path));
+      }
+    }
+    return out;
+  }
+
+  function parsePacketTracerXml(file, decoded, sha256, head, report) {
+    const doc = parseXmlDocument(decoded.xmlText);
+    const root = doc.documentElement;
+    const packetTracer = directChild(root, "PACKETTRACER5") || directChild(root, "PACKETTRACER") || root;
+    const network = directChild(packetTracer, "NETWORK");
+    const activityRoot = directChild(root, "ACTIVITY");
+    const devicesRoot = pathChild(network, ["DEVICES"]);
+    const linksRoot = pathChild(network, ["LINKS"]);
+
+    const saveRefToName = {};
+    const memAddrToName = {};
+    const allDevices = directChildren(devicesRoot, "DEVICE").map((deviceEl, index) => {
+      const engine = directChild(deviceEl, "ENGINE");
+      const typeEl = directChild(engine, "TYPE");
+      const logical = pathChild(deviceEl, ["WORKSPACE", "LOGICAL"]);
+      const name = childText(engine, "NAME") || `PT-Device-${index + 1}`;
+      const saveRefId = childText(engine, "SAVE_REF_ID");
+      const devAddr = childText(logical, "DEV_ADDR");
+      if (saveRefId) saveRefToName[saveRefId] = name;
+      if (devAddr) memAddrToName[devAddr] = name;
+      const runningConfig = Array.from(engine?.getElementsByTagName("RUNNINGCONFIG")?.[0]?.children || [])
+        .filter((line) => line.tagName === "LINE")
+        .map((line) => line.textContent);
+      return {
+        name,
+        kind: (typeEl?.textContent || "Device").trim(),
+        model: typeEl?.getAttribute("model") || typeEl?.getAttribute("customModel") || "",
+        customModel: typeEl?.getAttribute("customModel") || "",
+        power: childText(engine, "POWER"),
+        x: Number(childText(logical, "X")) || 300 + index * 80,
+        y: Number(childText(logical, "Y")) || 240 + index * 60,
+        saveRefId,
+        memAddr: devAddr,
+        runningConfig,
+        xml: elementOuterXml(deviceEl),
+      };
+    });
+
+    const devices = allDevices.filter((device) => !/^Power Distribution Device$/i.test(device.kind || device.model || device.name || ""));
+    const links = directChildren(linksRoot, "LINK").map((linkEl) => {
+      const cable = directChild(linkEl, "CABLE");
+      const ports = directChildren(cable, "PORT").map((port) => port.textContent.trim());
+      const fromRef = childText(cable, "FROM");
+      const toRef = childText(cable, "TO");
+      const fromDevice = saveRefToName[fromRef] || memAddrToName[childText(cable, "FROM_DEVICE_MEM_ADDR")] || fromRef;
+      const toDevice = saveRefToName[toRef] || memAddrToName[childText(cable, "TO_DEVICE_MEM_ADDR")] || toRef;
+      return {
+        type: childText(cable, "TYPE") || childText(linkEl, "TYPE") || "Packet Tracer Link",
+        medium: childText(linkEl, "TYPE"),
+        from: `${fromDevice}:${ports[0] || "Port"}`,
+        to: `${toDevice}:${ports[1] || "Port"}`,
+        fromRef,
+        toRef,
+        functional: childText(cable, "FUNCTIONAL"),
+        xml: elementOuterXml(linkEl),
+      };
+    }).filter((link) => link.from && link.to);
+
+    const instructionsHtml = (
+      directChildren(pathChild(activityRoot, ["INSTRUCTIONS"]), "PAGE").map((page) => page.textContent.trim()).find(Boolean) ||
+      firstDescendantText(pathChild(activityRoot, ["INSTRUCTION_DIALOG"]), "USER_NOTES") ||
+      childText(network, "DESCRIPTION") ||
+      ""
+    );
+    const title = stripPacketTracerExt(file.name) || titleFromHtml(instructionsHtml) || "Packet Tracer Assignment";
+    const assessmentRootNodes = Array.from(doc.getElementsByTagName("NODE"))
+      .filter((node) => directChild(node, "NAME")?.hasAttribute("checkType"))
+      .filter((node) => !directChild(node.parentElement, "NAME")?.hasAttribute("checkType"))
+      .map(parseAssessmentNode)
+      .filter(Boolean);
+    const assessmentItems = flattenAssessment(assessmentRootNodes);
+    const totalPoints = assessmentItems.reduce((sum, item) => sum + (Number(item.points) || 0), 0);
+    const answerCommands = Object.fromEntries(devices.map((device) => [
+      device.name,
+      device.runningConfig || [],
+    ]));
+
+    report.decoder = {
+      status: "decoded",
+      profile: decoded.profile,
+      rootTag: root.tagName,
+      packetTracerVersion: firstDescendantText(root, "VERSION"),
+      xmlLength: decoded.xmlText.length,
+      stages: decoded.stages,
+    };
+
+    return {
+      format: "packet-tracer-activity",
+      importerVersion: 2,
+      title,
+      instructionsText: htmlToPlainText(instructionsHtml),
+      instructionsHtml,
+      progress: {
+        percent: null,
+        score: null,
+        itemCount: `${assessmentItems.length}/${assessmentItems.length}`,
+        components: Object.entries(assessmentItems.reduce((acc, item) => {
+          const key = item.components || "Other";
+          acc[key] = acc[key] || { name: key, items: 0, points: 0 };
+          acc[key].items += 1;
+          acc[key].points += Number(item.points) || 0;
+          return acc;
+        }, {})).map(([, value]) => ({ name: value.name, items: `${value.items}/${value.items}`, score: `${value.points} pts` })),
+      },
+      devices,
+      links,
+      answerCommands,
+      rubricPattern: assessmentRootNodes,
+      assessmentItems,
+      decoded: {
+        profile: decoded.profile,
+        rootTag: root.tagName,
+        xmlText: decoded.xmlText,
+        xmlLength: decoded.xmlText.length,
+        xmlSha256: null,
+        packetTracerVersion: firstDescendantText(root, "VERSION"),
+        networkDeviceCount: devices.length,
+        packetTracerObjectCount: allDevices.length,
+        hiddenObjects: allDevices.filter((device) => !devices.includes(device)).map((device) => ({
+          name: device.name,
+          kind: device.kind,
+          model: device.model,
+          x: device.x,
+          y: device.y,
+          saveRefId: device.saveRefId,
+        })),
+      },
+      reverseReport: report,
+      featureCoverage: {
+        rawFilePreserved: false,
+        semanticExtraction: "decoded-xml",
+        profileMatched: true,
+        preservedButUnsupported: [
+          "Full decoded Packet Tracer XML is preserved on the imported activity.",
+          "Packet Tracer-only UI, simulation, assessment, media, and device internals are retained in decoded.xmlText even when OpenPT does not render them yet.",
+        ],
+      },
+      diagnostics: {
+        sha256,
+        headHex: head,
+        size: file.size,
+        decoder: report.decoder,
+      },
+    };
+  }
+
   function makeUnsupportedActivity(file, sha256, head, report) {
     const title = stripPacketTracerExt(file.name);
     return {
@@ -472,7 +882,23 @@ ${report.notes.map((n) => `- ${n}`).join("\n")}`;
       backend: "indexeddb",
       reason: err?.message || String(err),
     }));
-    const activity = (knownByHash || knownByFallback) ? clone(etherchannelActivity) : makeUnsupportedActivity(file, sha256, head, report);
+    let activity = null;
+    try {
+      const decoded = await decodePacketTracerXml(bytes);
+      activity = parsePacketTracerXml(file, decoded, sha256, head, report);
+    } catch (err) {
+      report.decoder = {
+        status: "not-decoded",
+        attemptedProfile: "ptsave-eax-twofish-v1",
+        error: err?.message || String(err),
+      };
+    }
+
+    if (!activity && (knownByHash || knownByFallback)) {
+      activity = clone(etherchannelActivity);
+      report.decoder = report.decoder || { status: "profile-fallback", profile: "static-etherchannel-review" };
+    }
+    if (!activity) activity = makeUnsupportedActivity(file, sha256, head, report);
     activity.reverseReport = report;
     activity.rawFile = {
       name: file.name || "packet-tracer-file",
@@ -484,15 +910,15 @@ ${report.notes.map((n) => `- ${n}`).join("\n")}`;
     };
     activity.featureCoverage = {
       rawFilePreserved: !!rawStorage.stored,
-      semanticExtraction: activity.unsupported ? "not-decoded" : "profile-derived",
+      semanticExtraction: activity.featureCoverage?.semanticExtraction || (activity.unsupported ? "not-decoded" : "profile-derived"),
       profileMatched: !activity.unsupported,
-      preservedButUnsupported: activity.unsupported ? [
+      preservedButUnsupported: activity.featureCoverage?.preservedButUnsupported || (activity.unsupported ? [
         "Packet Tracer encrypted/proprietary activity payload",
         "Device configurations hidden inside the activity payload",
         "Assessment tree hidden inside the activity payload",
         "Workspace objects hidden inside the activity payload",
         "Instruction assets hidden inside the activity payload",
-      ] : [],
+      ] : []),
     };
     activity.sourceName = file.name || "packet-tracer-file";
     activity.sourceSize = file.size;

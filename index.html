@@ -4,6 +4,7 @@
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>OpenPT — Network Sandbox</title>
+<link rel="icon" type="image/svg+xml" href="favicon.svg" />
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
 <link href="https://fonts.googleapis.com/css2?family=Geist:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet" />
@@ -695,6 +696,16 @@
 <script type="text/babel" src="topology.jsx"></script>
 <script type="text/babel" src="cli.jsx"></script>
 <script type="text/babel" src="inspector.jsx"></script>
+<script>
+  window.OpenPTTwofishExports = {};
+  window.exports = window.OpenPTTwofishExports;
+</script>
+<script src="vendor/twofish-ts.js"></script>
+<script>
+  window.OpenPTTwofish = window.OpenPTTwofishExports;
+  delete window.OpenPTTwofishExports;
+  delete window.exports;
+</script>
 <script src="packet-tracer-importer.js"></script>
 <script src="sync-client.js"></script>
 <script type="text/babel" src="app.jsx"></script>

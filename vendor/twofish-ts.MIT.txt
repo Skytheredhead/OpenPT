@@ -1,0 +1,7 @@
+twofish-ts 1.0.2
+Copyright (c) Logan R. Kearsley
+License: MIT
+Source: https://github.com/gliese1337/twofish
+
+This project vendors bin/index.js from the npm package so the Packet Tracer
+decoder can run fully in-browser without calling a local Packet Tracer install.
