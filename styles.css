@@ -63,18 +63,23 @@
   position: absolute;
   top: calc(100% + 6px);
   left: 50%;
-  transform: translateX(-50%);
+  transform: translateX(-50%) scale(var(--canvas-label-scale, 1));
+  transform-origin: top center;
   font-family: var(--font-mono); font-size: 11px;
   color: var(--fg-0); background: color-mix(in oklab, var(--bg-1) 85%, transparent);
   padding: 1px 6px; border-radius: 4px; border: 1px solid var(--line-soft);
   white-space: nowrap;
+  max-width: 15ch;
+  overflow: hidden;
+  text-overflow: ellipsis;
   backdrop-filter: blur(2px);
 }
 .node-meta {
   position: absolute;
   top: calc(100% + 26px);
   left: 50%;
-  transform: translateX(-50%);
+  transform: translateX(-50%) scale(var(--canvas-label-scale, 1));
+  transform-origin: top center;
   font-family: var(--font-mono); font-size: 9.5px;
   color: var(--fg-2);
   white-space: nowrap; letter-spacing: 0;
@@ -97,13 +102,18 @@
 
 /* ── Link (cable) ──────────────────────────────────────────── */
 .link-label {
-  position: absolute; transform: translate(-50%, -50%);
+  position: absolute; transform: translate(-50%, -50%) scale(var(--canvas-label-scale, 1));
+  transform-origin: center;
   font-family: var(--font-mono); font-size: 9.5px;
   background: color-mix(in oklab, var(--bg-1) 92%, transparent);
   border: 1px solid var(--line-soft);
   color: var(--fg-2); padding: 1px 5px; border-radius: 3px;
-  pointer-events: none;
+  pointer-events: auto;
   white-space: nowrap;
+  max-width: 24ch;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  cursor: default;
   backdrop-filter: blur(3px);
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.4);
 }
@@ -293,6 +303,7 @@
 /* ── Canvas overlay HUD ─────────────────────────────────── */
 .canvas-hud {
   position: absolute; top: 10px; right: 10px;
+  z-index: 5;
   display: flex; gap: 6px;
   background: color-mix(in oklab, var(--bg-1) 80%, transparent);
   border: 1px solid var(--line);

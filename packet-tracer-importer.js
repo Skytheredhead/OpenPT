@@ -2,6 +2,24 @@
 (function () {
   const ETHERCHANNEL_SHA256 = "f37cf1ca63177e6fa30799e28f1abac2b26cac26e6b652b0357cf51438d5081a";
   let twofishLoadPromise = null;
+  const BUILT_IN_ASSESSMENT_COMPONENTS = new Set([
+    "acl",
+    "default gateway",
+    "defautl gateway",
+    "ip",
+    "ip address",
+    "nat",
+    "other",
+    "pc address",
+    "pc addressing",
+    "physical",
+    "router address",
+    "router addressing",
+    "routing",
+    "save config",
+    "switch address",
+    "switching",
+  ]);
 
   const etherchannelText = `15.2.7 Packet Tracer - EtherChannel Review
 
@@ -789,6 +807,26 @@ ${report.notes.map((n) => `- ${n}`).join("\n")}`;
     };
   }
 
+  function parseAssessmentComponentList(root) {
+    return firstDescendantText(root, "COMPONENT_LIST")
+      .split(",")
+      .map((component) => component.trim())
+      .filter(Boolean);
+  }
+
+  function customAssessmentComponents(root) {
+    return new Set(parseAssessmentComponentList(root).filter((component) => {
+      return !BUILT_IN_ASSESSMENT_COMPONENTS.has(component.toLowerCase());
+    }));
+  }
+
+  function selectPacketTracerVisibleAssessmentItems(items, componentNames) {
+    const scoredItems = (items || []).filter((item) => (Number(item.points) || 0) > 0);
+    if (!componentNames?.size) return scoredItems;
+    const authoredItems = scoredItems.filter((item) => componentNames.has(item.components || ""));
+    return authoredItems.length ? authoredItems : scoredItems;
+  }
+
   function parseAssessmentNode(node, variables = {}) {
     const nameEl = directChild(node, "NAME");
     const children = directChildren(node, "NODE").map((child) => parseAssessmentNode(child, variables)).filter(Boolean);
@@ -919,7 +957,9 @@ ${report.notes.map((n) => `- ${n}`).join("\n")}`;
       .filter((node) => !(node.parentElement?.tagName === "NODE" && hasScoredAssessmentNode(node.parentElement)))
       .map((node) => parseAssessmentNode(node, variables))
       .filter(Boolean);
-    const assessmentItems = flattenAssessment(assessmentRootNodes);
+    const rawAssessmentItems = flattenAssessment(assessmentRootNodes);
+    const visibleComponents = customAssessmentComponents(root);
+    const assessmentItems = selectPacketTracerVisibleAssessmentItems(rawAssessmentItems, visibleComponents);
     const assessmentSections = buildAssessmentSections(assessmentItems);
     const totalPoints = assessmentItems.reduce((sum, item) => sum + (Number(item.points) || 0), 0);
     const answerCommands = Object.fromEntries(devices.map((device) => [
@@ -944,16 +984,16 @@ ${report.notes.map((n) => `- ${n}`).join("\n")}`;
       instructionsText: htmlToPlainText(resolvedInstructionsHtml),
       instructionsHtml: resolvedInstructionsHtml,
       progress: {
-        percent: null,
-        score: null,
-        itemCount: `${assessmentItems.length}/${assessmentItems.length}`,
+        percent: 0,
+        score: `0/${totalPoints}`,
+        itemCount: `0/${assessmentItems.length}`,
         components: Object.entries(assessmentItems.reduce((acc, item) => {
           const key = item.components || "Other";
           acc[key] = acc[key] || { name: key, items: 0, points: 0 };
           acc[key].items += 1;
           acc[key].points += Number(item.points) || 0;
           return acc;
-        }, {})).map(([, value]) => ({ name: value.name, items: `${value.items}/${value.items}`, score: `${value.points} pts` })),
+        }, {})).map(([, value]) => ({ name: value.name, items: `0/${value.items}`, score: `0/${value.points}` })),
       },
       devices,
       links,
@@ -970,7 +1010,10 @@ ${report.notes.map((n) => `- ${n}`).join("\n")}`;
         networkDeviceCount: devices.length,
         packetTracerObjectCount: allDevices.length,
         variables,
+        componentList: parseAssessmentComponentList(root),
+        visibleAssessmentComponents: Array.from(visibleComponents),
         assessmentClassification: assessmentSections.counts,
+        rawAssessmentClassification: buildAssessmentSections(rawAssessmentItems).counts,
         hiddenObjects: allDevices.filter((device) => !devices.includes(device)).map((device) => ({
           name: device.name,
           kind: device.kind,

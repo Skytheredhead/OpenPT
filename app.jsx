@@ -86,6 +86,90 @@ function packetTracerIfaceSeed(kind, name, deviceName) {
   return iface;
 }
 
+function improvePacketTracerImportLayout(devices, links) {
+  const list = Object.values(devices || {});
+  if (list.length < 2) return devices;
+
+  const desiredGap = 148;
+  const minGap = 118;
+  const bounds = list.reduce((box, d) => ({
+    minX: Math.min(box.minX, Number(d.x) || 0),
+    minY: Math.min(box.minY, Number(d.y) || 0),
+    maxX: Math.max(box.maxX, Number(d.x) || 0),
+    maxY: Math.max(box.maxY, Number(d.y) || 0),
+  }), { minX: Infinity, minY: Infinity, maxX: -Infinity, maxY: -Infinity });
+  const cx = (bounds.minX + bounds.maxX) / 2;
+  const cy = (bounds.minY + bounds.maxY) / 2;
+
+  const nearestDistances = list.map((a) => {
+    let nearest = Infinity;
+    for (const b of list) {
+      if (a.id === b.id) continue;
+      nearest = Math.min(nearest, Math.hypot((Number(a.x) || 0) - (Number(b.x) || 0), (Number(a.y) || 0) - (Number(b.y) || 0)));
+    }
+    return nearest;
+  }).filter(Number.isFinite).sort((a, b) => a - b);
+  const medianNearest = nearestDistances[Math.floor(nearestDistances.length / 2)] || desiredGap;
+  const compactSpan = (bounds.maxX - bounds.minX) < 220 && (bounds.maxY - bounds.minY) < 180;
+  const scale = Math.max(1, Math.min(2.2, desiredGap / Math.max(1, medianNearest), compactSpan ? 1.45 : 1));
+
+  let next = Object.fromEntries(list.map((d, index) => {
+    const angle = (index / Math.max(1, list.length)) * Math.PI * 2;
+    const sameSpotNudge = medianNearest < 4 ? { x: Math.cos(angle) * desiredGap, y: Math.sin(angle) * desiredGap } : { x: 0, y: 0 };
+    return [d.id, {
+      ...d,
+      x: cx + ((Number(d.x) || cx) - cx) * scale + sameSpotNudge.x,
+      y: cy + ((Number(d.y) || cy) - cy) * scale + sameSpotNudge.y,
+    }];
+  }));
+
+  const neighborPairs = new Set((links || []).map((l) => [l.a, l.b].filter(Boolean).sort().join(":")));
+  for (let pass = 0; pass < 18; pass++) {
+    const moved = {};
+    const values = Object.values(next);
+    for (let i = 0; i < values.length; i++) {
+      for (let j = i + 1; j < values.length; j++) {
+        const a = values[i], b = values[j];
+        const key = [a.id, b.id].sort().join(":");
+        const target = neighborPairs.has(key) ? minGap : desiredGap;
+        let dx = b.x - a.x;
+        let dy = b.y - a.y;
+        let dist = Math.hypot(dx, dy);
+        if (dist >= target) continue;
+        if (dist < 1) {
+          const angle = ((i + j + 1) * 2.399963229728653) % (Math.PI * 2);
+          dx = Math.cos(angle);
+          dy = Math.sin(angle);
+          dist = 1;
+        }
+        const push = (target - dist) * 0.5;
+        const ux = dx / dist;
+        const uy = dy / dist;
+        moved[a.id] = moved[a.id] || { x: 0, y: 0 };
+        moved[b.id] = moved[b.id] || { x: 0, y: 0 };
+        moved[a.id].x -= ux * push;
+        moved[a.id].y -= uy * push;
+        moved[b.id].x += ux * push;
+        moved[b.id].y += uy * push;
+      }
+    }
+    for (const [id, delta] of Object.entries(moved)) {
+      next[id] = { ...next[id], x: next[id].x + delta.x, y: next[id].y + delta.y };
+    }
+  }
+
+  const finalValues = Object.values(next);
+  const finalMinX = Math.min(...finalValues.map((d) => d.x));
+  const finalMinY = Math.min(...finalValues.map((d) => d.y));
+  const shiftX = finalMinX < 90 ? 90 - finalMinX : 0;
+  const shiftY = finalMinY < 90 ? 90 - finalMinY : 0;
+  return Object.fromEntries(finalValues.map((d) => [d.id, {
+    ...d,
+    x: Math.round(d.x + shiftX),
+    y: Math.round(d.y + shiftY),
+  }]));
+}
+
 function buildTopologyFromPacketTracer(activity) {
   const deviceMap = {};
   const devices = {};
@@ -149,7 +233,7 @@ function buildTopologyFromPacketTracer(activity) {
     });
   }
 
-  return { devices, links };
+  return { devices: improvePacketTracerImportLayout(devices, links), links };
 }
 
 const TWEAK_DEFAULTS = /*EDITMODE-BEGIN*/{
@@ -425,6 +509,7 @@ function App() {
   const [fileDropActive, setFileDropActive] = useState(false);
   const [ctx, setCtx] = useState(null);  // { x, y, devId }
   const [pendingCmd, setPendingCmd] = useState(null);  // { devId, cmd, nonce }
+  const [bottomPanelHeight, setBottomPanelHeight] = useState(280);
   const syncClient = useMemo(() => Sync ? new Sync.OpenPTSyncClient() : null, []);
   const [cloudUser, setCloudUser] = useState(null);
   const [cloudProjects, setCloudProjects] = useState([]);
@@ -744,6 +829,26 @@ function App() {
       ...e.slice(-200),
       { t: new Date().toLocaleTimeString("en-GB", { hour12: false }).slice(3), s: severity, src: source, m: ifaceText(message) },
     ]);
+  };
+
+  const beginResize = (event) => {
+    event.preventDefault();
+    const startY = event.clientY;
+    const startHeight = bottomPanelHeight;
+    document.body.classList.add("is-resizing-layout");
+    const onMove = (moveEvent) => {
+      const maxHeight = Math.max(180, window.innerHeight - 170);
+      setBottomPanelHeight(Math.max(120, Math.min(maxHeight, startHeight - (moveEvent.clientY - startY))));
+    };
+    const onUp = () => {
+      document.body.classList.remove("is-resizing-layout");
+      window.removeEventListener("pointermove", onMove);
+      window.removeEventListener("pointerup", onUp);
+      window.removeEventListener("pointercancel", onUp);
+    };
+    window.addEventListener("pointermove", onMove);
+    window.addEventListener("pointerup", onUp, { once: true });
+    window.addEventListener("pointercancel", onUp, { once: true });
   };
 
   const openImportedTopology = (topology, filename) => {
@@ -1701,9 +1806,12 @@ function App() {
       </div>
 
       {/* Workspace */}
-      <div className="workspace">
-        {/* Side panel */}
-        <div style={{ display: "none" }} />
+      <div
+        className="workspace"
+        style={{
+          "--bottom-panel-height": `${bottomPanelHeight}px`,
+        }}
+      >
         {/* (Labs/Diagnostics moved to top menus) */}
 
         {/* Center */}
@@ -1772,6 +1880,13 @@ function App() {
           />
 
           <div className="bottom-panel">
+            <div
+              className="bottom-resizer"
+              role="separator"
+              aria-orientation="horizontal"
+              aria-label="Resize bottom panel"
+              onPointerDown={beginResize}
+            />
             <div className="bp-tabs">
               {openConsoles.map((id) => {
                 const dev = devices[id];
@@ -2365,21 +2480,64 @@ function packetTracerIsConnectivityAssessment(item) {
   return /\b(connectivity|reachability|reachable|ping|icmp|trace\s*route|traceroute|simple\s+pdu|complex\s+pdu|pdu|successful\s+connection|packet\s+test)\b/i.test(packetTracerAssessmentText(item));
 }
 
+const PACKET_TRACER_BUILT_IN_COMPONENTS = new Set([
+  "acl",
+  "default gateway",
+  "defautl gateway",
+  "ip",
+  "ip address",
+  "nat",
+  "other",
+  "pc address",
+  "pc addressing",
+  "physical",
+  "router address",
+  "router addressing",
+  "routing",
+  "save config",
+  "switch address",
+  "switching",
+]);
+
+function packetTracerVisibleAssessmentItems(activity, allItems) {
+  const scoredItems = (allItems || []).filter((item) => (Number(item.points) || 0) > 0);
+  if (!scoredItems.length) return [];
+  const authoredComponents = new Set((activity?.decoded?.visibleAssessmentComponents || []).filter(Boolean));
+  if (!authoredComponents.size) {
+    for (const item of scoredItems) {
+      const component = item.components || "";
+      if (component && !PACKET_TRACER_BUILT_IN_COMPONENTS.has(component.toLowerCase())) authoredComponents.add(component);
+    }
+  }
+  if (!authoredComponents.size) return scoredItems;
+  const authoredItems = scoredItems.filter((item) => authoredComponents.has(item.components || ""));
+  return authoredItems.length ? authoredItems : scoredItems;
+}
+
 function packetTracerAssessmentSections(activity) {
   const allItems = activity?.assessmentItems || [];
-  if (activity?.assessmentSections) {
+  const visibleItems = allItems.length ? packetTracerVisibleAssessmentItems(activity, allItems) : [];
+  if (!visibleItems.length && activity?.assessmentSections) {
+    const storedItems = [
+      ...(activity.assessmentSections.assessmentItems || []),
+      ...(activity.assessmentSections.connectivityTests || []),
+    ];
+    const fallbackItems = packetTracerVisibleAssessmentItems(activity, storedItems);
+    const connectivityTests = fallbackItems.filter(packetTracerIsConnectivityAssessment);
+    const connectivitySet = new Set(connectivityTests);
     return {
-      connectivityTests: activity.assessmentSections.connectivityTests || [],
-      assessmentItems: activity.assessmentSections.assessmentItems || [],
+      connectivityTests,
+      assessmentItems: fallbackItems.filter((item) => !connectivitySet.has(item)),
       roots: activity.assessmentSections.roots || [],
     };
   }
-  const connectivityTests = allItems.filter(packetTracerIsConnectivityAssessment);
+  const connectivityTests = visibleItems.filter(packetTracerIsConnectivityAssessment);
   const connectivitySet = new Set(connectivityTests);
+  const assessmentItems = visibleItems.filter((item) => !connectivitySet.has(item));
   return {
     connectivityTests,
-    assessmentItems: allItems.filter((item) => !connectivitySet.has(item)),
-    roots: Object.entries(allItems.reduce((acc, item) => {
+    assessmentItems,
+    roots: Object.entries(visibleItems.reduce((acc, item) => {
       const key = item.rootName || "Assessment Items";
       acc[key] = (acc[key] || 0) + 1;
       return acc;
@@ -2387,29 +2545,274 @@ function packetTracerAssessmentSections(activity) {
   };
 }
 
-function PacketTracerAssessmentRows({ items, empty }) {
-  if (!items?.length) return <div style={{ color: "var(--fg-3)", padding: "8px 0 12px" }}>{empty}</div>;
+function sanitizePacketTracerHtml(html) {
+  const source = String(html || "");
+  if (!source.trim()) return "";
+  try {
+    const doc = new DOMParser().parseFromString(source, "text/html");
+    doc.querySelectorAll("script,style,link,meta,iframe,object,embed").forEach((node) => node.remove());
+    doc.body.querySelectorAll("*").forEach((node) => {
+      Array.from(node.attributes).forEach((attr) => {
+        const name = attr.name.toLowerCase();
+        const value = String(attr.value || "");
+        if (
+          name.startsWith("on") ||
+          name === "style" ||
+          name === "bgcolor" ||
+          name === "background" ||
+          name === "color" ||
+          name === "text" ||
+          ((name === "href" || name === "src") && /^\s*javascript:/i.test(value))
+        ) {
+          node.removeAttribute(attr.name);
+        }
+      });
+    });
+    return doc.body.innerHTML;
+  } catch (error) {
+    return "";
+  }
+}
+
+function PacketTracerAssignmentSidebar({ activity, activeTab, onTabChange }) {
+  const assessmentSections = packetTracerAssessmentSections(activity);
+  const assessmentCount = (assessmentSections.assessmentItems?.length || 0) + (assessmentSections.connectivityTests?.length || 0);
+  const hasProgress = !!activity?.progress || assessmentCount > 0;
+  const title = activity?.title || activity?.sourceName || "Packet Tracer assignment";
   return (
-    <>
-      <div className="event" style={{ gridTemplateColumns: "1fr 120px 70px" }}>
-        <span className="s dim">item</span><span className="s dim">check</span><span className="s dim">points</span>
-      </div>
-      {items.slice(0, 160).map((item, i) => (
-        <div key={`${item.path || item.name || "assessment"}-${i}`} className="event" style={{ gridTemplateColumns: "1fr 120px 70px" }}>
-          <span className="m" style={{ minWidth: 0 }}>
-            <span style={{ color: "var(--fg-1)" }}>{item.path || item.name || "Assessment Item"}</span>
-            {(item.components || item.rootName) && (
-              <span style={{ display: "block", color: "var(--fg-3)", fontSize: 10.5, marginTop: 2 }}>
-                {[item.components, item.rootName].filter(Boolean).join(" · ")}
-              </span>
-            )}
-          </span>
-          <span className="s dim" style={{ overflowWrap: "anywhere" }}>{item.checkType || item.rootCheckType || "n/a"}</span>
-          <span className="t">{item.points || "0"}</span>
+    <aside className="side-panel pt-side-panel">
+      <div className="pt-side-title">
+        <div>
+          <div className="pt-side-kicker">Assignment</div>
+          <div className="pt-side-name" title={title}>{title}</div>
         </div>
-      ))}
-      {items.length > 160 && <div style={{ color: "var(--fg-3)", padding: "8px 0" }}>Showing first 160 of {items.length} items.</div>}
-    </>
+        {activity?.progress?.itemCount && <span className="pt-score-chip">{activity.progress.itemCount}</span>}
+      </div>
+      <div className="side-tabs pt-side-tabs" role="tablist" aria-label="Assignment sidebar">
+        {[
+          ["instructions", "Instructions"],
+          ["progress", "Progress"],
+        ].map(([key, label]) => (
+          <button
+            key={key}
+            type="button"
+            role="tab"
+            aria-selected={activeTab === key}
+            className={`side-tab ${activeTab === key ? "active" : ""}`}
+            onClick={() => onTabChange(key)}
+          >
+            {label}
+          </button>
+        ))}
+      </div>
+      <div className="pt-side-body">
+        {activeTab === "instructions" ? (
+          <PacketTracerInstructions activity={activity} />
+        ) : (
+          <PacketTracerProgress activity={activity} assessmentSections={assessmentSections} hasProgress={hasProgress} />
+        )}
+      </div>
+    </aside>
+  );
+}
+
+function PacketTracerInstructions({ activity }) {
+  const html = useMemo(() => sanitizePacketTracerHtml(activity?.instructionsHtml), [activity?.instructionsHtml]);
+  if (html) {
+    return <div className="pt-instructions-html" dangerouslySetInnerHTML={{ __html: html }} />;
+  }
+  return (
+    <div className="pt-empty">
+      {activity?.instructionsText || "No assignment instructions were found in this Packet Tracer file."}
+    </div>
+  );
+}
+
+function PacketTracerProgress({ activity, assessmentSections, hasProgress }) {
+  const components = activity?.progress?.components || [];
+  const totalAssessmentItems = assessmentSections.assessmentItems.length + assessmentSections.connectivityTests.length;
+  if (!hasProgress) return <div className="pt-empty">No progress or assessment data was decoded for this assignment.</div>;
+  return (
+    <div className="pt-progress">
+      <div className="pt-metric-grid">
+        <div className="pt-metric">
+          <span>Items</span>
+          <strong>{activity?.progress?.itemCount || `${totalAssessmentItems}/${totalAssessmentItems}`}</strong>
+        </div>
+        <div className="pt-metric">
+          <span>Connectivity</span>
+          <strong>{assessmentSections.connectivityTests.length}</strong>
+        </div>
+        <div className="pt-metric">
+          <span>Assessment</span>
+          <strong>{assessmentSections.assessmentItems.length}</strong>
+        </div>
+      </div>
+
+      {components.length > 0 && (
+        <>
+          <div className="pt-section-title">Components</div>
+          <div className="pt-table">
+            <div className="pt-table-row pt-table-head">
+              <span>Component</span>
+              <span>Items</span>
+              <span>Score</span>
+            </div>
+            {components.map((component, index) => (
+              <div className="pt-table-row" key={`${component.name || "component"}-${index}`}>
+                <span title={component.name}>{component.name}</span>
+                <span>{component.items || "0/0"}</span>
+                <span>{component.score || "0 pts"}</span>
+              </div>
+            ))}
+          </div>
+        </>
+      )}
+
+      {assessmentSections.roots?.length > 0 && (
+        <>
+          <div className="pt-section-title">Assessment Roots</div>
+          <div className="pt-table two-col">
+            <div className="pt-table-row pt-table-head">
+              <span>Root</span>
+              <span>Items</span>
+            </div>
+            {assessmentSections.roots.map((root, index) => (
+              <div className="pt-table-row" key={`${root.name}-${index}`}>
+                <span title={root.name}>{root.name}</span>
+                <span>{root.count}</span>
+              </div>
+            ))}
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
+function packetTracerAssessmentPathParts(item) {
+  if (Array.isArray(item?.pathParts) && item.pathParts.length) return item.pathParts;
+  return String(item?.path || item?.name || "Assessment Item").split(/\s*\/\s*/).filter(Boolean);
+}
+
+function buildPacketTracerAssessmentTree(items) {
+  const root = { key: "root", name: "root", depth: -1, children: [], childMap: new Map() };
+  for (const item of items || []) {
+    let cursor = root;
+    const parts = packetTracerAssessmentPathParts(item);
+    parts.forEach((part, index) => {
+      const key = `${cursor.key}/${part}`;
+      let next = cursor.childMap.get(part);
+      if (!next) {
+        next = { key, name: part, depth: index, children: [], childMap: new Map(), item: null };
+        cursor.childMap.set(part, next);
+        cursor.children.push(next);
+      }
+      if (index === parts.length - 1) next.item = item;
+      cursor = next;
+    });
+  }
+  const rows = [];
+  const visit = (node, parentKeys = []) => {
+    for (const child of node.children) {
+      rows.push({
+        ...child,
+        parentKeys,
+        isLeaf: !!child.item && child.children.length === 0,
+      });
+      visit(child, [...parentKeys, child.key]);
+    }
+  };
+  visit(root);
+  return rows;
+}
+
+function packetTracerComponentSummary(items) {
+  return Object.values((items || []).reduce((acc, item) => {
+    const name = item.components || "Other";
+    acc[name] = acc[name] || { name, items: 0, points: 0 };
+    acc[name].items += 1;
+    acc[name].points += Number(item.points) || 0;
+    return acc;
+  }, {}));
+}
+
+function PacketTracerAssessmentSummary({ items }) {
+  const components = packetTracerComponentSummary(items);
+  const totalPoints = items.reduce((sum, item) => sum + (Number(item.points) || 0), 0);
+  return (
+    <aside className="pt-check-summary">
+      <div className="pt-check-score">
+        <div><strong>Score</strong><span>0/{totalPoints}</span></div>
+        <div><strong>Item Count</strong><span>0/{items.length}</span></div>
+      </div>
+      <div className="pt-component-table">
+        <div className="pt-component-head"><span>Component</span><span>Items/Total</span><span>Score</span></div>
+        {components.map((component) => (
+          <div className="pt-component-row" key={component.name}>
+            <span title={component.name}>{component.name}</span>
+            <span>0/{component.items}</span>
+            <span>0/{component.points}</span>
+          </div>
+        ))}
+      </div>
+    </aside>
+  );
+}
+
+function PacketTracerAssessmentRows({ items, empty }) {
+  const rows = useMemo(() => buildPacketTracerAssessmentTree(items || []), [items]);
+  const expandableKeys = useMemo(() => rows.filter((row) => row.children.length).map((row) => row.key), [rows]);
+  const [expanded, setExpanded] = useState(() => new Set(expandableKeys));
+  useEffect(() => {
+    setExpanded(new Set(expandableKeys));
+  }, [expandableKeys.join("|")]);
+  const allExpanded = expandableKeys.length > 0 && expandableKeys.every((key) => expanded.has(key));
+  if (!items?.length) return <div className="pt-check-empty">{empty}</div>;
+  const visibleRows = rows.filter((row) => row.parentKeys.every((key) => expanded.has(key)));
+  const toggleNode = (key) => {
+    setExpanded((current) => {
+      const next = new Set(current);
+      if (next.has(key)) next.delete(key); else next.add(key);
+      return next;
+    });
+  };
+  return (
+    <div className="pt-check-layout">
+      <div className="pt-check-main">
+        <div className="pt-check-actions">
+          <button type="button" onClick={() => setExpanded(allExpanded ? new Set() : new Set(expandableKeys))}>Expand/Collapse All</button>
+          <button type="button">Show Incorrect Items</button>
+        </div>
+        <div className="pt-check-grid" role="table" aria-label="Packet Tracer assessment items">
+          <div className="pt-check-row pt-check-head" role="row">
+            <span>Assessment Items</span><span>Status</span><span>Points</span><span>Component(s)</span><span>Feedback</span>
+          </div>
+          {visibleRows.map((row) => {
+            const item = row.item;
+            const hasChildren = row.children.length > 0;
+            return (
+              <div className="pt-check-row" role="row" key={row.key}>
+                <span className="pt-check-name" style={{ paddingLeft: `${Math.max(0, row.depth) * 20 + 4}px` }} title={item?.path || row.name}>
+                  {hasChildren ? (
+                    <button type="button" className="pt-check-expander" onClick={() => toggleNode(row.key)} aria-label={`${expanded.has(row.key) ? "Collapse" : "Expand"} ${row.name}`}>
+                      {expanded.has(row.key) ? "-" : "+"}
+                    </button>
+                  ) : <span className="pt-check-spacer" />}
+                  {item && <span className="pt-check-x">x</span>}
+                  <span>{row.name}</span>
+                </span>
+                <span>{item ? (item.status || "Incorrect") : ""}</span>
+                <span>{item?.points || ""}</span>
+                <span title={item?.components || ""}>{item?.components || ""}</span>
+                <span title={item?.attrs?.incorrectFeedback || item?.attrs?.feedback || ""}>{item?.attrs?.incorrectFeedback || item?.attrs?.feedback || ""}</span>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+      <PacketTracerAssessmentSummary items={items} />
+    </div>
   );
 }
 
@@ -2518,7 +2921,7 @@ function Events({ events }) {
 }
 
 const PacketTracerReverseReport = React.memo(function PacketTracerReverseReport({ activity }) {
-  const [reportTab, setReportTab] = useState("overview");
+  const [reportTab, setReportTab] = useState("assessment");
   const report = activity?.reverseReport || activity?.diagnostics || {};
   const assessmentSections = packetTracerAssessmentSections(activity);
   const assessmentCount = (assessmentSections.assessmentItems?.length || 0) + (assessmentSections.connectivityTests?.length || 0);
@@ -2537,7 +2940,7 @@ const PacketTracerReverseReport = React.memo(function PacketTracerReverseReport(
     URL.revokeObjectURL(a.href);
   };
   return (
-    <div className="events" style={{ padding: 16, overflow: "auto" }}>
+    <div className="events pt-check-window">
       <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 12 }}>
         <div style={{ flex: 1, minWidth: 0 }}>
           <div style={{ color: "var(--fg-0)", fontSize: 13, fontWeight: 600 }}>{activity.title || activity.sourceName || "Packet Tracer file"}</div>
@@ -2551,17 +2954,18 @@ const PacketTracerReverseReport = React.memo(function PacketTracerReverseReport(
         <button className="hud-btn" style={{ width: "auto", padding: "0 10px", fontSize: 11 }} onClick={download}>JSON</button>
       </div>
 
-      <div style={{ display: "flex", gap: 6, marginBottom: 12, overflowX: "auto" }}>
+      <div className="pt-check-tabs" role="tablist" aria-label="Packet Tracer check results">
         {[
-          ["overview", "Overview", null],
-          ["connectivity", "Connectivity Tests", assessmentSections.connectivityTests.length],
-          ["assessment", "Assessment Items", assessmentSections.assessmentItems.length],
+          ["overview", "Overall Feedback", null],
+          ["assessment", "Assessment Items", null],
+          ["connectivity", "Connectivity Tests", null],
           ["raw", "Raw Evidence", null],
         ].map(([key, label, badge]) => (
           <button
             key={key}
-            className={`hud-btn ${reportTab === key ? "active" : ""}`}
-            style={{ width: "auto", padding: "0 10px", fontSize: 11, whiteSpace: "nowrap" }}
+            className={`pt-check-tab ${reportTab === key ? "active" : ""}`}
+            role="tab"
+            aria-selected={reportTab === key}
             onClick={() => setReportTab(key)}
           >
             {label}{badge != null ? ` ${badge}` : ""}

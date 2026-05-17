@@ -26,6 +26,10 @@ function Topology(props) {
     return () => clearTimeout(t);
   }, [toast]);
 
+  function labelScaleForZoom(k) {
+    return k > 1 ? 1 / Math.pow(k, 0.45) : 1;
+  }
+
   const applyPanStyles = (nextPan) => {
     if (wrapRef.current) {
       wrapRef.current.style.backgroundPosition = `${nextPan.x}px ${nextPan.y}px`;
@@ -33,6 +37,7 @@ function Topology(props) {
     }
     if (worldRef.current) {
       worldRef.current.style.transform = `translate(${nextPan.x}px, ${nextPan.y}px) scale(${nextPan.k})`;
+      worldRef.current.style.setProperty("--canvas-label-scale", labelScaleForZoom(nextPan.k));
     }
   };
 
@@ -218,6 +223,84 @@ function Topology(props) {
   const cat = window.DeviceCatalog;
   const meta = (d) => cat.find(c => c.platform === d.platform && c.kind === d.kind) || cat.find(c => c.platform === d.platform) || cat.find(c => c.kind === d.kind) || cat[0];
   const ifaceName = window.OPT_Engine.shortIfaceName;
+  const linkLabelPositions = React.useMemo(() => {
+    const pairGroups = new Map();
+    links.forEach((l) => {
+      const key = [l.a, l.b].filter(Boolean).sort().join(":");
+      if (!pairGroups.has(key)) pairGroups.set(key, []);
+      pairGroups.get(key).push(l.id);
+    });
+    const pairSlots = {};
+    for (const ids of pairGroups.values()) {
+      ids.forEach((id, index) => {
+        pairSlots[id] = { offset: index - (ids.length - 1) / 2, count: ids.length };
+      });
+    }
+
+    const placed = Object.values(devices || {}).map((d) => ({
+      left: d.x - 38,
+      right: d.x + 38,
+      top: d.y - 34,
+      bottom: d.y + 58,
+    }));
+    const positions = {};
+    const overlaps = (box) => placed.some((other) => !(
+      box.right < other.left || box.left > other.right || box.bottom < other.top || box.top > other.bottom
+    ));
+
+    links.forEach((l) => {
+      const a = devices[l.a], b = devices[l.b];
+      if (!a || !b) return;
+      const dx = b.x - a.x, dy = b.y - a.y;
+      const len = Math.hypot(dx, dy) || 1;
+      const nx = -dy / len, ny = dx / len;
+      const tx = dx / len, ty = dy / len;
+      const slot = pairSlots[l.id] || { offset: 0, count: 1 };
+      const label = `${ifaceName(l.ai)} ↔ ${ifaceName(l.bi)}`;
+      const width = Math.min(168, Math.max(62, label.length * 6.1 + 12));
+      const height = 20;
+      const basePerp = slot.count > 1 ? slot.offset * 30 : 16;
+      const perpOptions = slot.count > 1
+        ? [basePerp, basePerp + Math.sign(basePerp || 1) * 20, basePerp - Math.sign(basePerp || 1) * 20, -basePerp || 28]
+        : [16, -16, 36, -36, 56, -56];
+      const alongOptions = [0, -34, 34, -68, 68];
+      let chosen = null;
+      for (const along of alongOptions) {
+        for (const perp of perpOptions) {
+          const x = (a.x + b.x) / 2 + nx * perp + tx * along;
+          const y = (a.y + b.y) / 2 + ny * perp + ty * along;
+          const box = {
+            left: x - width / 2 - 8,
+            right: x + width / 2 + 8,
+            top: y - height / 2 - 6,
+            bottom: y + height / 2 + 6,
+          };
+          if (!overlaps(box)) {
+            chosen = { x, y, box };
+            break;
+          }
+        }
+        if (chosen) break;
+      }
+      if (!chosen) {
+        const x = (a.x + b.x) / 2 + nx * basePerp;
+        const y = (a.y + b.y) / 2 + ny * basePerp;
+        chosen = {
+          x,
+          y,
+          box: {
+            left: x - width / 2 - 8,
+            right: x + width / 2 + 8,
+            top: y - height / 2 - 6,
+            bottom: y + height / 2 + 6,
+          },
+        };
+      }
+      placed.push(chosen.box);
+      positions[l.id] = { x: chosen.x, y: chosen.y, label };
+    });
+    return positions;
+  }, [devices, links]);
 
   const fit = () => {
     const wrap = wrapRef.current;
@@ -289,6 +372,7 @@ function Topology(props) {
           position: "absolute", inset: 0,
           transform: `translate(${pan.x}px, ${pan.y}px) scale(${pan.k})`,
           transformOrigin: "0 0",
+          "--canvas-label-scale": labelScaleForZoom(pan.k),
         }}
       >
         {/* Links SVG layer */}
@@ -327,20 +411,16 @@ function Topology(props) {
         {links.map(l => {
           const a = devices[l.a], b = devices[l.b];
           if (!a || !b) return null;
-          const dx = b.x - a.x, dy = b.y - a.y;
-          const len = Math.hypot(dx, dy) || 1;
-          // Offset perpendicular to the cable so the label isn't dead-center
-          const ox = -dy / len * 10;
-          const oy = dx / len * 10;
-          const mx = (a.x + b.x) / 2 + ox;
-          const my = (a.y + b.y) / 2 + oy;
+          const labelPosition = linkLabelPositions[l.id];
+          const mx = labelPosition?.x ?? (a.x + b.x) / 2;
+          const my = labelPosition?.y ?? (a.y + b.y) / 2;
           return (
             <div
               key={`lbl-${l.id}`}
               className="link-label"
               style={{ left: mx, top: my }}
               onDoubleClick={() => onDeleteLink && onDeleteLink(l.id)}
-              title="Double-click to remove"
+              title={`${ifaceName(l.ai)} ↔ ${ifaceName(l.bi)}. Double-click to remove`}
             >
               <span title={l.ai}>{ifaceName(l.ai)}</span> ↔ <span title={l.bi}>{ifaceName(l.bi)}</span>
             </div>
