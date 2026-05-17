@@ -565,12 +565,21 @@ End of document`;
     const db = await openPacketTracerDb();
     if (!db) return null;
     return new Promise((resolve, reject) => {
+      const close = () => {
+        try { db.close(); } catch (e) {}
+      };
       const tx = db.transaction("rawFiles", "readonly");
       const req = tx.objectStore("rawFiles").get(sha256);
       req.onsuccess = () => resolve(req.result || null);
-      req.onerror = () => reject(req.error);
-      tx.oncomplete = () => db.close();
-      tx.onerror = () => db.close();
+      req.onerror = () => {
+        close();
+        reject(req.error);
+      };
+      tx.oncomplete = close;
+      tx.onerror = () => {
+        close();
+        reject(tx.error);
+      };
     });
   }
 
@@ -690,6 +699,14 @@ ${report.notes.map((n) => `- ${n}`).join("\n")}`;
     return out;
   }
 
+  function resolveAttrsObject(element, variables = {}) {
+    const out = {};
+    for (const [key, value] of Object.entries(attrsObject(element))) {
+      out[key] = resolvePacketTracerTokens(value, variables);
+    }
+    return out;
+  }
+
   function htmlToPlainText(html) {
     const doc = new DOMParser().parseFromString(html || "", "text/html");
     return (doc.body?.textContent || "").replace(/\u00a0/g, " ").replace(/[ \t]+\n/g, "\n").replace(/\n{3,}/g, "\n\n").trim();
@@ -704,37 +721,124 @@ ${report.notes.map((n) => `- ${n}`).join("\n")}`;
     return element ? new XMLSerializer().serializeToString(element) : "";
   }
 
-  function parseAssessmentNode(node) {
+  function collectPacketTracerVariables(root) {
+    const variables = {};
+    const manager = root?.getElementsByTagName("VARIABLE_MANAGER")?.[0];
+    const pools = pathChild(manager, ["VARIABLES_POOLS"]) || manager;
+    for (const variable of Array.from(pools?.getElementsByTagName?.("*") || [])) {
+      const name = childText(variable, "NAME");
+      const value = childText(variable, "VALUE");
+      if (name) variables[name] = value;
+    }
+    return variables;
+  }
+
+  function resolvePacketTracerTokens(text, variables = {}) {
+    return String(text || "").replace(/\[\[([A-Za-z0-9_.:-]+)\]\]/g, (match, name) => {
+      if (Object.prototype.hasOwnProperty.call(variables, name)) return variables[name];
+      return name || match;
+    });
+  }
+
+  function hasScoredAssessmentNode(node) {
+    if (!node) return false;
+    if (directChild(node, "NAME")?.hasAttribute("checkType")) return true;
+    return Array.from(node.getElementsByTagName?.("NAME") || []).some((name) => name.hasAttribute("checkType"));
+  }
+
+  function assessmentSearchText(item) {
+    return [
+      item?.name,
+      item?.path,
+      item?.rootName,
+      item?.parentPath,
+      item?.components,
+      item?.checkType,
+      item?.rootCheckType,
+      item?.eclass,
+      item?.id,
+      ...(item?.checkTypes || []),
+      ...Object.values(item?.attrs || {}),
+    ].filter(Boolean).join(" ").toLowerCase();
+  }
+
+  function isConnectivityAssessmentItem(item) {
+    const text = assessmentSearchText(item);
+    return /\b(connectivity|reachability|reachable|ping|icmp|trace\s*route|traceroute|simple\s+pdu|complex\s+pdu|pdu|successful\s+connection|packet\s+test)\b/i.test(text);
+  }
+
+  function buildAssessmentSections(items) {
+    const connectivityTests = [];
+    const assessmentItems = [];
+    for (const item of items || []) {
+      (isConnectivityAssessmentItem(item) ? connectivityTests : assessmentItems).push(item);
+    }
+    return {
+      connectivityTests,
+      assessmentItems,
+      counts: {
+        total: items?.length || 0,
+        connectivityTests: connectivityTests.length,
+        assessmentItems: assessmentItems.length,
+      },
+      roots: Object.entries((items || []).reduce((acc, item) => {
+        const key = item.rootName || "Assessment Items";
+        acc[key] = (acc[key] || 0) + 1;
+        return acc;
+      }, {})).map(([name, count]) => ({ name, count })),
+    };
+  }
+
+  function parseAssessmentNode(node, variables = {}) {
     const nameEl = directChild(node, "NAME");
-    const children = directChildren(node, "NODE").map(parseAssessmentNode).filter(Boolean);
+    const children = directChildren(node, "NODE").map((child) => parseAssessmentNode(child, variables)).filter(Boolean);
     if (!nameEl && children.length === 0) return null;
     return {
-      name: nameEl?.textContent?.trim() || childText(node, "ID") || "Assessment Item",
-      id: childText(node, "ID"),
-      components: childText(node, "COMPONENTS"),
+      name: resolvePacketTracerTokens(nameEl?.textContent?.trim() || childText(node, "ID") || "Assessment Item", variables),
+      id: resolvePacketTracerTokens(childText(node, "ID"), variables),
+      components: resolvePacketTracerTokens(childText(node, "COMPONENTS"), variables),
       points: childText(node, "POINTS"),
-      value: nameEl?.getAttribute("nodeValue") || "",
-      checkType: nameEl?.getAttribute("checkType") || "",
-      eclass: nameEl?.getAttribute("eclass") || "",
-      attrs: attrsObject(nameEl),
+      value: resolvePacketTracerTokens(nameEl?.getAttribute("nodeValue") || "", variables),
+      checkType: resolvePacketTracerTokens(nameEl?.getAttribute("checkType") || "", variables),
+      eclass: resolvePacketTracerTokens(nameEl?.getAttribute("eclass") || "", variables),
+      attrs: resolveAttrsObject(nameEl, variables),
       children,
     };
   }
 
-  function flattenAssessment(nodes, prefix = []) {
+  function flattenAssessment(nodes, prefix = [], inherited = {}) {
     const out = [];
     for (const node of nodes || []) {
       const path = [...prefix, node.name].filter(Boolean);
+      const checkTypes = [
+        ...(inherited.checkTypes || []),
+        node.checkType,
+      ].filter(Boolean);
+      const nextInherited = {
+        rootName: inherited.rootName || node.name,
+        rootCheckType: inherited.rootCheckType || node.checkType || "",
+        components: node.components || inherited.components || "",
+        checkType: node.checkType || inherited.checkType || "",
+        checkTypes,
+      };
       if (!node.children?.length) {
         out.push({
           path: path.join(" / "),
+          pathParts: path,
+          parentPath: prefix.join(" / "),
+          rootName: nextInherited.rootName,
           id: node.id,
-          components: node.components,
+          components: node.components || nextInherited.components,
           points: node.points,
           value: node.value,
+          checkType: node.checkType || nextInherited.checkType,
+          rootCheckType: nextInherited.rootCheckType,
+          checkTypes,
+          eclass: node.eclass,
+          attrs: node.attrs,
         });
       } else {
-        out.push(...flattenAssessment(node.children, path));
+        out.push(...flattenAssessment(node.children, path, nextInherited));
       }
     }
     return out;
@@ -749,6 +853,7 @@ ${report.notes.map((n) => `- ${n}`).join("\n")}`;
     const activityRoot = directChild(root, "ACTIVITY");
     const devicesRoot = pathChild(network, ["DEVICES"]);
     const linksRoot = pathChild(network, ["LINKS"]);
+    const variables = collectPacketTracerVariables(root);
 
     const saveRefToName = {};
     const memAddrToName = {};
@@ -756,7 +861,8 @@ ${report.notes.map((n) => `- ${n}`).join("\n")}`;
       const engine = directChild(deviceEl, "ENGINE");
       const typeEl = directChild(engine, "TYPE");
       const logical = pathChild(deviceEl, ["WORKSPACE", "LOGICAL"]);
-      const name = childText(engine, "NAME") || `PT-Device-${index + 1}`;
+      const rawName = childText(engine, "NAME") || `PT-Device-${index + 1}`;
+      const name = resolvePacketTracerTokens(rawName, variables);
       const saveRefId = childText(engine, "SAVE_REF_ID");
       const devAddr = childText(logical, "DEV_ADDR");
       if (saveRefId) saveRefToName[saveRefId] = name;
@@ -772,6 +878,7 @@ ${report.notes.map((n) => `- ${n}`).join("\n")}`;
         power: childText(engine, "POWER"),
         x: Number(childText(logical, "X")) || 300 + index * 80,
         y: Number(childText(logical, "Y")) || 240 + index * 60,
+        rawName,
         saveRefId,
         memAddr: devAddr,
         runningConfig,
@@ -805,13 +912,15 @@ ${report.notes.map((n) => `- ${n}`).join("\n")}`;
       childText(network, "DESCRIPTION") ||
       ""
     );
-    const title = stripPacketTracerExt(file.name) || titleFromHtml(instructionsHtml) || "Packet Tracer Assignment";
+    const resolvedInstructionsHtml = resolvePacketTracerTokens(instructionsHtml, variables);
+    const title = stripPacketTracerExt(file.name) || titleFromHtml(resolvedInstructionsHtml) || "Packet Tracer Assignment";
     const assessmentRootNodes = Array.from(doc.getElementsByTagName("NODE"))
-      .filter((node) => directChild(node, "NAME")?.hasAttribute("checkType"))
-      .filter((node) => !directChild(node.parentElement, "NAME")?.hasAttribute("checkType"))
-      .map(parseAssessmentNode)
+      .filter(hasScoredAssessmentNode)
+      .filter((node) => !(node.parentElement?.tagName === "NODE" && hasScoredAssessmentNode(node.parentElement)))
+      .map((node) => parseAssessmentNode(node, variables))
       .filter(Boolean);
     const assessmentItems = flattenAssessment(assessmentRootNodes);
+    const assessmentSections = buildAssessmentSections(assessmentItems);
     const totalPoints = assessmentItems.reduce((sum, item) => sum + (Number(item.points) || 0), 0);
     const answerCommands = Object.fromEntries(devices.map((device) => [
       device.name,
@@ -832,8 +941,8 @@ ${report.notes.map((n) => `- ${n}`).join("\n")}`;
       format: "packet-tracer-activity",
       importerVersion: 2,
       title,
-      instructionsText: htmlToPlainText(instructionsHtml),
-      instructionsHtml,
+      instructionsText: htmlToPlainText(resolvedInstructionsHtml),
+      instructionsHtml: resolvedInstructionsHtml,
       progress: {
         percent: null,
         score: null,
@@ -860,6 +969,8 @@ ${report.notes.map((n) => `- ${n}`).join("\n")}`;
         packetTracerVersion: firstDescendantText(root, "VERSION"),
         networkDeviceCount: devices.length,
         packetTracerObjectCount: allDevices.length,
+        variables,
+        assessmentClassification: assessmentSections.counts,
         hiddenObjects: allDevices.filter((device) => !devices.includes(device)).map((device) => ({
           name: device.name,
           kind: device.kind,
@@ -870,6 +981,7 @@ ${report.notes.map((n) => `- ${n}`).join("\n")}`;
         })),
       },
       reverseReport: report,
+      assessmentSections,
       featureCoverage: {
         rawFilePreserved: false,
         semanticExtraction: "decoded-xml",

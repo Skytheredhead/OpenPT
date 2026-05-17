@@ -2345,6 +2345,74 @@ function generateConfig(d) {
   return OPT_Engine.serializeConfig(d);
 }
 
+function packetTracerAssessmentText(item) {
+  return [
+    item?.name,
+    item?.path,
+    item?.rootName,
+    item?.parentPath,
+    item?.components,
+    item?.checkType,
+    item?.rootCheckType,
+    item?.eclass,
+    item?.id,
+    ...(item?.checkTypes || []),
+    ...Object.values(item?.attrs || {}),
+  ].filter(Boolean).join(" ").toLowerCase();
+}
+
+function packetTracerIsConnectivityAssessment(item) {
+  return /\b(connectivity|reachability|reachable|ping|icmp|trace\s*route|traceroute|simple\s+pdu|complex\s+pdu|pdu|successful\s+connection|packet\s+test)\b/i.test(packetTracerAssessmentText(item));
+}
+
+function packetTracerAssessmentSections(activity) {
+  const allItems = activity?.assessmentItems || [];
+  if (activity?.assessmentSections) {
+    return {
+      connectivityTests: activity.assessmentSections.connectivityTests || [],
+      assessmentItems: activity.assessmentSections.assessmentItems || [],
+      roots: activity.assessmentSections.roots || [],
+    };
+  }
+  const connectivityTests = allItems.filter(packetTracerIsConnectivityAssessment);
+  const connectivitySet = new Set(connectivityTests);
+  return {
+    connectivityTests,
+    assessmentItems: allItems.filter((item) => !connectivitySet.has(item)),
+    roots: Object.entries(allItems.reduce((acc, item) => {
+      const key = item.rootName || "Assessment Items";
+      acc[key] = (acc[key] || 0) + 1;
+      return acc;
+    }, {})).map(([name, count]) => ({ name, count })),
+  };
+}
+
+function PacketTracerAssessmentRows({ items, empty }) {
+  if (!items?.length) return <div style={{ color: "var(--fg-3)", padding: "8px 0 12px" }}>{empty}</div>;
+  return (
+    <>
+      <div className="event" style={{ gridTemplateColumns: "1fr 120px 70px" }}>
+        <span className="s dim">item</span><span className="s dim">check</span><span className="s dim">points</span>
+      </div>
+      {items.slice(0, 160).map((item, i) => (
+        <div key={`${item.path || item.name || "assessment"}-${i}`} className="event" style={{ gridTemplateColumns: "1fr 120px 70px" }}>
+          <span className="m" style={{ minWidth: 0 }}>
+            <span style={{ color: "var(--fg-1)" }}>{item.path || item.name || "Assessment Item"}</span>
+            {(item.components || item.rootName) && (
+              <span style={{ display: "block", color: "var(--fg-3)", fontSize: 10.5, marginTop: 2 }}>
+                {[item.components, item.rootName].filter(Boolean).join(" · ")}
+              </span>
+            )}
+          </span>
+          <span className="s dim" style={{ overflowWrap: "anywhere" }}>{item.checkType || item.rootCheckType || "n/a"}</span>
+          <span className="t">{item.points || "0"}</span>
+        </div>
+      ))}
+      {items.length > 160 && <div style={{ color: "var(--fg-3)", padding: "8px 0" }}>Showing first 160 of {items.length} items.</div>}
+    </>
+  );
+}
+
 function ContextMenu({ x, y, device, onClose, onAction }) {
   const ref = useRef(null);
   useEffect(() => {
@@ -2450,7 +2518,10 @@ function Events({ events }) {
 }
 
 const PacketTracerReverseReport = React.memo(function PacketTracerReverseReport({ activity }) {
+  const [reportTab, setReportTab] = useState("overview");
   const report = activity?.reverseReport || activity?.diagnostics || {};
+  const assessmentSections = packetTracerAssessmentSections(activity);
+  const assessmentCount = (assessmentSections.assessmentItems?.length || 0) + (assessmentSections.connectivityTests?.length || 0);
   const signatures = report.signatures || [];
   const strings = (report.interestingStrings && report.interestingStrings.length ? report.interestingStrings : report.strings || []).slice(0, 28);
   const entropyRows = (report.entropyByWindow || []).slice(0, 8);
@@ -2480,92 +2551,152 @@ const PacketTracerReverseReport = React.memo(function PacketTracerReverseReport(
         <button className="hud-btn" style={{ width: "auto", padding: "0 10px", fontSize: 11 }} onClick={download}>JSON</button>
       </div>
 
-      <div style={{ display: "grid", gridTemplateColumns: "130px 1fr", gap: "6px 12px", fontSize: 11.5, marginBottom: 14 }}>
-        <div style={{ color: "var(--fg-3)" }}>SHA-256</div>
-        <code style={{ color: "var(--fg-1)", overflowWrap: "anywhere" }}>{activity.sourceSha256 || report.sha256 || "unavailable"}</code>
-        <div style={{ color: "var(--fg-3)" }}>Header</div>
-        <code style={{ color: "var(--fg-1)" }}>{activity.sourceHeadHex || report.headHex || "n/a"}</code>
-        <div style={{ color: "var(--fg-3)" }}>Tail</div>
-        <code style={{ color: "var(--fg-1)" }}>{report.tailHex || "n/a"}</code>
-        <div style={{ color: "var(--fg-3)" }}>Entropy</div>
-        <span style={{ color: "var(--fg-1)" }}>{report.entropy != null ? `${report.entropy} bits/byte` : "n/a"}</span>
-        <div style={{ color: "var(--fg-3)" }}>Raw PKA</div>
-        <span style={{ color: activity.rawFile?.storage?.stored ? "var(--ok)" : "var(--warn)" }}>
-          {activity.rawFile?.storage?.stored ? `preserved in ${activity.rawFile.storage.backend}` : `not preserved${activity.rawFile?.storage?.reason ? `: ${activity.rawFile.storage.reason}` : ""}`}
-        </span>
-        <div style={{ color: "var(--fg-3)" }}>Semantic coverage</div>
-        <span style={{ color: activity.unsupported ? "var(--warn)" : "var(--fg-1)" }}>
-          {activity.featureCoverage?.semanticExtraction || (activity.unsupported ? "not-decoded" : "profile-derived")}
-        </span>
-        {report.decoder && (
-          <>
-            <div style={{ color: "var(--fg-3)" }}>Decoder</div>
-            <span style={{ color: report.decoder.status === "decoded" ? "var(--ok)" : "var(--warn)", overflowWrap: "anywhere" }}>
-              {report.decoder.status || "unknown"}
-              {report.decoder.profile ? ` · ${report.decoder.profile}` : report.decoder.attemptedProfile ? ` · ${report.decoder.attemptedProfile}` : ""}
-              {report.decoder.error ? ` · ${report.decoder.error}` : ""}
-            </span>
-          </>
-        )}
-        {activity.progress?.score && (
-          <>
-            <div style={{ color: "var(--fg-3)" }}>Progress</div>
-            <span style={{ color: "var(--ok)" }}>{activity.progress.score} · {activity.progress.itemCount}</span>
-          </>
-        )}
+      <div style={{ display: "flex", gap: 6, marginBottom: 12, overflowX: "auto" }}>
+        {[
+          ["overview", "Overview", null],
+          ["connectivity", "Connectivity Tests", assessmentSections.connectivityTests.length],
+          ["assessment", "Assessment Items", assessmentSections.assessmentItems.length],
+          ["raw", "Raw Evidence", null],
+        ].map(([key, label, badge]) => (
+          <button
+            key={key}
+            className={`hud-btn ${reportTab === key ? "active" : ""}`}
+            style={{ width: "auto", padding: "0 10px", fontSize: 11, whiteSpace: "nowrap" }}
+            onClick={() => setReportTab(key)}
+          >
+            {label}{badge != null ? ` ${badge}` : ""}
+          </button>
+        ))}
       </div>
 
-      {activity.unsupported && (
-        <div style={{ color: "var(--warn)", marginBottom: 14, fontSize: 12 }}>
-          No full extractor profile is packaged for this hash yet. The original file is preserved raw when browser storage is available, and unsupported Packet Tracer-only features are tracked below.
+      {reportTab === "overview" && (
+        <>
+          <div style={{ display: "grid", gridTemplateColumns: "130px 1fr", gap: "6px 12px", fontSize: 11.5, marginBottom: 14 }}>
+            <div style={{ color: "var(--fg-3)" }}>SHA-256</div>
+            <code style={{ color: "var(--fg-1)", overflowWrap: "anywhere" }}>{activity.sourceSha256 || report.sha256 || "unavailable"}</code>
+            <div style={{ color: "var(--fg-3)" }}>Header</div>
+            <code style={{ color: "var(--fg-1)" }}>{activity.sourceHeadHex || report.headHex || "n/a"}</code>
+            <div style={{ color: "var(--fg-3)" }}>Tail</div>
+            <code style={{ color: "var(--fg-1)" }}>{report.tailHex || "n/a"}</code>
+            <div style={{ color: "var(--fg-3)" }}>Entropy</div>
+            <span style={{ color: "var(--fg-1)" }}>{report.entropy != null ? `${report.entropy} bits/byte` : "n/a"}</span>
+            <div style={{ color: "var(--fg-3)" }}>Raw PKA</div>
+            <span style={{ color: activity.rawFile?.storage?.stored ? "var(--ok)" : "var(--warn)" }}>
+              {activity.rawFile?.storage?.stored ? `preserved in ${activity.rawFile.storage.backend}` : `not preserved${activity.rawFile?.storage?.reason ? `: ${activity.rawFile.storage.reason}` : ""}`}
+            </span>
+            <div style={{ color: "var(--fg-3)" }}>Semantic coverage</div>
+            <span style={{ color: activity.unsupported ? "var(--warn)" : "var(--fg-1)" }}>
+              {activity.featureCoverage?.semanticExtraction || (activity.unsupported ? "not-decoded" : "profile-derived")}
+            </span>
+            <div style={{ color: "var(--fg-3)" }}>Assessment</div>
+            <span style={{ color: assessmentCount ? "var(--fg-1)" : "var(--fg-3)" }}>
+              {assessmentCount ? `${assessmentCount} items · ${assessmentSections.connectivityTests.length} connectivity` : "none found"}
+            </span>
+            {report.decoder && (
+              <>
+                <div style={{ color: "var(--fg-3)" }}>Decoder</div>
+                <span style={{ color: report.decoder.status === "decoded" ? "var(--ok)" : "var(--warn)", overflowWrap: "anywhere" }}>
+                  {report.decoder.status || "unknown"}
+                  {report.decoder.profile ? ` · ${report.decoder.profile}` : report.decoder.attemptedProfile ? ` · ${report.decoder.attemptedProfile}` : ""}
+                  {report.decoder.error ? ` · ${report.decoder.error}` : ""}
+                </span>
+              </>
+            )}
+            {activity.progress?.score && (
+              <>
+                <div style={{ color: "var(--fg-3)" }}>Progress</div>
+                <span style={{ color: "var(--ok)" }}>{activity.progress.score} · {activity.progress.itemCount}</span>
+              </>
+            )}
+          </div>
+
+          {activity.unsupported && (
+            <div style={{ color: "var(--warn)", marginBottom: 14, fontSize: 12 }}>
+              No full extractor profile is packaged for this hash yet. The original file is preserved raw when browser storage is available, and unsupported Packet Tracer-only features are tracked below.
+            </div>
+          )}
+
+          {assessmentCount > 0 && assessmentSections.connectivityTests.length === 0 && (
+            <div style={{ color: "var(--warn)", marginBottom: 14, fontSize: 12 }}>
+              Assessment data was decoded, but no connectivity tests matched the classifier. Check the assessment roots below to extend the import mapping for this PKA.
+            </div>
+          )}
+
+          {assessmentSections.roots?.length > 0 && (
+            <>
+              <div style={{ color: "var(--fg-2)", fontWeight: 600, margin: "10px 0 6px" }}>Assessment Roots</div>
+              {assessmentSections.roots.map((root, i) => (
+                <div key={`${root.name}-${i}`} className="event" style={{ gridTemplateColumns: "1fr 70px" }}>
+                  <span className="m">{root.name}</span>
+                  <span className="t">{root.count}</span>
+                </div>
+              ))}
+            </>
+          )}
+
+          {activity.featureCoverage?.preservedButUnsupported?.length > 0 && (
+            <>
+              <div style={{ color: "var(--fg-2)", fontWeight: 600, margin: "10px 0 6px" }}>Preserved But Not Decoded</div>
+              {activity.featureCoverage.preservedButUnsupported.map((item, i) => (
+                <div key={i} className="event" style={{ gridTemplateColumns: "130px 1fr" }}>
+                  <span className="s warn">raw payload</span>
+                  <span className="m">{item}</span>
+                </div>
+              ))}
+            </>
+          )}
+        </>
+      )}
+
+      {reportTab === "connectivity" && (
+        <div>
+          <PacketTracerAssessmentRows items={assessmentSections.connectivityTests} empty="No connectivity tests were classified for this PKA." />
         </div>
       )}
 
-      {activity.featureCoverage?.preservedButUnsupported?.length > 0 && (
+      {reportTab === "assessment" && (
+        <div>
+          <PacketTracerAssessmentRows items={assessmentSections.assessmentItems} empty="No non-connectivity assessment items were found." />
+        </div>
+      )}
+
+      {reportTab === "raw" && (
         <>
-          <div style={{ color: "var(--fg-2)", fontWeight: 600, margin: "10px 0 6px" }}>Preserved But Not Decoded</div>
-          {activity.featureCoverage.preservedButUnsupported.map((item, i) => (
-            <div key={i} className="event" style={{ gridTemplateColumns: "130px 1fr" }}>
-              <span className="s warn">raw payload</span>
-              <span className="m">{item}</span>
+          <div style={{ color: "var(--fg-2)", fontWeight: 600, margin: "10px 0 6px" }}>Embedded Signatures</div>
+          <div className="event" style={{ gridTemplateColumns: "130px 90px 1fr" }}>
+            <span className="s dim">type</span><span className="s dim">offset</span><span className="m">signature</span>
+          </div>
+          {signatures.length === 0 ? (
+            <div style={{ color: "var(--fg-3)", padding: "6px 0 12px" }}>No PDF, ZIP, RTF, HTML, or image signatures found.</div>
+          ) : signatures.slice(0, 40).map((s, i) => (
+            <div key={i} className="event" style={{ gridTemplateColumns: "130px 90px 1fr" }}>
+              <span className="s ok">{s.label}</span>
+              <span className="t">0x{s.offset.toString(16)}</span>
+              <span className="m"><code>{s.hex}</code></span>
+            </div>
+          ))}
+
+          <div style={{ color: "var(--fg-2)", fontWeight: 600, margin: "12px 0 6px" }}>Entropy Windows</div>
+          {entropyRows.map((row, i) => (
+            <div key={i} className="event" style={{ gridTemplateColumns: "90px 90px 1fr" }}>
+              <span className="t">0x{row.offset.toString(16)}</span>
+              <span className="s dim">{row.length}b</span>
+              <span className="m">{row.entropy} bits/byte</span>
+            </div>
+          ))}
+
+          <div style={{ color: "var(--fg-2)", fontWeight: 600, margin: "12px 0 6px" }}>String Sample</div>
+          {strings.length === 0 ? (
+            <div style={{ color: "var(--fg-3)", padding: "6px 0" }}>No printable strings found.</div>
+          ) : strings.map((s, i) => (
+            <div key={i} className="event" style={{ gridTemplateColumns: "90px 58px 1fr" }}>
+              <span className="t">0x{s.offset.toString(16)}</span>
+              <span className="s dim">{s.length}</span>
+              <span className="m"><code>{s.text}</code></span>
             </div>
           ))}
         </>
       )}
-
-      <div style={{ color: "var(--fg-2)", fontWeight: 600, margin: "10px 0 6px" }}>Embedded Signatures</div>
-      <div className="event" style={{ gridTemplateColumns: "130px 90px 1fr" }}>
-        <span className="s dim">type</span><span className="s dim">offset</span><span className="m">signature</span>
-      </div>
-      {signatures.length === 0 ? (
-        <div style={{ color: "var(--fg-3)", padding: "6px 0 12px" }}>No PDF, ZIP, RTF, HTML, or image signatures found.</div>
-      ) : signatures.slice(0, 40).map((s, i) => (
-        <div key={i} className="event" style={{ gridTemplateColumns: "130px 90px 1fr" }}>
-          <span className="s ok">{s.label}</span>
-          <span className="t">0x{s.offset.toString(16)}</span>
-          <span className="m"><code>{s.hex}</code></span>
-        </div>
-      ))}
-
-      <div style={{ color: "var(--fg-2)", fontWeight: 600, margin: "12px 0 6px" }}>Entropy Windows</div>
-      {entropyRows.map((row, i) => (
-        <div key={i} className="event" style={{ gridTemplateColumns: "90px 90px 1fr" }}>
-          <span className="t">0x{row.offset.toString(16)}</span>
-          <span className="s dim">{row.length}b</span>
-          <span className="m">{row.entropy} bits/byte</span>
-        </div>
-      ))}
-
-      <div style={{ color: "var(--fg-2)", fontWeight: 600, margin: "12px 0 6px" }}>String Sample</div>
-      {strings.length === 0 ? (
-        <div style={{ color: "var(--fg-3)", padding: "6px 0" }}>No printable strings found.</div>
-      ) : strings.map((s, i) => (
-        <div key={i} className="event" style={{ gridTemplateColumns: "90px 58px 1fr" }}>
-          <span className="t">0x{s.offset.toString(16)}</span>
-          <span className="s dim">{s.length}</span>
-          <span className="m"><code>{s.text}</code></span>
-        </div>
-      ))}
     </div>
   );
 });

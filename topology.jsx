@@ -11,7 +11,10 @@ function Topology(props) {
   const selSet = React.useMemo(() => new Set(selectedIds || []), [selectedIds]);
 
   const wrapRef = React.useRef(null);
+  const worldRef = React.useRef(null);
+  const panRef = React.useRef(viewState?.pan || { x: 0, y: 0, k: 1 });
   const viewStateCommitRef = React.useRef(null);
+  const panStateCommitRef = React.useRef(null);
   const [pan, setPan] = React.useState(viewState?.pan || { x: 0, y: 0, k: 1 });
   const [drag, setDrag] = React.useState(null);   // { id, ox, oy }
   const [linkPick, setLinkPick] = React.useState(null);  // { devId, iface? }
@@ -23,22 +26,54 @@ function Topology(props) {
     return () => clearTimeout(t);
   }, [toast]);
 
-  React.useEffect(() => {
-    if (viewState?.pan) setPan(viewState.pan);
-  }, [viewState?.pan?.x, viewState?.pan?.y, viewState?.pan?.k]);
+  const applyPanStyles = (nextPan) => {
+    if (wrapRef.current) {
+      wrapRef.current.style.backgroundPosition = `${nextPan.x}px ${nextPan.y}px`;
+      wrapRef.current.style.backgroundSize = `${24 * nextPan.k}px ${24 * nextPan.k}px`;
+    }
+    if (worldRef.current) {
+      worldRef.current.style.transform = `translate(${nextPan.x}px, ${nextPan.y}px) scale(${nextPan.k})`;
+    }
+  };
 
-  React.useEffect(() => {
+  const updatePan = (nextPan, options = {}) => {
+    panRef.current = nextPan;
+    applyPanStyles(nextPan);
+
+    clearTimeout(panStateCommitRef.current);
+    if (options.render) {
+      setPan(nextPan);
+    } else {
+      panStateCommitRef.current = setTimeout(() => setPan(panRef.current), 220);
+    }
+
     if (!onViewStateChange) return;
     clearTimeout(viewStateCommitRef.current);
     viewStateCommitRef.current = setTimeout(() => {
-      onViewStateChange({ pan });
-    }, 180);
-    return () => clearTimeout(viewStateCommitRef.current);
-  }, [pan.x, pan.y, pan.k, onViewStateChange]);
+      onViewStateChange({ pan: panRef.current });
+    }, 500);
+  };
+
+  React.useEffect(() => {
+    if (viewState?.pan) {
+      panRef.current = viewState.pan;
+      setPan(viewState.pan);
+      requestAnimationFrame(() => applyPanStyles(viewState.pan));
+    }
+  }, [viewState?.pan?.x, viewState?.pan?.y, viewState?.pan?.k]);
+
+  React.useEffect(() => {
+    requestAnimationFrame(() => applyPanStyles(panRef.current));
+    return () => {
+      clearTimeout(viewStateCommitRef.current);
+      clearTimeout(panStateCommitRef.current);
+    };
+  }, []);
 
   const screenToWorld = (px, py) => {
     const r = wrapRef.current.getBoundingClientRect();
-    return { x: (px - r.left - pan.x) / pan.k, y: (py - r.top - pan.y) / pan.k };
+    const currentPan = panRef.current;
+    return { x: (px - r.left - currentPan.x) / currentPan.k, y: (py - r.top - currentPan.y) / currentPan.k };
   };
 
   // ── Drop new device from palette
@@ -53,8 +88,8 @@ function Topology(props) {
   // ── Pan with middle/right drag
   const onMouseDownBg = (e) => {
     if (e.button === 1 || (e.button === 0 && e.altKey)) {
-      const start = { ...pan, mx: e.clientX, my: e.clientY };
-      const move = (ev) => setPan({ x: start.x + ev.clientX - start.mx, y: start.y + ev.clientY - start.my, k: start.k });
+      const start = { ...panRef.current, mx: e.clientX, my: e.clientY };
+      const move = (ev) => updatePan({ x: start.x + ev.clientX - start.mx, y: start.y + ev.clientY - start.my, k: start.k });
       const up = () => { window.removeEventListener("mousemove", move); window.removeEventListener("mouseup", up); };
       window.addEventListener("mousemove", move);
       window.addEventListener("mouseup", up);
@@ -79,18 +114,20 @@ function Topology(props) {
     // Plain wheel/two-finger trackpad scroll → pan.
     if (e.ctrlKey || e.metaKey) {
       const delta = -e.deltaY * 0.01;
-      const k = Math.max(0.3, Math.min(2.5, pan.k * (1 + delta)));
+      const currentPan = panRef.current;
+      const k = Math.max(0.3, Math.min(2.5, currentPan.k * (1 + delta)));
       const r = wrapRef.current.getBoundingClientRect();
       const cx = e.clientX - r.left, cy = e.clientY - r.top;
-      setPan({
-        x: cx - (cx - pan.x) * (k / pan.k),
-        y: cy - (cy - pan.y) * (k / pan.k),
+      updatePan({
+        x: cx - (cx - currentPan.x) * (k / currentPan.k),
+        y: cy - (cy - currentPan.y) * (k / currentPan.k),
         k,
       });
     } else {
       // Pan with trackpad — scale down for comfortable feel
       const factor = 0.5;
-      setPan((p) => ({ x: p.x - e.deltaX * factor, y: p.y - e.deltaY * factor, k: p.k }));
+      const currentPan = panRef.current;
+      updatePan({ x: currentPan.x - e.deltaX * factor, y: currentPan.y - e.deltaY * factor, k: currentPan.k });
     }
   };
 
@@ -150,7 +187,7 @@ function Topology(props) {
       const dx = e.clientX - drag.startX, dy = e.clientY - drag.startY;
       if (!drag.moved && (Math.abs(dx) > 3 || Math.abs(dy) > 3)) drag.moved = true;
       // World-space delta
-      const wx = dx / pan.k, wy = dy / pan.k;
+      const wx = dx / panRef.current.k, wy = dy / panRef.current.k;
       const deltas = drag.groupIds.map((id) => {
         const start = drag.startPositions[id];
         return { id, x: start.x + wx, y: start.y + wy };
@@ -186,7 +223,7 @@ function Topology(props) {
     const wrap = wrapRef.current;
     if (!wrap) return;
     const ds = Object.values(devices);
-    if (!ds.length) { setPan({ x: 0, y: 0, k: 1 }); return; }
+    if (!ds.length) { updatePan({ x: 0, y: 0, k: 1 }, { render: true }); return; }
     const minX = Math.min(...ds.map(d => d.x)) - 60;
     const minY = Math.min(...ds.map(d => d.y)) - 60;
     const maxX = Math.max(...ds.map(d => d.x)) + 60;
@@ -194,11 +231,11 @@ function Topology(props) {
     const w = wrap.clientWidth, h = wrap.clientHeight;
     const kx = w / (maxX - minX), ky = h / (maxY - minY);
     const k = Math.max(0.4, Math.min(1.3, Math.min(kx, ky)));
-    setPan({
+    updatePan({
       x: (w - (maxX - minX) * k) / 2 - minX * k,
       y: (h - (maxY - minY) * k) / 2 - minY * k,
       k,
-    });
+    }, { render: true });
   };
 
   // Auto-fit on mount
@@ -227,8 +264,8 @@ function Topology(props) {
     >
       {/* HUD top-right */}
       <div className="canvas-hud">
-        <div className="hud-btn" title="Zoom in" onClick={() => setPan({ ...pan, k: Math.min(2.5, pan.k * 1.15) })}>{window.Icon.zoomIn()}</div>
-        <div className="hud-btn" title="Zoom out" onClick={() => setPan({ ...pan, k: Math.max(0.4, pan.k / 1.15) })}>{window.Icon.zoomOut()}</div>
+        <div className="hud-btn" title="Zoom in" onClick={() => updatePan({ ...panRef.current, k: Math.min(2.5, panRef.current.k * 1.15) }, { render: true })}>{window.Icon.zoomIn()}</div>
+        <div className="hud-btn" title="Zoom out" onClick={() => updatePan({ ...panRef.current, k: Math.max(0.4, panRef.current.k / 1.15) }, { render: true })}>{window.Icon.zoomOut()}</div>
         <div className="hud-btn" title="Fit to screen" onClick={fit}>{window.Icon.fit()}</div>
       </div>
 
@@ -247,6 +284,7 @@ function Topology(props) {
 
       {/* World transform */}
       <div
+        ref={worldRef}
         style={{
           position: "absolute", inset: 0,
           transform: `translate(${pan.x}px, ${pan.y}px) scale(${pan.k})`,
