@@ -233,8 +233,9 @@ function App() {
           links: norm.links,
           selectedIds: cur.selectedIds || (cur.selectedId ? [cur.selectedId] : []),
           openConsoles: cur.openConsoles || [],
-          activeBottom: cur.activeBottom || "events",
+          activeBottom: (cur.activeBottom && cur.activeBottom !== "pka-report") ? cur.activeBottom : "events",
           ptActivity: cur.ptActivity || null,
+          ptSidebarOpen: cur.ptSidebarOpen ?? !!cur.ptActivity,
           loaded: true,
         };
       }
@@ -243,13 +244,14 @@ function App() {
     return {
       tabs: [{ id: "w-0", name: "lab-01 · two-router-vlan.opt" }],
       activeWid: "w-0",
-      snapshots: { "w-0": { devices: s.devices, links: s.links, selectedIds: [], openConsoles: [], activeBottom: "events", ptActivity: null } },
+      snapshots: { "w-0": { devices: s.devices, links: s.links, selectedIds: [], openConsoles: [], activeBottom: "events", ptActivity: null, ptSidebarOpen: false } },
       devices: s.devices,
       links: s.links,
       selectedIds: [],
       openConsoles: [],
       activeBottom: "events",
       ptActivity: null,
+      ptSidebarOpen: false,
       loaded: false,
     };
   }, []);
@@ -262,6 +264,7 @@ function App() {
   const [openConsoles, setOpenConsoles] = useState(initial.openConsoles);
   const [activeBottom, setActiveBottom] = useState(initial.activeBottom);
   const [ptActivity, setPtActivity] = useState(initial.ptActivity);
+  const [ptSidebarOpen, setPtSidebarOpen] = useState(initial.ptSidebarOpen ?? !!initial.ptActivity);
 
   // Derived: the most-recently-selected device (used for inspector / context menu)
   const selectedId = selectedIds[selectedIds.length - 1] || null;
@@ -280,22 +283,22 @@ function App() {
   const [activeWid, setActiveWid] = useState(initial.activeWid);
   const snapshotsRef = useRef(initial.snapshots);
   useEffect(() => {
-    snapshotsRef.current[activeWid] = { devices, links, selectedIds, openConsoles, activeBottom, ptActivity };
-  }, [devices, links, selectedIds, openConsoles, activeBottom, ptActivity, activeWid]);
+    snapshotsRef.current[activeWid] = { devices, links, selectedIds, openConsoles, activeBottom, ptActivity, ptSidebarOpen };
+  }, [devices, links, selectedIds, openConsoles, activeBottom, ptActivity, ptSidebarOpen, activeWid]);
 
   // Persist to localStorage (debounced)
   useEffect(() => {
     const handle = setTimeout(() => {
       try {
         // Ensure current snap is up-to-date before saving
-        snapshotsRef.current[activeWid] = { devices, links, selectedIds, openConsoles, activeBottom, ptActivity };
+        snapshotsRef.current[activeWid] = { devices, links, selectedIds, openConsoles, activeBottom, ptActivity, ptSidebarOpen };
         localStorage.setItem(STORAGE_KEY, JSON.stringify({
           tabs, activeWid, snapshots: snapshotsRef.current,
         }));
       } catch (e) {}
     }, 250);
     return () => clearTimeout(handle);
-  }, [tabs, activeWid, devices, links, selectedIds, openConsoles, activeBottom, ptActivity]);
+  }, [tabs, activeWid, devices, links, selectedIds, openConsoles, activeBottom, ptActivity, ptSidebarOpen]);
 
   // Hide boot splash on first mount (with a brief hold so the splash is actually seen)
   useEffect(() => {
@@ -313,7 +316,7 @@ function App() {
   }, []);
   const switchTab = (newId) => {
     if (newId === activeWid) return;
-    snapshotsRef.current[activeWid] = { devices, links, selectedIds, openConsoles, activeBottom, ptActivity };
+    snapshotsRef.current[activeWid] = { devices, links, selectedIds, openConsoles, activeBottom, ptActivity, ptSidebarOpen };
     const snap = snapshotsRef.current[newId];
     const norm = OPT_Engine.normalizeTopology(snap?.devices || {}, snap?.links || []);
     setActiveWid(newId);
@@ -321,26 +324,27 @@ function App() {
     setLinks(norm.links);
     setSelectedIds(snap?.selectedIds || (snap?.selectedId ? [snap.selectedId] : []));
     setOpenConsoles(snap?.openConsoles || []);
-    setActiveBottom(snap?.activeBottom || "events");
+    setActiveBottom((snap?.activeBottom && snap.activeBottom !== "pka-report") ? snap.activeBottom : "events");
     setPtActivity(snap?.ptActivity || null);
+    setPtSidebarOpen(snap?.ptSidebarOpen ?? !!snap?.ptActivity);
   };
   const newBlankTab = () => {
-    snapshotsRef.current[activeWid] = { devices, links, selectedIds, openConsoles, activeBottom, ptActivity };
+    snapshotsRef.current[activeWid] = { devices, links, selectedIds, openConsoles, activeBottom, ptActivity, ptSidebarOpen };
     const id = `w-${Date.now()}`;
-    snapshotsRef.current[id] = { devices: {}, links: [], selectedIds: [], openConsoles: [], activeBottom: "events", ptActivity: null };
+    snapshotsRef.current[id] = { devices: {}, links: [], selectedIds: [], openConsoles: [], activeBottom: "events", ptActivity: null, ptSidebarOpen: false };
     setTabs((ts) => [...ts, { id, name: `untitled-${ts.length}.opt` }]);
     setActiveWid(id);
-    setDevices({}); setLinks([]); setSelectedId(null); setOpenConsoles([]); setActiveBottom("events"); setPtActivity(null);
+    setDevices({}); setLinks([]); setSelectedId(null); setOpenConsoles([]); setActiveBottom("events"); setPtActivity(null); setPtSidebarOpen(false);
     setCloudProjectId(null); setCloudVersion(0); setCloudBaseDoc(null); setCloudLease(null); setShareToken(null); setShareMode(null); setSyncStatus({ state: cloudUser ? "local" : "local", message: cloudUser ? "Signed in" : "Local only" });
   };
   const newStarterTab = () => {
-    snapshotsRef.current[activeWid] = { devices, links, selectedIds, openConsoles, activeBottom, ptActivity };
+    snapshotsRef.current[activeWid] = { devices, links, selectedIds, openConsoles, activeBottom, ptActivity, ptSidebarOpen };
     const id = `w-${Date.now()}`;
     const s = OPT_Engine.makeStarter();
-    snapshotsRef.current[id] = { devices: s.devices, links: s.links, selectedIds: [], openConsoles: [], activeBottom: "events", ptActivity: null };
+    snapshotsRef.current[id] = { devices: s.devices, links: s.links, selectedIds: [], openConsoles: [], activeBottom: "events", ptActivity: null, ptSidebarOpen: false };
     setTabs((ts) => [...ts, { id, name: `lab-${ts.length + 1}.opt` }]);
     setActiveWid(id);
-    setDevices(s.devices); setLinks(s.links); setSelectedId(null); setOpenConsoles([]); setActiveBottom("events"); setPtActivity(null);
+    setDevices(s.devices); setLinks(s.links); setSelectedId(null); setOpenConsoles([]); setActiveBottom("events"); setPtActivity(null); setPtSidebarOpen(false);
     setCloudProjectId(null); setCloudVersion(0); setCloudBaseDoc(null); setCloudLease(null); setShareToken(null); setShareMode(null); setSyncStatus({ state: cloudUser ? "local" : "local", message: cloudUser ? "Signed in" : "Local only" });
   };
   const closeTab = (id) => {
@@ -357,8 +361,9 @@ function App() {
         setLinks(norm.links);
         setSelectedIds(snap?.selectedIds || (snap?.selectedId ? [snap.selectedId] : []));
         setOpenConsoles(snap?.openConsoles || []);
-        setActiveBottom(snap?.activeBottom || "events");
+        setActiveBottom((snap?.activeBottom && snap.activeBottom !== "pka-report") ? snap.activeBottom : "events");
         setPtActivity(snap?.ptActivity || null);
+        setPtSidebarOpen(snap?.ptSidebarOpen ?? !!snap?.ptActivity);
       } else {
         delete snapshotsRef.current[id];
       }
@@ -474,10 +479,11 @@ function App() {
       openConsoles,
       activeBottom,
       ptActivity,
+      ptSidebarOpen,
       topologyViewState,
       terminalScrolls: terminalScrollPayload(terminalScrolls),
     },
-  }), [currentProjectTitle, devices, links, selectedIds, openConsoles, activeBottom, ptActivity, topologyViewState, terminalScrolls]);
+  }), [currentProjectTitle, devices, links, selectedIds, openConsoles, activeBottom, ptActivity, ptSidebarOpen, topologyViewState, terminalScrolls]);
 
   const applyProjectDocument = (document, project = null) => {
     const norm = OPT_Engine.normalizeTopology(document?.devices || {}, document?.links || []);
@@ -485,8 +491,9 @@ function App() {
     setLinks(norm.links);
     setSelectedIds(document?.uiState?.selectedIds || []);
     setOpenConsoles(document?.uiState?.openConsoles || []);
-    setActiveBottom(document?.uiState?.activeBottom || "events");
+    setActiveBottom((document?.uiState?.activeBottom && document.uiState.activeBottom !== "pka-report") ? document.uiState.activeBottom : "events");
     setPtActivity(document?.uiState?.ptActivity || null);
+    setPtSidebarOpen(document?.uiState?.ptSidebarOpen ?? !!document?.uiState?.ptActivity);
     setTopologyViewState(document?.uiState?.topologyViewState || {});
     setTerminalScrolls(document?.uiState?.terminalScrolls || {});
     if (project) setTabs((ts) => mergeProjectIntoTabs(ts, activeWid, project));
@@ -749,7 +756,7 @@ function App() {
   const openImportedTopology = (topology, filename) => {
     const norm = OPT_Engine.normalizeTopology(topology.devices || {}, topology.links || []);
     const tabName = filename.replace(/\.(json|opt)$/i, "") || "imported-lab";
-    snapshotsRef.current[activeWid] = { devices, links, selectedIds, openConsoles, activeBottom, ptActivity };
+    snapshotsRef.current[activeWid] = { devices, links, selectedIds, openConsoles, activeBottom, ptActivity, ptSidebarOpen };
     const id = `w-${Date.now()}`;
     snapshotsRef.current[id] = {
       devices: norm.devices,
@@ -758,6 +765,7 @@ function App() {
       openConsoles: [],
       activeBottom: "events",
       ptActivity: null,
+      ptSidebarOpen: false,
     };
     setTabs((ts) => [...ts, { id, name: `${tabName}.opt` }]);
     setActiveWid(id);
@@ -767,6 +775,7 @@ function App() {
     setOpenConsoles([]);
     setActiveBottom("events");
     setPtActivity(null);
+    setPtSidebarOpen(false);
     setCloudProjectId(null); setCloudVersion(0); setCloudBaseDoc(null); setCloudLease(null); setShareToken(null); setShareMode(null);
     setEvents([]);
     setPackets([]);
@@ -778,15 +787,18 @@ function App() {
     const topology = buildTopologyFromPacketTracer(activity);
     const norm = OPT_Engine.normalizeTopology(topology.devices || {}, topology.links || []);
     const title = activity?.title || filename.replace(/\.(pka|pkt)$/i, "") || "packet-tracer-assignment";
-    snapshotsRef.current[activeWid] = { devices, links, selectedIds, openConsoles, activeBottom, ptActivity };
+    snapshotsRef.current[activeWid] = { devices, links, selectedIds, openConsoles, activeBottom, ptActivity, ptSidebarOpen };
     const id = `w-${Date.now()}`;
+    // Assignment instructions, progress, and rubric all live in the left sidebar now;
+    // the PKA Report bottom panel is no longer auto-opened (and is hidden) on import.
     snapshotsRef.current[id] = {
       devices: norm.devices,
       links: norm.links,
       selectedIds: [],
       openConsoles: [],
-      activeBottom: "pka-report",
+      activeBottom: "events",
       ptActivity: activity,
+      ptSidebarOpen: true,
     };
     setTabs((ts) => [...ts, { id, name: `${title}.pka`, source: "packet-tracer" }]);
     setActiveWid(id);
@@ -794,8 +806,9 @@ function App() {
     setLinks(norm.links);
     setSelectedIds([]);
     setOpenConsoles([]);
-    setActiveBottom("pka-report");
+    setActiveBottom("events");
     setPtActivity(activity);
+    setPtSidebarOpen(true);
     setCloudProjectId(null); setCloudVersion(0); setCloudBaseDoc(null); setCloudLease(null); setShareToken(null); setShareMode(null);
     setEvents([]);
     setPackets([]);
@@ -1702,9 +1715,21 @@ function App() {
 
       {/* Workspace */}
       <div className="workspace">
-        {/* Side panel */}
-        <div style={{ display: "none" }} />
-        {/* (Labs/Diagnostics moved to top menus) */}
+        {ptActivity && ptSidebarOpen && (
+          <PacketTracerSidebar
+            activity={ptActivity}
+            onClose={() => setPtSidebarOpen(false)}
+          />
+        )}
+        {ptActivity && !ptSidebarOpen && (
+          <div
+            className="pt-sidebar-stub"
+            onClick={() => setPtSidebarOpen(true)}
+            title="Show assignment instructions"
+          >
+            <span>▸</span>
+          </div>
+        )}
 
         {/* Center */}
         <div className="center-col">
@@ -1787,7 +1812,6 @@ function App() {
               })}
               {openConsoles.length > 0 && <div style={{ width: 1, background: "var(--line)" }}/>}
               {[
-                ...(ptActivity ? [["pka-report", "PKA Report", ptActivity.unsupported ? "RE" : "OK"]] : []),
                 ["events", "Events", events.length || null],
                 ["packets", "Packets", null],
               ].map(([k, lbl, badge]) => (
@@ -1817,15 +1841,10 @@ function App() {
                   />
                 </div>
               ))}
-              {openConsoles.length === 0 && activeBottom !== "events" && activeBottom !== "packets" && activeBottom !== "pka-report" && (
+              {openConsoles.length === 0 && activeBottom !== "events" && activeBottom !== "packets" && (
                 <div style={{ position: "absolute", inset: 0, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", color: "var(--fg-3)", gap: 8 }}>
                   <div style={{ fontSize: 13, color: "var(--fg-2)" }}>No consoles open</div>
                   <div style={{ fontSize: 11.5 }}>Right-click a device on the canvas → Open Console</div>
-                </div>
-              )}
-              {ptActivity && (
-                <div style={{ position: "absolute", inset: 0, display: activeBottom === "pka-report" ? "block" : "none" }}>
-                  <PacketTracerReverseReport activity={ptActivity} />
                 </div>
               )}
               <div style={{ position: "absolute", inset: 0, display: activeBottom === "events" ? "block" : "none" }}>
@@ -2700,6 +2719,290 @@ const PacketTracerReverseReport = React.memo(function PacketTracerReverseReport(
     </div>
   );
 });
+
+function sanitizeActivityHtml(html) {
+  if (!html) return "";
+  return String(html)
+    .replace(/<script[\s\S]*?<\/script>/gi, "")
+    .replace(/<style[\s\S]*?<\/style>/gi, "")
+    .replace(/\son[a-z]+\s*=\s*"[^"]*"/gi, "")
+    .replace(/\son[a-z]+\s*=\s*'[^']*'/gi, "")
+    .replace(/\sjavascript:/gi, " ");
+}
+
+function progressDisplay(progress) {
+  if (!progress) return { primary: "—", secondary: "" };
+  if (typeof progress.percent === "number" && Number.isFinite(progress.percent)) {
+    return { primary: `${progress.percent}%`, secondary: progress.score || progress.itemCount || "" };
+  }
+  if (progress.score) return { primary: progress.score, secondary: progress.itemCount || "" };
+  if (progress.itemCount) return { primary: progress.itemCount, secondary: "items" };
+  return { primary: "—", secondary: "" };
+}
+
+function normalizeRubricPattern(pattern, assessmentItems) {
+  if (Array.isArray(pattern)) return pattern;
+  if (pattern && typeof pattern === "object") {
+    return Object.entries(pattern).map(([name, value]) => ({
+      name,
+      children: rubricFromValue(value),
+    }));
+  }
+  // Fall back: rebuild a tree from flat assessmentItems by their pathParts/rootName
+  if (Array.isArray(assessmentItems) && assessmentItems.length) {
+    const root = { children: [] };
+    for (const item of assessmentItems) {
+      const parts = Array.isArray(item.pathParts) && item.pathParts.length
+        ? item.pathParts
+        : String(item.path || item.name || "").split(" / ").filter(Boolean);
+      let cur = root;
+      for (let i = 0; i < parts.length; i++) {
+        const isLeaf = i === parts.length - 1;
+        let child = cur.children.find((c) => c.name === parts[i]);
+        if (!child) {
+          child = { name: parts[i], children: [] };
+          cur.children.push(child);
+        }
+        if (isLeaf) {
+          child.points = item.points;
+          child.checkType = item.checkType;
+          child.id = item.id;
+        }
+        cur = child;
+      }
+    }
+    return root.children;
+  }
+  return [];
+}
+
+function rubricFromValue(value) {
+  if (Array.isArray(value)) {
+    return value.map((v) => (typeof v === "string" ? { name: v } : v));
+  }
+  if (value && typeof value === "object") {
+    return Object.entries(value).map(([k, v]) => ({ name: k, children: rubricFromValue(v) }));
+  }
+  return [];
+}
+
+function RubricNode({ node, depth }) {
+  const [open, setOpen] = useState(depth < 2);
+  const children = node?.children || [];
+  const hasChildren = children.length > 0;
+  const points = node?.points;
+  const label = node?.name || node?.id || "Item";
+  return (
+    <div className="pt-sb-rub-node" style={{ paddingLeft: depth * 12 }}>
+      <div className="pt-sb-rub-row" onClick={() => hasChildren && setOpen(!open)}>
+        <span className="pt-sb-rub-toggle">
+          {hasChildren ? (open ? "▾" : "▸") : "·"}
+        </span>
+        <span className="pt-sb-rub-label" title={label}>{label}</span>
+        {node?.checkType && (
+          <span className="pt-sb-rub-type">{node.checkType}</span>
+        )}
+        {points != null && points !== "" && (
+          <span className="pt-sb-rub-points">{points} pts</span>
+        )}
+      </div>
+      {hasChildren && open && (
+        <div className="pt-sb-rub-children">
+          {children.map((child, i) => (
+            <RubricNode key={`${child?.id || child?.name || i}-${i}`} node={child} depth={depth + 1} />
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function PacketTracerSidebar({ activity, onClose }) {
+  const [topTab, setTopTab] = useState("progress");
+  const [sub, setSub] = useState("overview");
+  if (!activity) return null;
+
+  const progress = activity.progress || null;
+  const { primary, secondary } = progressDisplay(progress);
+  const sections = packetTracerAssessmentSections(activity);
+  const connectivityItems = sections.connectivityTests || [];
+  const assessmentOnly = sections.assessmentItems || [];
+  const components = progress?.components || [];
+  const title = activity.title || activity.sourceName || "Packet Tracer Activity";
+  const isPerfect = typeof progress?.percent === "number" && progress.percent >= 100;
+  const rubricRoots = normalizeRubricPattern(activity.rubricPattern, activity.assessmentItems);
+
+  return (
+    <div className="pt-sidebar">
+      <div className="pt-sb-head">
+        <div className="pt-sb-title" title={title}>{title}</div>
+        <div className="pt-sb-head-right">
+          <div className={`pt-sb-score ${isPerfect ? "ok" : ""}`} title="Progress">
+            <span className="pt-sb-score-primary">{primary}</span>
+            {secondary && <span className="pt-sb-score-secondary">{secondary}</span>}
+          </div>
+          {onClose && (
+            <button className="pt-sb-close" onClick={onClose} title="Hide sidebar">×</button>
+          )}
+        </div>
+      </div>
+
+      <div className="pt-sb-instructions">
+        {activity.instructionsHtml
+          ? <div className="pt-sb-html" dangerouslySetInnerHTML={{ __html: sanitizeActivityHtml(activity.instructionsHtml) }} />
+          : activity.instructionsText
+            ? <pre className="pt-sb-text">{activity.instructionsText}</pre>
+            : <div className="pt-sb-empty">No instructions were embedded in this activity.</div>}
+      </div>
+
+      <div className="side-tabs pt-sb-tabs">
+        {[
+          ["progress", "Progress"],
+          ["rubric", `Rubric${rubricRoots.length ? ` (${rubricRoots.length})` : ""}`],
+        ].map(([k, lbl]) => (
+          <div
+            key={k}
+            className={`side-tab ${topTab === k ? "active" : ""}`}
+            onClick={() => setTopTab(k)}
+          >{lbl}</div>
+        ))}
+      </div>
+
+      {topTab === "progress" && (
+        <>
+          <div className="pt-sb-subtabs">
+            {[
+              ["overview", "Overview"],
+              ["items", `Assessment Items${assessmentOnly.length ? ` (${assessmentOnly.length})` : ""}`],
+              ["connectivity", `Connectivity Tests${connectivityItems.length ? ` (${connectivityItems.length})` : ""}`],
+            ].map(([k, lbl]) => (
+              <div
+                key={k}
+                className={`pt-sb-subtab ${sub === k ? "active" : ""}`}
+                onClick={() => setSub(k)}
+              >{lbl}</div>
+            ))}
+          </div>
+
+          <div className="pt-sb-body">
+            {sub === "overview" && (
+              <div className="pt-sb-section">
+                <div className="pt-sb-summary">
+                  <div className="pt-sb-summary-row"><span className="k">Score</span><span className="v">{progress?.score || "—"}</span></div>
+                  <div className="pt-sb-summary-row"><span className="k">Items</span><span className="v">{progress?.itemCount || `${(assessmentOnly.length + connectivityItems.length)}`}</span></div>
+                  {typeof progress?.percent === "number" && (
+                    <div className="pt-sb-summary-row"><span className="k">Percent</span><span className="v">{progress.percent}%</span></div>
+                  )}
+                </div>
+                {components.length > 0 ? (
+                  <>
+                    <div className="pt-sb-h">Components</div>
+                    <div className="pt-sb-comp-table">
+                      <div className="pt-sb-comp-row head">
+                        <span>Component</span><span>Items</span><span>Score</span>
+                      </div>
+                      {components.map((c, i) => (
+                        <div key={i} className="pt-sb-comp-row">
+                          <span title={c.name}>{c.name || "—"}</span>
+                          <span>{c.items || "—"}</span>
+                          <span>{c.score || "—"}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </>
+                ) : sections.roots?.length > 0 ? (
+                  <>
+                    <div className="pt-sb-h">Sections</div>
+                    <div className="pt-sb-comp-table">
+                      <div className="pt-sb-comp-row head"><span>Section</span><span>Items</span><span/></div>
+                      {sections.roots.map((r, i) => (
+                        <div key={i} className="pt-sb-comp-row">
+                          <span title={r.name}>{r.name}</span>
+                          <span>{r.count}</span>
+                          <span/>
+                        </div>
+                      ))}
+                    </div>
+                  </>
+                ) : (
+                  <div className="pt-sb-empty">No component breakdown available.</div>
+                )}
+              </div>
+            )}
+
+            {sub === "items" && (
+              <div className="pt-sb-section">
+                {assessmentOnly.length === 0 ? (
+                  <div className="pt-sb-empty">No assessment items extracted.</div>
+                ) : (
+                  <div className="pt-sb-items">
+                    {assessmentOnly.slice(0, 400).map((it, i) => (
+                      <div key={`${it.path || it.id || i}-${i}`} className="pt-sb-item">
+                        <div className="pt-sb-item-main">
+                          <div className="pt-sb-item-name" title={it.path}>{it.path || it.name || it.id || `Item ${i + 1}`}</div>
+                          {(it.components || it.rootName) && (
+                            <div className="pt-sb-item-meta">{[it.components, it.rootName].filter(Boolean).join(" · ")}</div>
+                          )}
+                          {it.checkType && <div className="pt-sb-item-meta dim">{it.checkType}</div>}
+                        </div>
+                        <div className="pt-sb-item-points">{it.points || 0} pts</div>
+                      </div>
+                    ))}
+                    {assessmentOnly.length > 400 && (
+                      <div className="pt-sb-empty">Showing first 400 of {assessmentOnly.length} items.</div>
+                    )}
+                  </div>
+                )}
+              </div>
+            )}
+
+            {sub === "connectivity" && (
+              <div className="pt-sb-section">
+                {connectivityItems.length === 0 ? (
+                  <div className="pt-sb-empty">No connectivity tests in this activity.</div>
+                ) : (
+                  <div className="pt-sb-items">
+                    {connectivityItems.slice(0, 400).map((it, i) => (
+                      <div key={`${it.path || it.id || i}-${i}`} className="pt-sb-item">
+                        <div className="pt-sb-item-main">
+                          <div className="pt-sb-item-name" title={it.path}>{it.path || it.name || it.id || `Test ${i + 1}`}</div>
+                          {(it.components || it.rootName) && (
+                            <div className="pt-sb-item-meta">{[it.components, it.rootName].filter(Boolean).join(" · ")}</div>
+                          )}
+                          {it.checkType && <div className="pt-sb-item-meta dim">{it.checkType}</div>}
+                        </div>
+                        <div className="pt-sb-item-points">{it.points || 0} pts</div>
+                      </div>
+                    ))}
+                    {connectivityItems.length > 400 && (
+                      <div className="pt-sb-empty">Showing first 400 of {connectivityItems.length} tests.</div>
+                    )}
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+        </>
+      )}
+
+      {topTab === "rubric" && (
+        <div className="pt-sb-body">
+          <div className="pt-sb-section">
+            {rubricRoots.length === 0 ? (
+              <div className="pt-sb-empty">No rubric extracted from this activity.</div>
+            ) : (
+              <div className="pt-sb-rubric">
+                {rubricRoots.map((root, i) => (
+                  <RubricNode key={`${root?.id || root?.name || i}-${i}`} node={root} depth={0} />
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
 
 function PacketLog({ events }) {
   return (
