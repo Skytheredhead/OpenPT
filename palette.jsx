@@ -3,20 +3,32 @@
 function Palette({ onDragStart, activeLink, onLinkPick }) {
   const cat = window.DeviceCatalog;
   const G = window.Glyph;
+  const groups = [
+    { title: "Routers", kinds: ["router"] },
+    { title: "Switches", kinds: ["l2switch", "l3switch"] },
+    { title: "End Devices", kinds: ["pc", "laptop", "server", "printer", "phone", "ap"] },
+  ].map((group) => ({
+    ...group,
+    devices: cat.filter((d) => group.kinds.includes(d.kind)),
+  })).filter((group) => group.devices.length);
+  const groupedIds = new Set(groups.flatMap((group) => group.devices.map((d) => d.id || d.kind)));
+  const other = cat.filter((d) => !groupedIds.has(d.id || d.kind));
+  if (other.length) groups.push({ title: "Other", devices: other });
   return (
     <div style={{ flex: 1, overflowY: "auto", minHeight: 0 }}>
-      <div className="palette-section">
-        <div className="palette-section-title">Devices</div>
+      {groups.map((group) => (
+      <div className="palette-section" key={group.title}>
+        <div className="palette-section-title">{group.title}</div>
         <div className="palette-grid">
-          {cat.map(d => (
+          {group.devices.map(d => (
             <div
-              key={d.kind}
+              key={d.id || d.kind}
               className="palette-item"
               draggable
               onDragStart={(e) => {
                 e.dataTransfer.effectAllowed = "copy";
-                e.dataTransfer.setData("text/x-openpt-device", d.kind);
-                onDragStart && onDragStart(d.kind);
+                e.dataTransfer.setData("text/x-openpt-device", d.id || d.kind);
+                onDragStart && onDragStart(d.id || d.kind);
               }}
               title={`Drag ${d.label} to canvas`}
             >
@@ -28,13 +40,14 @@ function Palette({ onDragStart, activeLink, onLinkPick }) {
           ))}
         </div>
       </div>
+      ))}
 
       <div className="palette-section">
         <div className="palette-section-title">Connections</div>
         <div className="palette-link-list">
           {[
             { id: "auto",     name: "Auto cable",       cls: "straight" },
-            { id: "straight", name: "Copper straight",  cls: "straight" },
+            { id: "copper",   name: "Copper straight",  cls: "straight" },
             { id: "cross",    name: "Copper crossover", cls: "cross" },
             { id: "serial",   name: "Serial DCE",       cls: "serial" },
             { id: "fiber",    name: "Fiber",            cls: "fiber" },

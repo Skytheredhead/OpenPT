@@ -4,9 +4,10 @@ function Topology(props) {
   const {
     devices, links, selectedIds, onSelect,
     onMoveDevices, onAddDevice, onDeleteLink,
-    linkMode, setLinkMode, packetMode, setPacketMode,
+    linkMode, setLinkMode, forceLinkType, packetMode, setPacketMode,
     onLinkRequest, onPacketRequest, simRunning, packets, activeHopDeviceId,
     viewState, onViewStateChange,
+    starterScreenVisible, onCreateProject,
   } = props;
   const selSet = React.useMemo(() => new Set(selectedIds || []), [selectedIds]);
 
@@ -17,7 +18,8 @@ function Topology(props) {
   const panStateCommitRef = React.useRef(null);
   const [pan, setPan] = React.useState(viewState?.pan || { x: 0, y: 0, k: 1 });
   const [drag, setDrag] = React.useState(null);   // { id, ox, oy }
-  const [linkPick, setLinkPick] = React.useState(null);  // { devId, iface? }
+  const [linkPick, setLinkPick] = React.useState(null);  // { devId, iface }
+  const [portPicker, setPortPicker] = React.useState(null);  // { devId }
   const [toast, setToast] = React.useState(null);
 
   React.useEffect(() => {
@@ -100,7 +102,7 @@ function Topology(props) {
       window.addEventListener("mouseup", up);
     } else if (e.button === 0 && !e.target.closest(".node") && !e.target.closest(".link-label")) {
       onSelect && onSelect(null);
-      if (linkMode) setLinkPick(null);
+      if (linkMode) { setLinkPick(null); setPortPicker(null); }
     }
   };
 
@@ -140,15 +142,7 @@ function Topology(props) {
   const onNodeMouseDown = (e, d) => {
     if (e.button !== 0) return;
     if (linkMode) {
-      if (!linkPick) {
-        setLinkPick({ devId: d.id });
-        setToast({ msg: `Selected ${d.hostname} — pick another device to connect`, kind: "" });
-      } else if (linkPick.devId !== d.id) {
-        onLinkRequest && onLinkRequest(linkPick.devId, d.id);
-        setLinkPick(null);
-      } else {
-        setLinkPick(null);
-      }
+      setPortPicker({ devId: d.id });
       e.stopPropagation();
       return;
     }
@@ -213,16 +207,81 @@ function Topology(props) {
   // ── Cancel modes on Esc
   React.useEffect(() => {
     const k = (e) => {
-      if (e.key === "Escape") { setLinkMode(false); setLinkPick(null); setPacketMode(null); }
+      if (e.key === "Escape") { setLinkMode(false); setLinkPick(null); setPortPicker(null); setPacketMode(null); }
     };
     window.addEventListener("keydown", k);
     return () => window.removeEventListener("keydown", k);
   }, []);
 
+  React.useEffect(() => {
+    if (!linkMode) {
+      setLinkPick(null);
+      setPortPicker(null);
+    }
+  }, [linkMode]);
+
   const G = window.Glyph;
   const cat = window.DeviceCatalog;
   const meta = (d) => cat.find(c => c.platform === d.platform && c.kind === d.kind) || cat.find(c => c.platform === d.platform) || cat.find(c => c.kind === d.kind) || cat[0];
   const ifaceName = window.OPT_Engine.shortIfaceName;
+  const cableType = window.OPT_Engine.normalizeCableType?.(forceLinkType || "auto") || "auto";
+  const cableLabel = window.OPT_Engine.cableTypeLabel?.(cableType) || "Auto cable";
+
+  const isIfaceTaken = (devId, iface) => links.some(l => (l.a === devId && l.ai === iface) || (l.b === devId && l.bi === iface));
+
+  const portStatus = (dev, iface) => {
+    if (!dev || !iface) return { disabled: true, reason: "Unavailable" };
+    if (isIfaceTaken(dev.id, iface)) return { disabled: true, reason: "Already connected" };
+    const fit = window.OPT_Engine.cableFitsPort?.(dev, iface, cableType) || { ok: true };
+    if (!fit.ok) return { disabled: true, reason: fit.reason };
+    if (linkPick) {
+      if (linkPick.devId === dev.id) return { disabled: true, reason: "Pick a port on another device" };
+      const first = devices[linkPick.devId];
+      const compat = window.OPT_Engine.cableCompatibility?.(first, linkPick.iface, dev, iface, cableType) || { ok: true };
+      if (!compat.ok) return { disabled: true, reason: compat.reason };
+      return { disabled: false, warning: compat.warning };
+    }
+    return { disabled: false };
+  };
+
+  const choosePort = (dev, iface) => {
+    const status = portStatus(dev, iface);
+    if (status.disabled) {
+      setToast({ kind: "err", msg: status.reason || "That port cannot be used" });
+      return;
+    }
+    const endpoint = { devId: dev.id, iface };
+    if (!linkPick || linkPick.devId === dev.id) {
+      setLinkPick(endpoint);
+      setPortPicker(null);
+      setToast({ msg: `${dev.hostname} ${ifaceName(iface)} selected - pick the other device`, kind: "" });
+      return;
+    }
+    onLinkRequest && onLinkRequest(linkPick, endpoint);
+    setLinkPick(null);
+    setPortPicker(null);
+  };
+
+  const portPickerStyle = () => {
+    const dev = devices[portPicker?.devId];
+    const wrap = wrapRef.current;
+    if (!dev || !wrap) return {};
+    const cardW = 324;
+    const cardH = 260;
+    const left = Math.max(12, Math.min(wrap.clientWidth - cardW - 12, panRef.current.x + dev.x * panRef.current.k + 34));
+    const top = Math.max(52, Math.min(wrap.clientHeight - cardH - 12, panRef.current.y + dev.y * panRef.current.k - 32));
+    return { left, top };
+  };
+
+  const portGroupsFor = (dev) => {
+    const groups = new Map();
+    for (const iface of Object.keys(dev?.interfaces || {})) {
+      const info = window.OPT_Engine.ifacePortInfo?.(dev, iface) || { group: "Other", label: iface };
+      if (!groups.has(info.group)) groups.set(info.group, []);
+      groups.get(info.group).push({ iface, info });
+    }
+    return Array.from(groups.entries());
+  };
   const linkLabelPositions = React.useMemo(() => {
     const pairGroups = new Map();
     links.forEach((l) => {
@@ -355,13 +414,79 @@ function Topology(props) {
       {linkMode && (
         <div className="canvas-modehint">
           <span style={{ width: 6, height: 6, borderRadius: 3, background: "var(--accent)" }}/>
-          Cable mode — click two devices to connect <span className="esc">Esc</span>
+          {linkPick
+            ? `Cable mode — ${devices[linkPick.devId]?.hostname || "Device"} ${ifaceName(linkPick.iface)} to...`
+            : `Cable mode — ${cableLabel}: click a device, then pick a port`}
+          <span className="esc">Esc</span>
+        </div>
+      )}
+      {linkMode && portPicker?.devId && devices[portPicker.devId] && (
+        <div
+          className="port-picker-card"
+          style={portPickerStyle()}
+          onMouseDown={(e) => e.stopPropagation()}
+          onClick={(e) => e.stopPropagation()}
+        >
+          <div className="port-picker-head">
+            <div>
+              <div className="port-picker-title">Plug into {devices[portPicker.devId].hostname}</div>
+              <div className="port-picker-subtitle">{devices[portPicker.devId].model || devices[portPicker.devId].kind} · {cableLabel}</div>
+            </div>
+            <button className="port-picker-close" onClick={() => setPortPicker(null)} title="Close port selector">×</button>
+          </div>
+          <div className="port-picker-shell">
+            {portGroupsFor(devices[portPicker.devId]).map(([group, ports]) => (
+              <div key={group} className="port-picker-group">
+                <div className="port-picker-group-title">{group}</div>
+                <div className="port-picker-grid">
+                  {ports.map(({ iface, info }) => {
+                    const status = portStatus(devices[portPicker.devId], iface);
+                    const isSelected = linkPick?.devId === portPicker.devId && linkPick?.iface === iface;
+                    return (
+                      <button
+                        key={iface}
+                        className={`port-button ${isSelected ? "selected" : ""} ${status.warning ? "warn" : ""}`}
+                        disabled={status.disabled}
+                        title={status.reason || status.warning || iface}
+                        onClick={() => choosePort(devices[portPicker.devId], iface)}
+                      >
+                        {info.label || ifaceName(iface)}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            ))}
+          </div>
+          <div className="port-picker-foot">
+            {linkPick
+              ? "Choose a compatible free port on this device."
+              : "Choose the first port for this cable."}
+          </div>
         </div>
       )}
       {packetMode && (
         <div className="canvas-modehint">
           <span style={{ width: 6, height: 6, borderRadius: 3, background: "var(--ok)" }}/>
           Packet mode — pick a {packetMode.stage === "dst" ? "destination" : "source"} device <span className="esc">Esc</span>
+        </div>
+      )}
+
+      {starterScreenVisible && (
+        <div className="starter-screen" aria-label="Start a project">
+          <div className="starter-message">
+            drag in a .pka file or{" "}
+            <button
+              type="button"
+              className="starter-create"
+              onClick={(e) => {
+                e.stopPropagation();
+                onCreateProject && onCreateProject();
+              }}
+            >
+              create a new project
+            </button>
+          </div>
         </div>
       )}
 

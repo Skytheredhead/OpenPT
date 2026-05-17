@@ -302,6 +302,116 @@ function shortIfaceNamesInText(text) {
     .replace(/\bVlan\s*(?=\d)/gi, "Vl");
 }
 
+function normalizeCableType(type) {
+  const t = String(type || "auto").toLowerCase();
+  if (t === "straight" || t === "straight-through") return "copper";
+  if (t === "copper" || t === "cross" || t === "serial" || t === "fiber" || t === "console" || t === "auto") return t;
+  return "auto";
+}
+
+function cableTypeLabel(type) {
+  const t = normalizeCableType(type);
+  return ({
+    auto: "Auto cable",
+    copper: "Copper straight-through",
+    cross: "Copper crossover",
+    serial: "Serial DCE",
+    fiber: "Fiber",
+    console: "Console",
+  })[t] || "Auto cable";
+}
+
+function ifacePortInfo(dev, iface) {
+  const raw = String(iface || "");
+  const n = raw.toLowerCase();
+  const model = String(dev?.platform || dev?.model || "").toLowerCase();
+  const fiberCapable = /^(tengigabitethernet|twentyfivegige|fortygigabitethernet|hundredgigabitethernet)/i.test(raw)
+    || ((model.includes("c9200") || model.includes("9200")) && /^GigabitEthernet1\/1\//i.test(raw))
+    || /\bsfp|fiber|fibre/i.test(raw);
+  let media = "unknown";
+  let group = "Other";
+  if (!raw || /^vlan/i.test(raw) || /^loopback/i.test(raw) || /^port-channel/i.test(raw)) {
+    media = "virtual"; group = "Virtual";
+  } else if (/wlan|wireless|wifi/i.test(raw)) {
+    media = "wireless"; group = "Wireless";
+  } else if (/^serial/i.test(raw)) {
+    media = "serial"; group = "Serial";
+  } else if (/coax/i.test(raw)) {
+    media = "coax"; group = "Coax";
+  } else if (/dsl/i.test(raw)) {
+    media = "dsl"; group = "DSL";
+  } else if (/console|aux/i.test(raw)) {
+    media = "console"; group = "Management";
+  } else if (/^(fastethernet|gigabitethernet|ethernet)/i.test(raw) || ["eth0", "wan", "internet", "pc"].includes(n)) {
+    media = "ethernet"; group = fiberCapable ? "Uplinks" : "Ethernet";
+  }
+  return { media, group, fiberCapable, label: shortIfaceName(raw) };
+}
+
+function cableFitsPort(dev, iface, cableType) {
+  const type = normalizeCableType(cableType);
+  const info = ifacePortInfo(dev, iface);
+  if (info.media === "virtual") return { ok: false, reason: "Virtual interfaces are not cable ports." };
+  if (info.media === "wireless") return { ok: false, reason: "Wireless interfaces do not accept cables." };
+  if (type === "auto") {
+    if (info.media === "ethernet" || info.media === "serial" || info.media === "console" || info.fiberCapable) return { ok: true };
+  } else if ((type === "copper" || type === "cross") && info.media === "ethernet") {
+    return { ok: true };
+  } else if (type === "serial" && info.media === "serial") {
+    return { ok: true };
+  } else if (type === "fiber" && info.fiberCapable) {
+    return { ok: true };
+  } else if (type === "console" && info.media === "console") {
+    return { ok: true };
+  }
+  return { ok: false, reason: `${cableTypeLabel(type)} does not fit ${shortIfaceName(iface)}.` };
+}
+
+function copperRole(dev) {
+  if (isSwitchLike(dev)) return "mdix";
+  return "mdi";
+}
+
+function recommendedCableTypeForPorts(a, aIface, b, bIface) {
+  const ai = ifacePortInfo(a, aIface);
+  const bi = ifacePortInfo(b, bIface);
+  if (ai.media === "serial" && bi.media === "serial") return "serial";
+  if (ai.media === "console" && bi.media === "console") return "console";
+  if (ai.media === "ethernet" && bi.media === "ethernet") {
+    return copperRole(a) === copperRole(b) ? "cross" : "copper";
+  }
+  if (ai.fiberCapable && bi.fiberCapable) return "fiber";
+  return null;
+}
+
+function cableCompatibility(a, aIface, b, bIface, requestedType = "auto") {
+  if (!a || !b || !aIface || !bIface) return { ok: false, reason: "Pick a port on both devices." };
+  const req = normalizeCableType(requestedType);
+  const aFit = cableFitsPort(a, aIface, req);
+  if (!aFit.ok) return { ok: false, reason: `${a.hostname || "Device"} ${aFit.reason}` };
+  const bFit = cableFitsPort(b, bIface, req);
+  if (!bFit.ok) return { ok: false, reason: `${b.hostname || "Device"} ${bFit.reason}` };
+
+  const ai = ifacePortInfo(a, aIface);
+  const bi = ifacePortInfo(b, bIface);
+  const recommended = recommendedCableTypeForPorts(a, aIface, b, bIface);
+  const type = req === "auto" ? recommended : req;
+  if (!type) {
+    return { ok: false, reason: `${shortIfaceName(aIface)} and ${shortIfaceName(bIface)} are different port types.` };
+  }
+  if (type === "serial" && (ai.media !== "serial" || bi.media !== "serial")) return { ok: false, reason: "Serial cables require serial ports on both devices." };
+  if ((type === "copper" || type === "cross") && (ai.media !== "ethernet" || bi.media !== "ethernet")) return { ok: false, reason: "Copper cables require Ethernet ports on both devices." };
+  if (type === "fiber" && (!ai.fiberCapable || !bi.fiberCapable)) return { ok: false, reason: "Fiber cables require fiber-capable uplink ports on both devices." };
+  if (type === "console" && (ai.media !== "console" || bi.media !== "console")) return { ok: false, reason: "Console cables require console ports." };
+
+  const warning = req !== "auto" && recommended && req !== recommended && (
+    (req === "copper" || req === "cross") && (recommended === "copper" || recommended === "cross")
+  )
+    ? `${cableTypeLabel(req)} fits, but ${cableTypeLabel(recommended)} is usually expected for this connection.`
+    : null;
+  return { ok: true, type, warning, recommended };
+}
+
 function normalizeDevice(d) {
   if (!d) return d;
   const profile = platformForKind(d.kind, d.platform);
@@ -803,5 +913,7 @@ window.OPT_Engine = {
   normalizeDevice, normalizeTopology, serializeConfig,
   planPath, allocateDhcp, recomputeDynamicRoutes, recalcConnectedRoutes,
   ipToInt, intToIp, maskBits, wildcardToMask, networkAddress, sameSubnet, inNet,
-  findPeer, lookupRoute, ifaceForDest, ifaceForVia, shortIfaceName, shortIfaceNamesInText, isRouterLike, isSwitchLike, isHostLike,
+  findPeer, lookupRoute, ifaceForDest, ifaceForVia, shortIfaceName, shortIfaceNamesInText,
+  normalizeCableType, cableTypeLabel, ifacePortInfo, cableFitsPort, recommendedCableTypeForPorts, cableCompatibility,
+  isRouterLike, isSwitchLike, isHostLike,
 };

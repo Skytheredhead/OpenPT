@@ -20,6 +20,98 @@ const TweakButton = window.TweakButton;
 const ifaceName = (name) => OPT_Engine.shortIfaceName ? OPT_Engine.shortIfaceName(name) : name;
 const ifaceText = (text) => OPT_Engine.shortIfaceNamesInText ? OPT_Engine.shortIfaceNamesInText(text) : text;
 
+function deviceLabel(device, fallback = "device") {
+  return device?.hostname || device?.name || device?.model || device?.id || fallback;
+}
+
+function linkLabel(link, devices) {
+  const a = devices?.[link?.a];
+  const b = devices?.[link?.b];
+  const left = `${deviceLabel(a, "device")} ${ifaceName(link?.ai || "")}`.trim();
+  const right = `${deviceLabel(b, "device")} ${ifaceName(link?.bi || "")}`.trim();
+  return `${left} to ${right}${link?.type ? ` (${link.type})` : ""}`;
+}
+
+function withoutPosition(device) {
+  if (!device) return device;
+  const { x, y, ...rest } = device;
+  return rest;
+}
+
+function sameJson(a, b) {
+  return JSON.stringify(a) === JSON.stringify(b);
+}
+
+function plural(count, one, many = `${one}s`) {
+  return `${count} ${count === 1 ? one : many}`;
+}
+
+function describeTopologyChange(before = {}, after = {}) {
+  const beforeDevices = before.devices || {};
+  const afterDevices = after.devices || {};
+  const beforeLinks = before.links || [];
+  const afterLinks = after.links || [];
+  const beforeLinkMap = Object.fromEntries(beforeLinks.map((link) => [link.id, link]));
+  const afterLinkMap = Object.fromEntries(afterLinks.map((link) => [link.id, link]));
+  const addedDeviceIds = Object.keys(afterDevices).filter((id) => !beforeDevices[id]);
+  const removedDeviceIds = Object.keys(beforeDevices).filter((id) => !afterDevices[id]);
+  const addedLinkIds = afterLinks.map((link) => link.id).filter((id) => !beforeLinkMap[id]);
+  const removedLinkIds = beforeLinks.map((link) => link.id).filter((id) => !afterLinkMap[id]);
+  const changedDeviceIds = Object.keys(afterDevices).filter((id) => beforeDevices[id] && !sameJson(beforeDevices[id], afterDevices[id]));
+  const changedLinkIds = afterLinks
+    .filter((link) => beforeLinkMap[link.id] && !sameJson(beforeLinkMap[link.id], link))
+    .map((link) => link.id);
+  const beforeCount = Object.keys(beforeDevices).length + beforeLinks.length;
+  const afterCount = Object.keys(afterDevices).length + afterLinks.length;
+
+  if (!beforeCount && afterCount) return `created topology with ${plural(Object.keys(afterDevices).length, "device")} and ${plural(afterLinks.length, "cable")}`;
+  if (beforeCount && !afterCount) return "cleared topology";
+
+  if (addedDeviceIds.length === 1 && !removedDeviceIds.length && !addedLinkIds.length && !removedLinkIds.length) {
+    const d = afterDevices[addedDeviceIds[0]];
+    return `added ${d?.model || d?.kind || "device"} ${deviceLabel(d)}`;
+  }
+  if (removedDeviceIds.length === 1 && !addedDeviceIds.length) {
+    const d = beforeDevices[removedDeviceIds[0]];
+    const cableText = removedLinkIds.length ? ` and ${plural(removedLinkIds.length, "cable")}` : "";
+    return `removed ${deviceLabel(d)}${cableText}`;
+  }
+  if (addedLinkIds.length === 1 && !removedLinkIds.length && !addedDeviceIds.length && !removedDeviceIds.length && !changedLinkIds.length) {
+    return `wired ${linkLabel(afterLinkMap[addedLinkIds[0]], afterDevices)}`;
+  }
+  if (removedLinkIds.length === 1 && !addedLinkIds.length && !addedDeviceIds.length && !removedDeviceIds.length && !changedLinkIds.length) {
+    return `removed cable ${linkLabel(beforeLinkMap[removedLinkIds[0]], beforeDevices)}`;
+  }
+
+  const onlyDeviceChanges = !addedDeviceIds.length && !removedDeviceIds.length && !addedLinkIds.length && !removedLinkIds.length && !changedLinkIds.length;
+  if (onlyDeviceChanges && changedDeviceIds.length === 1) {
+    const id = changedDeviceIds[0];
+    const prev = beforeDevices[id];
+    const next = afterDevices[id];
+    if (prev.hostname !== next.hostname) return `renamed ${deviceLabel(prev)} to ${deviceLabel(next)}`;
+    if (prev.powered !== next.powered) return `${deviceLabel(next)} power ${next.powered ? "on" : "off"}`;
+    if ((prev.x !== next.x || prev.y !== next.y) && sameJson(withoutPosition(prev), withoutPosition(next))) return `moved ${deviceLabel(next)}`;
+    return `updated ${deviceLabel(next)}`;
+  }
+  if (onlyDeviceChanges && changedDeviceIds.length > 1) {
+    const movedOnly = changedDeviceIds.every((id) => {
+      const prev = beforeDevices[id];
+      const next = afterDevices[id];
+      return (prev.x !== next.x || prev.y !== next.y) && sameJson(withoutPosition(prev), withoutPosition(next));
+    });
+    return movedOnly ? `moved ${plural(changedDeviceIds.length, "device")}` : `updated ${plural(changedDeviceIds.length, "device")}`;
+  }
+
+  const parts = [];
+  if (addedDeviceIds.length) parts.push(`added ${plural(addedDeviceIds.length, "device")}`);
+  if (removedDeviceIds.length) parts.push(`removed ${plural(removedDeviceIds.length, "device")}`);
+  if (addedLinkIds.length) parts.push(`added ${plural(addedLinkIds.length, "cable")}`);
+  if (removedLinkIds.length) parts.push(`removed ${plural(removedLinkIds.length, "cable")}`);
+  if (changedDeviceIds.length) parts.push(`updated ${plural(changedDeviceIds.length, "device")}`);
+  if (changedLinkIds.length) parts.push(`updated ${plural(changedLinkIds.length, "cable")}`);
+  return parts.length ? parts.join(", ") : "changed topology";
+}
+
 function packetTracerKind(device) {
   const text = `${device?.kind || ""} ${device?.model || ""} ${device?.name || ""}`.toLowerCase();
   if (text.includes("2960")) return "l2switch";
@@ -320,22 +412,23 @@ function App() {
           activeBottom: (cur.activeBottom && cur.activeBottom !== "pka-report") ? cur.activeBottom : "events",
           ptActivity: cur.ptActivity || null,
           ptSidebarOpen: cur.ptSidebarOpen ?? !!cur.ptActivity,
+          starterScreenVisible: !!data.starterScreenVisible && !Object.keys(norm.devices).length && !cur.ptActivity,
           loaded: true,
         };
       }
     } catch (e) {}
-    const s = OPT_Engine.makeStarter();
     return {
-      tabs: [{ id: "w-0", name: "lab-01 · two-router-vlan.opt" }],
+      tabs: [{ id: "w-0", name: "untitled-0.opt" }],
       activeWid: "w-0",
-      snapshots: { "w-0": { devices: s.devices, links: s.links, selectedIds: [], openConsoles: [], activeBottom: "events", ptActivity: null, ptSidebarOpen: false } },
-      devices: s.devices,
-      links: s.links,
+      snapshots: { "w-0": { devices: {}, links: [], selectedIds: [], openConsoles: [], activeBottom: "events", ptActivity: null, ptSidebarOpen: false } },
+      devices: {},
+      links: [],
       selectedIds: [],
       openConsoles: [],
       activeBottom: "events",
       ptActivity: null,
       ptSidebarOpen: false,
+      starterScreenVisible: true,
       loaded: false,
     };
   }, []);
@@ -349,6 +442,7 @@ function App() {
   const [activeBottom, setActiveBottom] = useState(initial.activeBottom);
   const [ptActivity, setPtActivity] = useState(initial.ptActivity);
   const [ptSidebarOpen, setPtSidebarOpen] = useState(initial.ptSidebarOpen ?? !!initial.ptActivity);
+  const [starterScreenVisible, setStarterScreenVisible] = useState(initial.starterScreenVisible || false);
 
   // Derived: the most-recently-selected device (used for inspector / context menu)
   const selectedId = selectedIds[selectedIds.length - 1] || null;
@@ -377,12 +471,12 @@ function App() {
         // Ensure current snap is up-to-date before saving
         snapshotsRef.current[activeWid] = { devices, links, selectedIds, openConsoles, activeBottom, ptActivity, ptSidebarOpen };
         localStorage.setItem(STORAGE_KEY, JSON.stringify({
-          tabs, activeWid, snapshots: snapshotsRef.current,
+          tabs, activeWid, snapshots: snapshotsRef.current, starterScreenVisible,
         }));
       } catch (e) {}
     }, 250);
     return () => clearTimeout(handle);
-  }, [tabs, activeWid, devices, links, selectedIds, openConsoles, activeBottom, ptActivity, ptSidebarOpen]);
+  }, [tabs, activeWid, devices, links, selectedIds, openConsoles, activeBottom, ptActivity, ptSidebarOpen, starterScreenVisible]);
 
   // Hide boot splash on first mount (with a brief hold so the splash is actually seen)
   useEffect(() => {
@@ -413,6 +507,7 @@ function App() {
     setPtSidebarOpen(snap?.ptSidebarOpen ?? !!snap?.ptActivity);
   };
   const newBlankTab = () => {
+    setStarterScreenVisible(false);
     snapshotsRef.current[activeWid] = { devices, links, selectedIds, openConsoles, activeBottom, ptActivity, ptSidebarOpen };
     const id = `w-${Date.now()}`;
     snapshotsRef.current[id] = { devices: {}, links: [], selectedIds: [], openConsoles: [], activeBottom: "events", ptActivity: null, ptSidebarOpen: false };
@@ -422,6 +517,7 @@ function App() {
     setCloudProjectId(null); setCloudVersion(0); setCloudBaseDoc(null); setCloudLease(null); setShareToken(null); setShareMode(null); setSyncStatus({ state: cloudUser ? "local" : "local", message: cloudUser ? "Signed in" : "Local only" });
   };
   const newStarterTab = () => {
+    setStarterScreenVisible(false);
     snapshotsRef.current[activeWid] = { devices, links, selectedIds, openConsoles, activeBottom, ptActivity, ptSidebarOpen };
     const id = `w-${Date.now()}`;
     const s = OPT_Engine.makeStarter();
@@ -485,21 +581,25 @@ function App() {
     const h = undoRef.current[activeWid];
     if (!h || !h.past.length) return;
     const prev = h.past.pop();
-    h.future.push({ devices, links });
+    const current = { devices, links };
+    const description = describeTopologyChange(prev, current);
+    h.future.push(current);
     skipNextSnapshot.current = true;
     setDevices(prev.devices);
     setLinks(prev.links);
-    log("dim", "system", "undo");
+    log("dim", "system", `undid ${description}`);
   };
   const redo = () => {
     const h = undoRef.current[activeWid];
     if (!h || !h.future.length) return;
     const next = h.future.pop();
-    h.past.push({ devices, links });
+    const current = { devices, links };
+    const description = describeTopologyChange(current, next);
+    h.past.push(current);
     skipNextSnapshot.current = true;
     setDevices(next.devices);
     setLinks(next.links);
-    log("dim", "system", "redo");
+    log("dim", "system", `redid ${description}`);
   };
   const [cliHistory, setCliHistory] = useState([]);
   const [events, setEvents] = useState([]);
@@ -515,6 +615,7 @@ function App() {
   const [ctx, setCtx] = useState(null);  // { x, y, devId }
   const [pendingCmd, setPendingCmd] = useState(null);  // { devId, cmd, nonce }
   const [bottomPanelHeight, setBottomPanelHeight] = useState(280);
+  const [packetTracerSidebarWidth, setPacketTracerSidebarWidth] = useState(340);
   const syncClient = useMemo(() => Sync ? new Sync.OpenPTSyncClient() : null, []);
   const [cloudUser, setCloudUser] = useState(null);
   const [cloudProjects, setCloudProjects] = useState([]);
@@ -571,6 +672,7 @@ function App() {
   }), [currentProjectTitle, devices, links, selectedIds, openConsoles, activeBottom, ptActivity, ptSidebarOpen, topologyViewState, terminalScrolls]);
 
   const applyProjectDocument = (document, project = null) => {
+    setStarterScreenVisible(false);
     const norm = OPT_Engine.normalizeTopology(document?.devices || {}, document?.links || []);
     setDevices(norm.devices);
     setLinks(norm.links);
@@ -776,6 +878,10 @@ function App() {
   }, [toast]);
 
   useEffect(() => {
+    if (!linkMode) setForceLinkType(null);
+  }, [linkMode]);
+
+  useEffect(() => {
     if (!syncClient) return;
     syncClient.me().then((data) => {
       setCloudUser(data.user || null);
@@ -838,12 +944,19 @@ function App() {
     ]);
   };
 
-  const beginResize = (event) => {
+  const beginResize = (kind, event) => {
     event.preventDefault();
+    const startX = event.clientX;
     const startY = event.clientY;
     const startHeight = bottomPanelHeight;
+    const startWidth = packetTracerSidebarWidth;
     document.body.classList.add("is-resizing-layout");
     const onMove = (moveEvent) => {
+      if (kind === "sidebar") {
+        const maxWidth = Math.max(300, Math.min(window.innerWidth * 0.48, window.innerWidth - 420));
+        setPacketTracerSidebarWidth(Math.max(260, Math.min(maxWidth, startWidth + moveEvent.clientX - startX)));
+        return;
+      }
       const maxHeight = Math.max(180, window.innerHeight - 170);
       setBottomPanelHeight(Math.max(120, Math.min(maxHeight, startHeight - (moveEvent.clientY - startY))));
     };
@@ -858,7 +971,36 @@ function App() {
     window.addEventListener("pointercancel", onUp, { once: true });
   };
 
+  const createEmptyProjectFromStarterScreen = () => {
+    const blank = {
+      devices: {},
+      links: [],
+      selectedIds: [],
+      openConsoles: [],
+      activeBottom: "events",
+      ptActivity: null,
+      ptSidebarOpen: false,
+    };
+    snapshotsRef.current[activeWid] = blank;
+    setDevices({});
+    setLinks([]);
+    setSelectedIds([]);
+    setOpenConsoles([]);
+    setActiveBottom("events");
+    setPtActivity(null);
+    setPtSidebarOpen(false);
+    setTopologyViewState({});
+    setTerminalScrolls({});
+    setEvents([]);
+    setPackets([]);
+    setStarterScreenVisible(false);
+    setCloudProjectId(null); setCloudVersion(0); setCloudBaseDoc(null); setCloudLease(null); setShareToken(null); setShareMode(null);
+    setSyncStatus({ state: cloudUser ? "local" : "local", message: cloudUser ? "Signed in" : "Local only" });
+    log("ok", "system", "created new empty project");
+  };
+
   const openImportedTopology = (topology, filename) => {
+    setStarterScreenVisible(false);
     const norm = OPT_Engine.normalizeTopology(topology.devices || {}, topology.links || []);
     const tabName = filename.replace(/\.(json|opt)$/i, "") || "imported-lab";
     snapshotsRef.current[activeWid] = { devices, links, selectedIds, openConsoles, activeBottom, ptActivity, ptSidebarOpen };
@@ -889,6 +1031,7 @@ function App() {
   };
 
   const openImportedPacketTracer = (activity, filename) => {
+    setStarterScreenVisible(false);
     const topology = buildTopologyFromPacketTracer(activity);
     const norm = OPT_Engine.normalizeTopology(topology.devices || {}, topology.links || []);
     const title = activity?.title || filename.replace(/\.(pka|pkt)$/i, "") || "packet-tracer-assignment";
@@ -1000,12 +1143,13 @@ function App() {
   };
 
   useEffect(() => {
-    log("ok", "system", "OpenPT initialized · starter scenario loaded (R1, R2, SW1, SW2, PC1-3, SRV1)");
+    log("ok", "system", starterScreenVisible ? "OpenPT initialized · waiting for a project" : "OpenPT initialized");
   }, []);
 
   // ── Device + link operations ─────────────────────────
   const addDevice = (catalogId, x, y) => {
     if (!markProjectChanged("add-device")) return;
+    setStarterScreenVisible(false);
     const cat = DeviceCatalog.find(c => c.id === catalogId) || DeviceCatalog.find(c => c.kind === catalogId);
     const kind = cat?.kind || catalogId;
     // pick a friendly name
@@ -1061,17 +1205,33 @@ function App() {
   };
 
   // ── Link creation
-  const onLinkRequest = (aId, bId) => {
-    if (!markProjectChanged("add-link")) return;
+  const onLinkRequest = (aEndpoint, bEndpoint) => {
+    const aId = typeof aEndpoint === "string" ? aEndpoint : aEndpoint?.devId;
+    const bId = typeof bEndpoint === "string" ? bEndpoint : bEndpoint?.devId;
     const a = devices[aId], b = devices[bId];
-    const aFree = freeIface(a, links, aId);
-    const bFree = freeIface(b, links, bId);
+    if (!a || !b) return;
+    const requestedType = OPT_Engine.normalizeCableType?.(forceLinkType || "auto") || (forceLinkType || "auto");
+    const aFree = aEndpoint?.iface || freeIface(a, links, aId, requestedType);
+    const bFree = bEndpoint?.iface || freeIface(b, links, bId, requestedType);
     if (!aFree || !bFree) {
-      log("err", "topology", `no free interface on ${!aFree ? a.hostname : b.hostname}`);
-      setToast({ kind: "err", msg: `No free interface on ${!aFree ? a.hostname : b.hostname}` });
+      const blocked = !aFree ? a : b;
+      log("err", "topology", `no compatible free port on ${blocked.hostname}`);
+      setToast({ kind: "err", msg: `No compatible free port on ${blocked.hostname}` });
       return;
     }
-    const type = (forceLinkType && forceLinkType !== "auto") ? forceLinkType : autoLinkType(a, b);
+    const existing = links.find(l => (l.a === aId && l.ai === aFree) || (l.b === aId && l.bi === aFree) || (l.a === bId && l.ai === bFree) || (l.b === bId && l.bi === bFree));
+    if (existing) {
+      setToast({ kind: "err", msg: "That port is already connected." });
+      return;
+    }
+    const compat = OPT_Engine.cableCompatibility?.(a, aFree, b, bFree, requestedType) || { ok: true, type: autoLinkType(a, b) };
+    if (!compat.ok) {
+      log("err", "topology", compat.reason);
+      setToast({ kind: "err", msg: compat.reason });
+      return;
+    }
+    if (!markProjectChanged("add-link")) return;
+    const type = compat.type || autoLinkType(a, b);
     setForceLinkType(null);
     const link = { id: OPT_Engine.uid("l"), a: aId, ai: aFree, b: bId, bi: bFree, type, up: true };
     setLinks((ls) => [...ls, link]);
@@ -1082,6 +1242,10 @@ function App() {
       [bId]: { ...m[bId], interfaces: { ...m[bId].interfaces, [bFree]: { ...m[bId].interfaces[bFree], up: true, admUp: true } } },
     }));
     log("ok", "topology", `wired ${a.hostname} ${ifaceName(aFree)} ↔ ${b.hostname} ${ifaceName(bFree)} (${type})`);
+    if (compat.warning) {
+      log("warn", "topology", compat.warning);
+      setToast({ kind: "warn", msg: compat.warning });
+    }
   };
 
   const onDeleteLink = (id) => {
@@ -1794,10 +1958,12 @@ function App() {
           onEnterLinkMode={(type) => { setLinkMode(true); setForceLinkType(type); }}
         />
         <div className="tb-center">
-          <div className={`tb-status-chip ${syncStatus.state}`}>
-            <span className="dot"/>
-            {syncStatus.message}
-          </div>
+          {syncStatus.message !== "Local only" && (
+            <div className={`tb-status-chip ${syncStatus.state}`}>
+              <span className="dot"/>
+              {syncStatus.message}
+            </div>
+          )}
         </div>
         <div className="tb-actions">
           {(cloudProjectId || shareToken) && !cloudLease && shareMode !== "read" && (
@@ -1823,14 +1989,24 @@ function App() {
         className="workspace"
         style={{
           "--bottom-panel-height": `${bottomPanelHeight}px`,
+          "--pt-sidebar-width": `${packetTracerSidebarWidth}px`,
         }}
       >
         {/* (Labs/Diagnostics moved to top menus) */}
         {ptActivity && ptSidebarOpen && (
-          <PacketTracerSidebar
-            activity={ptActivity}
-            onClose={() => setPtSidebarOpen(false)}
-          />
+          <>
+            <PacketTracerSidebar
+              activity={ptActivity}
+              onClose={() => setPtSidebarOpen(false)}
+            />
+            <div
+              className="pt-sidebar-resizer"
+              role="separator"
+              aria-orientation="vertical"
+              aria-label="Resize assignment sidebar"
+              onPointerDown={(event) => beginResize("sidebar", event)}
+            />
+          </>
         )}
         {ptActivity && !ptSidebarOpen && (
           <div
@@ -1889,6 +2065,7 @@ function App() {
             onDeleteLink={onDeleteLink}
             linkMode={linkMode}
             setLinkMode={setLinkMode}
+            forceLinkType={forceLinkType || "auto"}
             packetMode={packetMode}
             setPacketMode={setPacketMode}
             onLinkRequest={onLinkRequest}
@@ -1903,6 +2080,8 @@ function App() {
             activeHopDeviceId={activeHopDeviceId}
             viewState={topologyViewState}
             onViewStateChange={setTopologyViewState}
+            starterScreenVisible={starterScreenVisible}
+            onCreateProject={createEmptyProjectFromStarterScreen}
             onOpenConsole={openConsole}
             onContextMenu={(e, d) => setCtx({ x: e.clientX, y: e.clientY, devId: d.id })}
           />
@@ -1913,7 +2092,7 @@ function App() {
               role="separator"
               aria-orientation="horizontal"
               aria-label="Resize bottom panel"
-              onPointerDown={beginResize}
+              onPointerDown={(event) => beginResize("bottom", event)}
             />
             <div className="bp-tabs">
               {openConsoles.map((id) => {
@@ -2164,6 +2343,17 @@ function TitleMenus(props) {
   const toggle = (k) => setOpen((cur) => cur === k ? null : k);
   const close = () => setOpen(null);
   const tweak = (k, v) => { props.setTweak(k, v); close(); };
+  const deviceGroups = [
+    { title: "Routers", kinds: ["router"] },
+    { title: "Switches", kinds: ["l2switch", "l3switch"] },
+    { title: "End Devices", kinds: ["pc", "laptop", "server", "printer", "phone", "ap"] },
+  ].map((group) => ({
+    ...group,
+    devices: DeviceCatalog.filter((d) => group.kinds.includes(d.kind)),
+  })).filter((group) => group.devices.length);
+  const groupedDeviceIds = new Set(deviceGroups.flatMap((group) => group.devices.map((d) => d.id || d.kind)));
+  const otherDevices = DeviceCatalog.filter((d) => !groupedDeviceIds.has(d.id || d.kind));
+  if (otherDevices.length) deviceGroups.push({ title: "Other", devices: otherDevices });
 
   const menus = {
     File: [
@@ -2255,34 +2445,39 @@ function TitleMenus(props) {
           </div>
           {open === name && (
             menus[name].kind === "devices" ? (
-              <div className="tb-dropdown" style={{ minWidth: 300 }}>
-                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 4, padding: "0 4px 6px" }}>
-                  {DeviceCatalog.map((d) => (
-                    <div
-                      key={d.id || d.kind}
-                      draggable
-                      onDragStart={(e) => {
-                        e.dataTransfer.effectAllowed = "copy";
-                        e.dataTransfer.setData("text/x-openpt-device", d.id || d.kind);
-                        // close menu shortly after drag start so the drop target receives
-                        setTimeout(close, 80);
-                      }}
-                      style={{
-                        display: "flex", flexDirection: "column", alignItems: "center",
-                        gap: 4, padding: "10px 4px 6px",
-                        background: "var(--bg-2)", border: "1px solid transparent",
-                        borderRadius: 7, cursor: "grab",
-                      }}
-                      onMouseEnter={(e) => { e.currentTarget.style.borderColor = "var(--line)"; }}
-                      onMouseLeave={(e) => { e.currentTarget.style.borderColor = "transparent"; }}
-                    >
-                      <div style={{ color: d.color }}>
-                        {React.createElement(Glyph[d.kind] || Glyph.router, { size: 28 })}
-                      </div>
-                      <div style={{ fontFamily: "var(--font-mono)", fontSize: 10.5, color: "var(--fg-1)" }}>{d.short}</div>
+              <div className="tb-dropdown" style={{ minWidth: 340, maxHeight: "calc(100vh - 70px)", overflowY: "auto" }}>
+                {deviceGroups.map((group) => (
+                  <div key={group.title}>
+                    <div className="tb-dropdown-section">{group.title}</div>
+                    <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 4, padding: "0 4px 6px" }}>
+                      {group.devices.map((d) => (
+                        <div
+                          key={d.id || d.kind}
+                          draggable
+                          onDragStart={(e) => {
+                            e.dataTransfer.effectAllowed = "copy";
+                            e.dataTransfer.setData("text/x-openpt-device", d.id || d.kind);
+                            // close menu shortly after drag start so the drop target receives
+                            setTimeout(close, 80);
+                          }}
+                          style={{
+                            display: "flex", flexDirection: "column", alignItems: "center",
+                            gap: 4, padding: "10px 4px 6px",
+                            background: "var(--bg-2)", border: "1px solid transparent",
+                            borderRadius: 7, cursor: "grab",
+                          }}
+                          onMouseEnter={(e) => { e.currentTarget.style.borderColor = "var(--line)"; }}
+                          onMouseLeave={(e) => { e.currentTarget.style.borderColor = "transparent"; }}
+                        >
+                          <div style={{ color: d.color }}>
+                            {React.createElement(Glyph[d.kind] || Glyph.router, { size: 28 })}
+                          </div>
+                          <div style={{ fontFamily: "var(--font-mono)", fontSize: 10.5, color: "var(--fg-1)" }}>{d.short}</div>
+                        </div>
+                      ))}
                     </div>
-                  ))}
-                </div>
+                  </div>
+                ))}
                 <div className="tb-dropdown-sep"/>
                 <div className="tb-dropdown-section">Cables</div>
                 <div className="tb-dropdown-item" onClick={() => { props.onEnterLinkMode("auto"); close(); }}>
@@ -3128,13 +3323,32 @@ const PacketTracerReverseReport = React.memo(function PacketTracerReverseReport(
 });
 
 function sanitizeActivityHtml(html) {
-  if (!html) return "";
-  return String(html)
-    .replace(/<script[\s\S]*?<\/script>/gi, "")
-    .replace(/<style[\s\S]*?<\/style>/gi, "")
-    .replace(/\son[a-z]+\s*=\s*"[^"]*"/gi, "")
-    .replace(/\son[a-z]+\s*=\s*'[^']*'/gi, "")
-    .replace(/\sjavascript:/gi, " ");
+  const source = String(html || "");
+  if (!source.trim()) return "";
+  try {
+    const doc = new DOMParser().parseFromString(source, "text/html");
+    doc.querySelectorAll("script,style,link,meta,iframe,object,embed").forEach((node) => node.remove());
+    doc.body.querySelectorAll("*").forEach((node) => {
+      Array.from(node.attributes).forEach((attr) => {
+        const name = attr.name.toLowerCase();
+        const value = String(attr.value || "");
+        if (
+          name.startsWith("on") ||
+          name === "style" ||
+          name === "bgcolor" ||
+          name === "background" ||
+          name === "color" ||
+          name === "text" ||
+          ((name === "href" || name === "src") && /^\s*javascript:/i.test(value))
+        ) {
+          node.removeAttribute(attr.name);
+        }
+      });
+    });
+    return doc.body.innerHTML;
+  } catch (error) {
+    return "";
+  }
 }
 
 function progressDisplay(progress) {
@@ -3225,8 +3439,7 @@ function RubricNode({ node, depth }) {
 }
 
 function PacketTracerSidebar({ activity, onClose }) {
-  const [topTab, setTopTab] = useState("progress");
-  const [sub, setSub] = useState("overview");
+  const [topTab, setTopTab] = useState("instructions");
   if (!activity) return null;
 
   const progress = activity.progress || null;
@@ -3234,10 +3447,10 @@ function PacketTracerSidebar({ activity, onClose }) {
   const sections = packetTracerAssessmentSections(activity);
   const connectivityItems = sections.connectivityTests || [];
   const assessmentOnly = sections.assessmentItems || [];
+  const allAssessmentItems = [...assessmentOnly, ...connectivityItems];
   const components = progress?.components || [];
   const title = activity.title || activity.sourceName || "Packet Tracer Activity";
   const isPerfect = typeof progress?.percent === "number" && progress.percent >= 100;
-  const rubricRoots = normalizeRubricPattern(activity.rubricPattern, activity.assessmentItems);
 
   return (
     <div className="pt-sidebar">
@@ -3254,18 +3467,11 @@ function PacketTracerSidebar({ activity, onClose }) {
         </div>
       </div>
 
-      <div className="pt-sb-instructions">
-        {activity.instructionsHtml
-          ? <div className="pt-sb-html" dangerouslySetInnerHTML={{ __html: sanitizeActivityHtml(activity.instructionsHtml) }} />
-          : activity.instructionsText
-            ? <pre className="pt-sb-text">{activity.instructionsText}</pre>
-            : <div className="pt-sb-empty">No instructions were embedded in this activity.</div>}
-      </div>
-
       <div className="side-tabs pt-sb-tabs">
         {[
+          ["instructions", "Instructions"],
+          ["assessment", `Assessment Items${allAssessmentItems.length ? ` (${allAssessmentItems.length})` : ""}`],
           ["progress", "Progress"],
-          ["rubric", `Rubric${rubricRoots.length ? ` (${rubricRoots.length})` : ""}`],
         ].map(([k, lbl]) => (
           <div
             key={k}
@@ -3275,138 +3481,84 @@ function PacketTracerSidebar({ activity, onClose }) {
         ))}
       </div>
 
-      {topTab === "progress" && (
-        <>
-          <div className="pt-sb-subtabs">
-            {[
-              ["overview", "Overview"],
-              ["items", `Assessment Items${assessmentOnly.length ? ` (${assessmentOnly.length})` : ""}`],
-              ["connectivity", `Connectivity Tests${connectivityItems.length ? ` (${connectivityItems.length})` : ""}`],
-            ].map(([k, lbl]) => (
-              <div
-                key={k}
-                className={`pt-sb-subtab ${sub === k ? "active" : ""}`}
-                onClick={() => setSub(k)}
-              >{lbl}</div>
-            ))}
+      {topTab === "instructions" && (
+        <div className="pt-sb-body">
+          <div className="pt-sb-instructions">
+            {activity.instructionsHtml
+              ? <div className="pt-sb-html" dangerouslySetInnerHTML={{ __html: sanitizeActivityHtml(activity.instructionsHtml) }} />
+              : activity.instructionsText
+                ? <pre className="pt-sb-text">{activity.instructionsText}</pre>
+                : <div className="pt-sb-empty">No instructions were embedded in this activity.</div>}
           </div>
-
-          <div className="pt-sb-body">
-            {sub === "overview" && (
-              <div className="pt-sb-section">
-                <div className="pt-sb-summary">
-                  <div className="pt-sb-summary-row"><span className="k">Score</span><span className="v">{progress?.score || "—"}</span></div>
-                  <div className="pt-sb-summary-row"><span className="k">Items</span><span className="v">{progress?.itemCount || `${(assessmentOnly.length + connectivityItems.length)}`}</span></div>
-                  {typeof progress?.percent === "number" && (
-                    <div className="pt-sb-summary-row"><span className="k">Percent</span><span className="v">{progress.percent}%</span></div>
-                  )}
-                </div>
-                {components.length > 0 ? (
-                  <>
-                    <div className="pt-sb-h">Components</div>
-                    <div className="pt-sb-comp-table">
-                      <div className="pt-sb-comp-row head">
-                        <span>Component</span><span>Items</span><span>Score</span>
-                      </div>
-                      {components.map((c, i) => (
-                        <div key={i} className="pt-sb-comp-row">
-                          <span title={c.name}>{c.name || "—"}</span>
-                          <span>{c.items || "—"}</span>
-                          <span>{c.score || "—"}</span>
-                        </div>
-                      ))}
-                    </div>
-                  </>
-                ) : sections.roots?.length > 0 ? (
-                  <>
-                    <div className="pt-sb-h">Sections</div>
-                    <div className="pt-sb-comp-table">
-                      <div className="pt-sb-comp-row head"><span>Section</span><span>Items</span><span/></div>
-                      {sections.roots.map((r, i) => (
-                        <div key={i} className="pt-sb-comp-row">
-                          <span title={r.name}>{r.name}</span>
-                          <span>{r.count}</span>
-                          <span/>
-                        </div>
-                      ))}
-                    </div>
-                  </>
-                ) : (
-                  <div className="pt-sb-empty">No component breakdown available.</div>
-                )}
-              </div>
-            )}
-
-            {sub === "items" && (
-              <div className="pt-sb-section">
-                {assessmentOnly.length === 0 ? (
-                  <div className="pt-sb-empty">No assessment items extracted.</div>
-                ) : (
-                  <div className="pt-sb-items">
-                    {assessmentOnly.slice(0, 400).map((it, i) => (
-                      <div key={`${it.path || it.id || i}-${i}`} className="pt-sb-item">
-                        <div className="pt-sb-item-main">
-                          <div className="pt-sb-item-name" title={it.path}>{it.path || it.name || it.id || `Item ${i + 1}`}</div>
-                          {(it.components || it.rootName) && (
-                            <div className="pt-sb-item-meta">{[it.components, it.rootName].filter(Boolean).join(" · ")}</div>
-                          )}
-                          {it.checkType && <div className="pt-sb-item-meta dim">{it.checkType}</div>}
-                        </div>
-                        <div className="pt-sb-item-points">{it.points || 0} pts</div>
-                      </div>
-                    ))}
-                    {assessmentOnly.length > 400 && (
-                      <div className="pt-sb-empty">Showing first 400 of {assessmentOnly.length} items.</div>
-                    )}
-                  </div>
-                )}
-              </div>
-            )}
-
-            {sub === "connectivity" && (
-              <div className="pt-sb-section">
-                {connectivityItems.length === 0 ? (
-                  <div className="pt-sb-empty">No connectivity tests in this activity.</div>
-                ) : (
-                  <div className="pt-sb-items">
-                    {connectivityItems.slice(0, 400).map((it, i) => (
-                      <div key={`${it.path || it.id || i}-${i}`} className="pt-sb-item">
-                        <div className="pt-sb-item-main">
-                          <div className="pt-sb-item-name" title={it.path}>{it.path || it.name || it.id || `Test ${i + 1}`}</div>
-                          {(it.components || it.rootName) && (
-                            <div className="pt-sb-item-meta">{[it.components, it.rootName].filter(Boolean).join(" · ")}</div>
-                          )}
-                          {it.checkType && <div className="pt-sb-item-meta dim">{it.checkType}</div>}
-                        </div>
-                        <div className="pt-sb-item-points">{it.points || 0} pts</div>
-                      </div>
-                    ))}
-                    {connectivityItems.length > 400 && (
-                      <div className="pt-sb-empty">Showing first 400 of {connectivityItems.length} tests.</div>
-                    )}
-                  </div>
-                )}
-              </div>
-            )}
-          </div>
-        </>
+        </div>
       )}
 
-      {topTab === "rubric" && (
+      {topTab === "assessment" && (
         <div className="pt-sb-body">
           <div className="pt-sb-section">
-            {rubricRoots.length === 0 ? (
-              <div className="pt-sb-empty">No rubric extracted from this activity.</div>
-            ) : (
-              <div className="pt-sb-rubric">
-                {rubricRoots.map((root, i) => (
-                  <RubricNode key={`${root?.id || root?.name || i}-${i}`} node={root} depth={0} />
-                ))}
-              </div>
+            {assessmentOnly.length > 0 && (
+              <PacketTracerAssessmentRows items={assessmentOnly} empty="No assessment items extracted." />
+            )}
+            {assessmentOnly.length === 0 && connectivityItems.length === 0 && (
+              <div className="pt-sb-empty">No assessment items extracted.</div>
+            )}
+            {connectivityItems.length > 0 && (
+              <>
+                <div className="pt-sb-h">Connectivity Tests</div>
+                <PacketTracerAssessmentRows items={connectivityItems} empty="No connectivity tests in this activity." />
+              </>
             )}
           </div>
         </div>
       )}
+
+      {topTab === "progress" && (
+        <div className="pt-sb-body">
+          <div className="pt-sb-section">
+            <div className="pt-sb-summary">
+              <div className="pt-sb-summary-row"><span className="k">Score</span><span className="v">{progress?.score || "—"}</span></div>
+              <div className="pt-sb-summary-row"><span className="k">Items</span><span className="v">{progress?.itemCount || `${allAssessmentItems.length}`}</span></div>
+              {typeof progress?.percent === "number" && (
+                <div className="pt-sb-summary-row"><span className="k">Percent</span><span className="v">{progress.percent}%</span></div>
+              )}
+            </div>
+            {components.length > 0 ? (
+              <>
+                <div className="pt-sb-h">Components</div>
+                <div className="pt-sb-comp-table">
+                  <div className="pt-sb-comp-row head">
+                    <span>Component</span><span>Items</span><span>Score</span>
+                  </div>
+                  {components.map((c, i) => (
+                    <div key={i} className="pt-sb-comp-row">
+                      <span title={c.name}>{c.name || "—"}</span>
+                      <span>{c.items || "—"}</span>
+                      <span>{c.score || "—"}</span>
+                    </div>
+                  ))}
+                </div>
+              </>
+            ) : sections.roots?.length > 0 ? (
+              <>
+                <div className="pt-sb-h">Sections</div>
+                <div className="pt-sb-comp-table">
+                  <div className="pt-sb-comp-row head"><span>Section</span><span>Items</span><span/></div>
+                  {sections.roots.map((r, i) => (
+                    <div key={i} className="pt-sb-comp-row">
+                      <span title={r.name}>{r.name}</span>
+                      <span>{r.count}</span>
+                      <span/>
+                    </div>
+                  ))}
+                </div>
+              </>
+            ) : (
+              <div className="pt-sb-empty">No component breakdown available.</div>
+            )}
+          </div>
+        </div>
+      )}
+
     </div>
   );
 }
@@ -3516,10 +3668,11 @@ function Stat({ k, v }) {
 }
 
 // ── Utilities ───────────────────────────────────────────
-function freeIface(d, links, devId) {
+function freeIface(d, links, devId, cableType = "auto") {
   for (const n of Object.keys(d.interfaces)) {
     const taken = links.some(l => (l.a === devId && l.ai === n) || (l.b === devId && l.bi === n));
-    if (!taken) return n;
+    const fits = OPT_Engine.cableFitsPort?.(d, n, cableType)?.ok ?? true;
+    if (!taken && fits) return n;
   }
   return null;
 }
