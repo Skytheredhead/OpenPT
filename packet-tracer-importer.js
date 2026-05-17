@@ -1,6 +1,7 @@
 // packet-tracer-importer.js - browser-side Packet Tracer assignment importer hook
 (function () {
   const ETHERCHANNEL_SHA256 = "f37cf1ca63177e6fa30799e28f1abac2b26cac26e6b652b0357cf51438d5081a";
+  let twofishLoadPromise = null;
 
   const etherchannelText = `15.2.7 Packet Tracer - EtherChannel Review
 
@@ -304,6 +305,40 @@ End of document`;
     return Array.from(new Uint8Array(digest)).map((b) => b.toString(16).padStart(2, "0")).join("");
   }
 
+  async function ensureTwofish() {
+    if (window.OpenPTTwofish?.makeSession && window.OpenPTTwofish?.encrypt) return;
+    if (typeof document === "undefined" || !document.createElement) {
+      throw new Error("Packet Tracer decoder cannot load Twofish in this environment.");
+    }
+    if (!twofishLoadPromise) {
+      twofishLoadPromise = new Promise((resolve, reject) => {
+        const previousExports = window.exports;
+        const exportsBucket = {};
+        window.OpenPTTwofishExports = exportsBucket;
+        window.exports = exportsBucket;
+        const script = document.createElement("script");
+        script.src = "vendor/twofish-ts.js";
+        script.async = true;
+        script.onload = () => {
+          window.OpenPTTwofish = window.OpenPTTwofishExports;
+          delete window.OpenPTTwofishExports;
+          if (previousExports === undefined) delete window.exports;
+          else window.exports = previousExports;
+          if (window.OpenPTTwofish?.makeSession && window.OpenPTTwofish?.encrypt) resolve();
+          else reject(new Error("Twofish helper loaded, but did not expose makeSession/encrypt."));
+        };
+        script.onerror = () => {
+          delete window.OpenPTTwofishExports;
+          if (previousExports === undefined) delete window.exports;
+          else window.exports = previousExports;
+          reject(new Error("Could not load vendor/twofish-ts.js. Make sure the vendored decoder file is deployed."));
+        };
+        document.head.appendChild(script);
+      });
+    }
+    await twofishLoadPromise;
+  }
+
   function packetTracerOuterDecode(bytes) {
     const n = bytes.length;
     const out = new Uint8Array(n);
@@ -465,6 +500,7 @@ End of document`;
       };
     }
 
+    await ensureTwofish();
     const decrypted = decryptPacketTracerSave(bytes);
     const xmlBytes = await qtUncompress(decrypted.payload);
     return {
@@ -830,7 +866,7 @@ ${report.notes.map((n) => `- ${n}`).join("\n")}`;
     const title = stripPacketTracerExt(file.name);
     return {
       format: "packet-tracer-activity",
-      importerVersion: 1,
+      importerVersion: 2,
       unsupported: true,
       title,
       instructionsText: reverseReportText(report),

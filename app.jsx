@@ -801,8 +801,11 @@ function App() {
     setPackets([]);
     if (activity?.unsupported) {
       const shortHash = activity.sourceSha256 ? activity.sourceSha256.slice(0, 12) : activity.sourceHeadHex;
-      setToast({ kind: "warn", msg: `No extractor profile for ${filename}` });
-      log("warn", "import", `Packet Tracer file recognized, but no extractor profile is packaged for ${filename}${shortHash ? ` (${shortHash})` : ""}`);
+      const decoderError = activity.reverseReport?.decoder?.error;
+      setToast({ kind: "warn", msg: decoderError ? `Could not decode ${filename}` : `No extractor profile for ${filename}` });
+      log("warn", "import", decoderError
+        ? `Packet Tracer decoder failed for ${filename}${shortHash ? ` (${shortHash})` : ""}: ${decoderError}`
+        : `Packet Tracer file recognized, but no extractor profile is packaged for ${filename}${shortHash ? ` (${shortHash})` : ""}`);
       return;
     }
     setToast({ kind: "ok", msg: `Imported ${filename}` });
@@ -2494,6 +2497,16 @@ function PacketTracerReverseReport({ activity }) {
         <span style={{ color: activity.unsupported ? "var(--warn)" : "var(--fg-1)" }}>
           {activity.featureCoverage?.semanticExtraction || (activity.unsupported ? "not-decoded" : "profile-derived")}
         </span>
+        {report.decoder && (
+          <>
+            <div style={{ color: "var(--fg-3)" }}>Decoder</div>
+            <span style={{ color: report.decoder.status === "decoded" ? "var(--ok)" : "var(--warn)", overflowWrap: "anywhere" }}>
+              {report.decoder.status || "unknown"}
+              {report.decoder.profile ? ` · ${report.decoder.profile}` : report.decoder.attemptedProfile ? ` · ${report.decoder.attemptedProfile}` : ""}
+              {report.decoder.error ? ` · ${report.decoder.error}` : ""}
+            </span>
+          </>
+        )}
         {activity.progress?.score && (
           <>
             <div style={{ color: "var(--fg-3)" }}>Progress</div>
