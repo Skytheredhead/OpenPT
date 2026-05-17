@@ -630,11 +630,35 @@ ${report.notes.map((n) => `- ${n}`).join("\n")}`;
     `;
   }
 
-  function parseXmlDocument(xmlText) {
-    const doc = new DOMParser().parseFromString(xmlText, "application/xml");
+  function sanitizeXmlForParser(xmlText) {
+    let replacements = 0;
+    const sanitized = String(xmlText || "").replace(/[\x00-\x08\x0b\x0c\x0e-\x1f]/g, () => {
+      replacements += 1;
+      return "\uFFFD";
+    });
+    return { sanitized, replacements };
+  }
+
+  function xmlParserError(doc) {
     const parserError = doc.getElementsByTagName("parsererror")[0];
-    if (parserError) throw new Error(parserError.textContent || "Decoded Packet Tracer XML could not be parsed.");
-    return doc;
+    return parserError ? parserError.textContent || "Decoded Packet Tracer XML could not be parsed." : "";
+  }
+
+  function parseXmlDocument(xmlText) {
+    const firstDoc = new DOMParser().parseFromString(xmlText, "application/xml");
+    const firstError = xmlParserError(firstDoc);
+    if (!firstError) return { doc: firstDoc, sanitizedReplacements: 0 };
+
+    const { sanitized, replacements } = sanitizeXmlForParser(xmlText);
+    if (replacements > 0 && sanitized !== xmlText) {
+      const retryDoc = new DOMParser().parseFromString(sanitized, "application/xml");
+      const retryError = xmlParserError(retryDoc);
+      if (!retryError) {
+        return { doc: retryDoc, sanitizedReplacements: replacements, firstError };
+      }
+    }
+
+    throw new Error(firstError);
   }
 
   function directChildren(element, tagName) {
@@ -717,7 +741,8 @@ ${report.notes.map((n) => `- ${n}`).join("\n")}`;
   }
 
   function parsePacketTracerXml(file, decoded, sha256, head, report) {
-    const doc = parseXmlDocument(decoded.xmlText);
+    const parsedXml = parseXmlDocument(decoded.xmlText);
+    const doc = parsedXml.doc;
     const root = doc.documentElement;
     const packetTracer = directChild(root, "PACKETTRACER5") || directChild(root, "PACKETTRACER") || root;
     const network = directChild(packetTracer, "NETWORK");
@@ -799,6 +824,7 @@ ${report.notes.map((n) => `- ${n}`).join("\n")}`;
       rootTag: root.tagName,
       packetTracerVersion: firstDescendantText(root, "VERSION"),
       xmlLength: decoded.xmlText.length,
+      sanitizedParserReplacements: parsedXml.sanitizedReplacements,
       stages: decoded.stages,
     };
 
