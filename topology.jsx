@@ -11,10 +11,10 @@ function Topology(props) {
   const selSet = React.useMemo(() => new Set(selectedIds || []), [selectedIds]);
 
   const wrapRef = React.useRef(null);
+  const viewStateCommitRef = React.useRef(null);
   const [pan, setPan] = React.useState(viewState?.pan || { x: 0, y: 0, k: 1 });
   const [drag, setDrag] = React.useState(null);   // { id, ox, oy }
   const [linkPick, setLinkPick] = React.useState(null);  // { devId, iface? }
-  const [hover, setHover] = React.useState({ x: 0, y: 0 });
   const [toast, setToast] = React.useState(null);
 
   React.useEffect(() => {
@@ -28,8 +28,13 @@ function Topology(props) {
   }, [viewState?.pan?.x, viewState?.pan?.y, viewState?.pan?.k]);
 
   React.useEffect(() => {
-    onViewStateChange && onViewStateChange({ pan });
-  }, [pan.x, pan.y, pan.k]);
+    if (!onViewStateChange) return;
+    clearTimeout(viewStateCommitRef.current);
+    viewStateCommitRef.current = setTimeout(() => {
+      onViewStateChange({ pan });
+    }, 180);
+    return () => clearTimeout(viewStateCommitRef.current);
+  }, [pan.x, pan.y, pan.k, onViewStateChange]);
 
   const screenToWorld = (px, py) => {
     const r = wrapRef.current.getBoundingClientRect();
@@ -215,8 +220,6 @@ function Topology(props) {
       onDrop={onDrop}
       onDragOver={(e) => e.preventDefault()}
       onMouseDown={onMouseDownBg}
-      onWheel={onWheel}
-      onMouseMove={(e) => setHover(screenToWorld(e.clientX, e.clientY))}
       style={{
         backgroundPosition: `${pan.x}px ${pan.y}px`,
         backgroundSize: `${24 * pan.k}px ${24 * pan.k}px`,

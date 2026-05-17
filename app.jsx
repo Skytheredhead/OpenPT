@@ -2449,7 +2449,7 @@ function Events({ events }) {
   );
 }
 
-function PacketTracerReverseReport({ activity }) {
+const PacketTracerReverseReport = React.memo(function PacketTracerReverseReport({ activity }) {
   const report = activity?.reverseReport || activity?.diagnostics || {};
   const signatures = report.signatures || [];
   const strings = (report.interestingStrings && report.interestingStrings.length ? report.interestingStrings : report.strings || []).slice(0, 28);
@@ -2568,7 +2568,7 @@ function PacketTracerReverseReport({ activity }) {
       ))}
     </div>
   );
-}
+});
 
 function PacketLog({ events }) {
   return (
