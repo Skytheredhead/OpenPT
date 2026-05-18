@@ -14,10 +14,18 @@ const root = resolve(__dirname, "..");
 const dataDir = resolve(process.env.OPENPT_DATA_DIR || join(root, ".openpt-data"));
 const port = Number(process.env.PORT || 5173);
 const host = process.env.HOST || "127.0.0.1";
-const allowedOrigins = (process.env.OPENPT_ALLOWED_ORIGINS || "http://127.0.0.1:5173,http://localhost:5173,https://open-pt.vercel.app")
+const defaultAllowedOrigins = [
+  "http://127.0.0.1:5173",
+  "http://localhost:5173",
+  "https://openpt.skylarenns.com",
+  "https://openpt.vercel.app",
+  "https://open-pt.vercel.app"
+];
+const allowedOrigins = (process.env.OPENPT_ALLOWED_ORIGINS || defaultAllowedOrigins.join(","))
   .split(",")
   .map((origin) => origin.trim())
   .filter(Boolean);
+const backendOnly = process.env.OPENPT_BACKEND_ONLY === "1";
 
 const app = Fastify({ logger: true, bodyLimit: 520 * 1024 * 1024 });
 const store = new OpenPTStore({
@@ -324,18 +332,21 @@ app.patch("/api/share/:token", async (req) => {
   return { project: projectSummary(result.project, { shared: true, mode: project.mode }), document: result.document };
 });
 
-await app.register(staticPlugin, {
-  root,
-  prefix: "/",
-  wildcard: false
-});
+if (!backendOnly) {
+  await app.register(staticPlugin, {
+    root,
+    prefix: "/",
+    wildcard: false
+  });
 
-app.get("/share/:token", async (req, reply) => {
-  return reply.sendFile("index.html");
-});
+  app.get("/share/:token", async (req, reply) => {
+    return reply.sendFile("index.html");
+  });
+}
 
 app.setNotFoundHandler((req, reply) => {
   if (req.raw.url?.startsWith("/api/")) return reply.status(404).send({ error: "Not found" });
+  if (backendOnly) return reply.status(404).send({ error: "OpenPT API only." });
   return reply.sendFile("index.html");
 });
 

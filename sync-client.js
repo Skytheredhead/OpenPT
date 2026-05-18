@@ -3,10 +3,18 @@
   const LABEL_KEY = "openpt:sync:client-label";
   const DB_NAME = "openpt-sync";
   const DB_VERSION = 1;
-  const DEFAULT_API_BASE = location.hostname.endsWith("vercel.app") ? "https://openptapi.skylarenns.com" : "";
+  const REMOTE_API_BASE = "https://openptapi.skylarenns.com";
+  const LOCAL_HOSTS = new Set(["", "localhost", "127.0.0.1", "::1"]);
+
+  function defaultApiBase() {
+    const hostname = location.hostname;
+    if (location.protocol === "file:" || LOCAL_HOSTS.has(hostname) || hostname.endsWith(".localhost")) return "";
+    if (hostname === "openptapi.skylarenns.com") return "";
+    return REMOTE_API_BASE;
+  }
 
   function apiBase() {
-    const configured = window.OPENPT_API_BASE || localStorage.getItem("openpt:api-base") || DEFAULT_API_BASE;
+    const configured = window.OPENPT_API_BASE || localStorage.getItem("openpt:api-base") || defaultApiBase();
     return String(configured || "").replace(/\/+$/, "");
   }
 
