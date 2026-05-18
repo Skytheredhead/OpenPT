@@ -8,6 +8,7 @@ import { fileURLToPath } from "node:url";
 import { ObjectStore } from "./object-store.mjs";
 import { OpenPTStore, LIMITS } from "./storage.mjs";
 import { AbuseGuard, clientIp } from "./abuse-guard.mjs";
+import { reportFingerprint, sanitizeErrorReport, sendErrorReportEmail } from "./error-report.mjs";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const root = resolve(__dirname, "..");
@@ -107,6 +108,16 @@ function projectSummary(row, extra = {}) {
   };
 }
 
+function accountExistsError() {
+  const err = new Error("Account already exists.");
+  err.statusCode = 409;
+  return err;
+}
+
+function isUniqueUserError(err) {
+  return err?.code === "SQLITE_CONSTRAINT_UNIQUE" || /UNIQUE constraint failed: users\.email/i.test(err?.message || "");
+}
+
 app.setErrorHandler((err, req, reply) => {
   const status = err.statusCode || 500;
   req.log[status >= 500 ? "error" : "warn"](err);
@@ -125,6 +136,25 @@ app.setErrorHandler((err, req, reply) => {
 
 app.get("/api/health", async () => ({ ok: true, limits: LIMITS }));
 
+app.post("/api/error-reports", { bodyLimit: 256 * 1024 }, async (req, reply) => {
+  if (req.user) requireCsrf(req);
+  const report = sanitizeErrorReport(req.body || {});
+  const fingerprint = reportFingerprint(report);
+  try {
+    abuse.check("errorReportIp", clientIp(req));
+    abuse.check("errorReportFingerprint", fingerprint);
+    if (req.user?.id) abuse.check("errorReportUser", req.user.id);
+  } catch (err) {
+    req.log.warn({ err, fingerprint }, "error report throttled");
+    return { ok: true };
+  }
+  sendErrorReportEmail(report, { logger: req.log }).catch((err) => {
+    req.log.warn({ err, fingerprint }, "error report email failed");
+  });
+  reply.status(202);
+  return { ok: true };
+});
+
 app.post("/api/auth/register", async (req, reply) => {
   const email = String(req.body?.email || "").trim().toLowerCase();
   const password = String(req.body?.password || "");
@@ -142,8 +172,15 @@ app.post("/api/auth/register", async (req, reply) => {
     reply.status(400);
     return { error: "Password must be at least 8 characters." };
   }
+  if (store.getUserByEmail(email)) throw accountExistsError();
   const hash = await argon2.hash(password, { type: argon2.argon2id });
-  const user = store.createUser(email, hash);
+  let user;
+  try {
+    user = store.createUser(email, hash);
+  } catch (err) {
+    if (isUniqueUserError(err)) throw accountExistsError();
+    throw err;
+  }
   const session = store.createSession(user.id);
   setSessionCookie(reply, session);
   return { user: publicUser(user), csrf: session.csrf };
@@ -166,6 +203,7 @@ app.post("/api/auth/login", async (req, reply) => {
 });
 
 app.post("/api/auth/logout", async (req, reply) => {
+  if (req.user) requireCsrf(req);
   if (req.cookies.openpt_session) store.deleteSession(req.cookies.openpt_session);
   reply.clearCookie("openpt_session", { path: "/" });
   return { ok: true };

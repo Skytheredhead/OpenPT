@@ -14,8 +14,39 @@
   }
 
   function apiBase() {
-    const configured = window.OPENPT_API_BASE || localStorage.getItem("openpt:api-base") || defaultApiBase();
+    const configured = window.OPENPT_API_BASE || safeStorageGet(storageArea("localStorage"), "openpt:api-base") || defaultApiBase();
     return String(configured || "").replace(/\/+$/, "");
+  }
+
+  function storageArea(name) {
+    try {
+      return window?.[name] || null;
+    } catch (err) {
+      return null;
+    }
+  }
+
+  function safeStorageGet(storage, key) {
+    try {
+      return storage?.getItem?.(key) || null;
+    } catch (err) {
+      return null;
+    }
+  }
+
+  function safeStorageSet(storage, key, value) {
+    try {
+      storage?.setItem?.(key, value);
+      return true;
+    } catch (err) {
+      return false;
+    }
+  }
+
+  function safeStorageRemove(storage, key) {
+    try {
+      storage?.removeItem?.(key);
+    } catch (err) {}
   }
 
   function uuid() {
@@ -67,26 +98,28 @@
   }
 
   function getClientId() {
-    let id = localStorage.getItem(CLIENT_KEY);
+    const storage = storageArea("localStorage");
+    let id = safeStorageGet(storage, CLIENT_KEY);
     if (!id) {
       id = uuid();
-      localStorage.setItem(CLIENT_KEY, id);
+      safeStorageSet(storage, CLIENT_KEY, id);
     }
     return id;
   }
 
   function getClientLabel() {
-    let label = localStorage.getItem(LABEL_KEY);
+    const storage = storageArea("localStorage");
+    let label = safeStorageGet(storage, LABEL_KEY);
     if (!label) {
       const ua = navigator.userAgent.includes("Mac") ? "Mac browser" : "Browser";
       label = `${ua} ${getClientId().slice(0, 4)}`;
-      localStorage.setItem(LABEL_KEY, label);
+      safeStorageSet(storage, LABEL_KEY, label);
     }
     return label;
   }
 
   function setClientLabel(label) {
-    localStorage.setItem(LABEL_KEY, label || getClientLabel());
+    safeStorageSet(storageArea("localStorage"), LABEL_KEY, label || getClientLabel());
   }
 
   function openDb() {
@@ -134,14 +167,18 @@
   }
 
   async function request(path, options = {}) {
-    const headers = { "content-type": "application/json", ...(options.headers || {}) };
-    const csrf = sessionStorage.getItem("openpt:csrf");
+    const headers = { ...(options.headers || {}) };
+    if (options.body != null && !Object.keys(headers).some((key) => key.toLowerCase() === "content-type")) {
+      headers["content-type"] = "application/json";
+    }
+    const session = storageArea("sessionStorage");
+    const csrf = safeStorageGet(session, "openpt:csrf");
     if (csrf) headers["x-openpt-csrf"] = csrf;
     const base = apiBase();
     const url = `${base}${path}`;
     const res = await fetch(url, { credentials: "include", ...options, headers });
     const nextCsrf = res.headers.get("x-openpt-csrf");
-    if (nextCsrf) sessionStorage.setItem("openpt:csrf", nextCsrf);
+    if (nextCsrf) safeStorageSet(session, "openpt:csrf", nextCsrf);
     const data = await res.json().catch(() => ({}));
     if (!res.ok) {
       const err = new Error(data.error || `Request failed: ${res.status}`);
@@ -149,7 +186,7 @@
       err.data = data;
       throw err;
     }
-    if (data.csrf) sessionStorage.setItem("openpt:csrf", data.csrf);
+    if (data.csrf) safeStorageSet(session, "openpt:csrf", data.csrf);
     return data;
   }
 
@@ -168,7 +205,13 @@
     async me() { return request("/api/me"); }
     async register(email, password, proof = {}) { return request("/api/auth/register", { method: "POST", body: JSON.stringify({ email, password, ...proof }) }); }
     async login(email, password) { return request("/api/auth/login", { method: "POST", body: JSON.stringify({ email, password }) }); }
-    async logout() { return request("/api/auth/logout", { method: "POST" }); }
+    async logout() {
+      try {
+        return await request("/api/auth/logout", { method: "POST" });
+      } finally {
+        safeStorageRemove(storageArea("sessionStorage"), "openpt:csrf");
+      }
+    }
     async listProjects() { return request("/api/projects"); }
     async createProject(title, document) { return request("/api/projects", { method: "POST", body: JSON.stringify({ title, document }) }); }
     async loadProject(id) { return request(`/api/projects/${encodeURIComponent(id)}`); }
@@ -181,6 +224,12 @@
     async renewLease(id, leaseId) {
       return request(`/api/projects/${encodeURIComponent(id)}/lease/renew`, {
         method: "POST",
+        body: JSON.stringify({ clientId: this.clientId, leaseId })
+      });
+    }
+    async releaseLease(id, leaseId) {
+      return request(`/api/projects/${encodeURIComponent(id)}/lease`, {
+        method: "DELETE",
         body: JSON.stringify({ clientId: this.clientId, leaseId })
       });
     }
@@ -213,6 +262,12 @@
       return request(`/api/share/${encodeURIComponent(token)}`, {
         method: "PATCH",
         body: JSON.stringify({ ...batch, clientId: this.clientId })
+      });
+    }
+    async reportError(payload) {
+      return request("/api/error-reports", {
+        method: "POST",
+        body: JSON.stringify(payload || {})
       });
     }
   }

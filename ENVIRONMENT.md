@@ -6,7 +6,7 @@ Check this file before deployment, server work, or Vercel verification.
 
 - The visible frontend version is defined in `app.jsx` as `OPENPT_VERSION`.
 - Bump that value before deployment tests that need to prove Vercel is serving the newest push.
-- Current expected version: `0.2.3-sync.20260516`.
+- Current expected version: `0.2.4-sync.20260518`.
 - Vercel redeploys automatically after pushes to `main`.
 - When testing Vercel, verify the visible title-bar version before testing behavior.
 - Vercel serves the static frontend. It uses `https://openptapi.skylarenns.com`

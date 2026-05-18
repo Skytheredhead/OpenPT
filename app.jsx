@@ -346,10 +346,14 @@ const ACCENTS = {
 };
 
 const Sync = window.OpenPTSync;
-const OPENPT_VERSION = "0.2.3-sync.20260516";
+const OPENPT_VERSION = "0.2.4-sync.20260518";
 const SYNC_AUTOSAVE_CHANGES = 20;
 const SYNC_AUTOSAVE_MS = 60_000;
 const SYNC_MIN_SAVE_MS = 10_000;
+
+function cloneState(value) {
+  return value == null ? value : JSON.parse(JSON.stringify(value));
+}
 
 function projectDocFromState({ title, devices, links, uiState, metadata = {} }) {
   return {
@@ -368,6 +372,96 @@ function terminalScrollPayload(scrolls) {
     if (state && !state.atBottom) out[id] = { top: state.top || 0 };
   }
   return out;
+}
+
+function cloneJson(value) {
+  if (value == null) return value;
+  return JSON.parse(JSON.stringify(value));
+}
+
+function stripProjectExtension(name) {
+  return (name || "Untitled OpenPT project").replace(/\.(json|opt|otp|pka|pkt)$/i, "");
+}
+
+function safeExportName(name, ext) {
+  const base = stripProjectExtension(name)
+    .trim()
+    .replace(/[^\w.-]+/g, "-")
+    .replace(/^-+|-+$/g, "") || "openpt-project";
+  return `${base}.${ext}`;
+}
+
+function buildOtpPackage({ title, devices, links, uiState, ptActivity, events, packets, cliHistory, cloudProjectId, cloudVersion }) {
+  const normalized = OPT_Engine.normalizeTopology(devices || {}, links || []);
+  const assignment = cloneJson(ptActivity || null);
+  const project = projectDocFromState({
+    title,
+    devices: normalized.devices,
+    links: normalized.links,
+    uiState: { ...(uiState || {}), ptActivity: null },
+    metadata: {
+      format: "openpt-otp",
+      otpVersion: 1,
+      exportedAt: new Date().toISOString(),
+    },
+  });
+  const deviceConfigs = Object.fromEntries(Object.entries(normalized.devices || {}).map(([id, device]) => [id, {
+    hostname: device.hostname || device.name || id,
+    kind: device.kind,
+    platform: device.platform || null,
+    model: device.model || null,
+    osVersion: device.osVersion || null,
+    runningConfig: OPT_Engine.serializeConfig(device),
+    startupConfig: device.startupConfig || "",
+    files: cloneJson(device.files || {}),
+  }]));
+
+  return {
+    format: "openpt-otp",
+    otpVersion: 1,
+    title: project.title,
+    createdAt: project.metadata.exportedAt,
+    generator: {
+      app: "OpenPT",
+      version: OPENPT_VERSION,
+    },
+    summary: {
+      devices: Object.keys(normalized.devices || {}).length,
+      links: (normalized.links || []).length,
+      assignment: assignment ? assignment.title || assignment.sourceName || "Packet Tracer activity" : null,
+    },
+    project,
+    assignment,
+    generated: {
+      deviceConfigs,
+    },
+    session: {
+      events: cloneJson(events || []),
+      packets: cloneJson(packets || []),
+      cliHistory: cloneJson(cliHistory || []),
+    },
+    provenance: {
+      cloudProjectId: cloudProjectId || null,
+      cloudVersion: cloudVersion || 0,
+      packetTracerRawFile: cloneJson(assignment?.rawFile || null),
+      packetTracerDecodedXml: !!assignment?.decoded?.xmlText,
+    },
+  };
+}
+
+function projectDocumentFromOtpPackage(pkg) {
+  if (!pkg || typeof pkg !== "object") return null;
+  const project = pkg.project || pkg.document || null;
+  if (!project || typeof project !== "object" || !project.devices || !Array.isArray(project.links)) return null;
+  const assignment = pkg.assignment || project.uiState?.ptActivity || null;
+  return {
+    ...project,
+    uiState: {
+      ...(project.uiState || {}),
+      ptActivity: assignment,
+      ptSidebarOpen: project.uiState?.ptSidebarOpen ?? !!assignment,
+    },
+  };
 }
 
 function mergeProjectIntoTabs(tabs, activeWid, project) {
@@ -443,6 +537,12 @@ function App() {
   const [ptActivity, setPtActivity] = useState(initial.ptActivity);
   const [ptSidebarOpen, setPtSidebarOpen] = useState(initial.ptSidebarOpen ?? !!initial.ptActivity);
   const [starterScreenVisible, setStarterScreenVisible] = useState(initial.starterScreenVisible || false);
+  const [paletteOpen, setPaletteOpen] = useState(() => {
+    try { return localStorage.getItem("openpt:palette-open") !== "0"; } catch (e) { return true; }
+  });
+  const [bottomCollapsed, setBottomCollapsed] = useState(() => {
+    try { return localStorage.getItem("openpt:bottom-collapsed") === "1"; } catch (e) { return false; }
+  });
 
   // Derived: the most-recently-selected device (used for inspector / context menu)
   const selectedId = selectedIds[selectedIds.length - 1] || null;
@@ -460,9 +560,113 @@ function App() {
   const [tabs, setTabs] = useState(initial.tabs);
   const [activeWid, setActiveWid] = useState(initial.activeWid);
   const snapshotsRef = useRef(initial.snapshots);
+  const [dirtyTabs, setDirtyTabs] = useState({});
+  const [selectedLinkId, setSelectedLinkId] = useState(null);
+  const [eventFilter, setEventFilter] = useState("all");
+  const [pingDialog, setPingDialog] = useState(null);
+  const [recentPingTargets, setRecentPingTargets] = useState(() => {
+    try { return JSON.parse(localStorage.getItem("openpt:recent-pings") || "[]"); } catch (e) { return []; }
+  });
+  const [confirmDialog, setConfirmDialog] = useState(null);
+  const [lastShareUrl, setLastShareUrl] = useState("");
+  const [lastImportReport, setLastImportReport] = useState(null);
+  const [cliGhostSuggestions, setCliGhostSuggestions] = useState(() => {
+    try { return localStorage.getItem("openpt:cli-ghost") !== "0"; } catch (e) { return true; }
+  });
+  const appUndoRef = useRef({ past: [], future: [] });
+  const suppressHistoryRef = useRef(false);
+  const dragStartSnapRef = useRef(null);
+  const latestTopologyRef = useRef({ devices, links });
+  const [historyVersion, setHistoryVersion] = useState(0);
+  useEffect(() => {
+    latestTopologyRef.current = { devices, links };
+  }, [devices, links]);
+
+  useEffect(() => {
+    try { localStorage.setItem("openpt:palette-open", paletteOpen ? "1" : "0"); } catch (e) {}
+  }, [paletteOpen]);
+  useEffect(() => {
+    try { localStorage.setItem("openpt:bottom-collapsed", bottomCollapsed ? "1" : "0"); } catch (e) {}
+  }, [bottomCollapsed]);
+  useEffect(() => {
+    try { localStorage.setItem("openpt:cli-ghost", cliGhostSuggestions ? "1" : "0"); } catch (e) {}
+  }, [cliGhostSuggestions]);
+  useEffect(() => {
+    try { localStorage.setItem("openpt:recent-pings", JSON.stringify(recentPingTargets.slice(0, 8))); } catch (e) {}
+  }, [recentPingTargets]);
+
+  const requestConfirm = (options) => new Promise((resolve) => {
+    setConfirmDialog({ ...options, resolve });
+  });
+  const resolveConfirm = (answer) => {
+    setConfirmDialog((dialog) => {
+      dialog?.resolve?.(answer);
+      return null;
+    });
+  };
   useEffect(() => {
     snapshotsRef.current[activeWid] = { devices, links, selectedIds, openConsoles, activeBottom, ptActivity, ptSidebarOpen };
   }, [devices, links, selectedIds, openConsoles, activeBottom, ptActivity, ptSidebarOpen, activeWid]);
+
+  const captureAppSnapshot = () => {
+    snapshotsRef.current[activeWid] = { devices, links, selectedIds, openConsoles, activeBottom, ptActivity, ptSidebarOpen };
+    return cloneState({
+      tabs,
+      activeWid,
+      snapshots: snapshotsRef.current,
+      devices,
+      links,
+      selectedIds,
+      openConsoles,
+      activeBottom,
+      ptActivity,
+      ptSidebarOpen,
+      starterScreenVisible,
+      cloudProjectId,
+      cloudVersion,
+      cloudBaseDoc,
+      cloudLease,
+      shareToken,
+      shareMode,
+      syncStatus,
+      dirtyTabs,
+      topologyViewState,
+      terminalScrolls,
+    });
+  };
+
+  const applyAppSnapshot = (snap) => {
+    if (!snap) return;
+    snapshotsRef.current = cloneState(snap.snapshots || {});
+    setTabs(snap.tabs || [{ id: "w-0", name: "untitled-0.opt" }]);
+    setActiveWid(snap.activeWid || "w-0");
+    setDevices(snap.devices || {});
+    setLinks(snap.links || []);
+    setSelectedIds(snap.selectedIds || []);
+    setOpenConsoles(snap.openConsoles || []);
+    setActiveBottom(snap.activeBottom || "events");
+    setPtActivity(snap.ptActivity || null);
+    setPtSidebarOpen(!!snap.ptSidebarOpen);
+    setStarterScreenVisible(!!snap.starterScreenVisible);
+    setCloudProjectId(snap.cloudProjectId || null);
+    setCloudVersion(snap.cloudVersion || 0);
+    setCloudBaseDoc(snap.cloudBaseDoc || null);
+    setCloudLease(snap.cloudLease || null);
+    setShareToken(snap.shareToken || null);
+    setShareMode(snap.shareMode || null);
+    setSyncStatus(snap.syncStatus || { state: "local", message: "Local only" });
+    setDirtyTabs(snap.dirtyTabs || {});
+    setTopologyViewState(snap.topologyViewState || {});
+    setTerminalScrolls(snap.terminalScrolls || {});
+    setSelectedLinkId(null);
+  };
+
+  const pushAppUndo = (label, before, after = null) => {
+    appUndoRef.current.past.push({ label, before, after });
+    if (appUndoRef.current.past.length > 40) appUndoRef.current.past.shift();
+    appUndoRef.current.future = [];
+    setHistoryVersion((n) => n + 1);
+  };
 
   // Persist to localStorage (debounced)
   useEffect(() => {
@@ -517,6 +721,7 @@ function App() {
     setCloudProjectId(null); setCloudVersion(0); setCloudBaseDoc(null); setCloudLease(null); setShareToken(null); setShareMode(null); setSyncStatus({ state: cloudUser ? "local" : "local", message: cloudUser ? "Signed in" : "Local only" });
   };
   const newStarterTab = () => {
+    const before = captureAppSnapshot();
     setStarterScreenVisible(false);
     snapshotsRef.current[activeWid] = { devices, links, selectedIds, openConsoles, activeBottom, ptActivity, ptSidebarOpen };
     const id = `w-${Date.now()}`;
@@ -524,30 +729,45 @@ function App() {
     snapshotsRef.current[id] = { devices: s.devices, links: s.links, selectedIds: [], openConsoles: [], activeBottom: "events", ptActivity: null, ptSidebarOpen: false };
     setTabs((ts) => [...ts, { id, name: `lab-${ts.length + 1}.opt` }]);
     setActiveWid(id);
+    skipNextSnapshot.current = true;
     setDevices(s.devices); setLinks(s.links); setSelectedId(null); setOpenConsoles([]); setActiveBottom("events"); setPtActivity(null); setPtSidebarOpen(false);
     setCloudProjectId(null); setCloudVersion(0); setCloudBaseDoc(null); setCloudLease(null); setShareToken(null); setShareMode(null); setSyncStatus({ state: cloudUser ? "local" : "local", message: cloudUser ? "Signed in" : "Local only" });
+    setDirtyTabs((m) => ({ ...m, [id]: true }));
+    pushAppUndo("opened starter lab", before);
   };
-  const closeTab = (id) => {
-    setTabs((ts) => {
-      const remaining = ts.filter(x => x.id !== id);
-      if (!remaining.length) return ts;
-      if (activeWid === id) {
-        const target = remaining[remaining.length - 1];
-        const snap = snapshotsRef.current[target.id];
-        const norm = OPT_Engine.normalizeTopology(snap?.devices || {}, snap?.links || []);
-        delete snapshotsRef.current[id];
-        setActiveWid(target.id);
-        setDevices(norm.devices);
-        setLinks(norm.links);
-        setSelectedIds(snap?.selectedIds || (snap?.selectedId ? [snap.selectedId] : []));
-        setOpenConsoles(snap?.openConsoles || []);
-        setActiveBottom((snap?.activeBottom && snap.activeBottom !== "pka-report") ? snap.activeBottom : "events");
-        setPtActivity(snap?.ptActivity || null);
-        setPtSidebarOpen(snap?.ptSidebarOpen ?? !!snap?.ptActivity);
-      } else {
-        delete snapshotsRef.current[id];
-      }
-      return remaining;
+  const closeTab = async (id) => {
+    if (dirtyTabs[id]) {
+      const ok = await requestConfirm({
+        title: "Close changed tab?",
+        message: "This tab has unsaved local changes. Close it anyway?",
+        confirmLabel: "Close tab",
+        danger: true,
+      });
+      if (!ok) return;
+    }
+    const remaining = tabs.filter(x => x.id !== id);
+    if (!remaining.length) return;
+    if (activeWid === id) {
+      const target = remaining[remaining.length - 1];
+      const snap = snapshotsRef.current[target.id];
+      const norm = OPT_Engine.normalizeTopology(snap?.devices || {}, snap?.links || []);
+      delete snapshotsRef.current[id];
+      setActiveWid(target.id);
+      setDevices(norm.devices);
+      setLinks(norm.links);
+      setSelectedIds(snap?.selectedIds || (snap?.selectedId ? [snap.selectedId] : []));
+      setOpenConsoles(snap?.openConsoles || []);
+      setActiveBottom((snap?.activeBottom && snap.activeBottom !== "pka-report") ? snap.activeBottom : "events");
+      setPtActivity(snap?.ptActivity || null);
+      setPtSidebarOpen(snap?.ptSidebarOpen ?? !!snap?.ptActivity);
+    } else {
+      delete snapshotsRef.current[id];
+    }
+    setTabs(remaining);
+    setDirtyTabs((m) => {
+      const next = { ...m };
+      delete next[id];
+      return next;
     });
   };
   const renameTab = (id, name) => {
@@ -559,6 +779,7 @@ function App() {
   const skipNextSnapshot = useRef(false);
   const prevSnap = useRef({ devices, links });
   useEffect(() => {
+    if (suppressHistoryRef.current) return;
     if (skipNextSnapshot.current) {
       skipNextSnapshot.current = false;
       prevSnap.current = { devices, links };
@@ -572,6 +793,7 @@ function App() {
     if (h.past.length > 80) h.past.shift();
     h.future = [];
     prevSnap.current = { devices, links };
+    setHistoryVersion((n) => n + 1);
   }, [devices, links, activeWid]);
 
   // When switching tabs, the snapshot ref needs to reset prev
@@ -579,6 +801,15 @@ function App() {
 
   const undo = () => {
     const h = undoRef.current[activeWid];
+    if ((!h || !h.past.length) && appUndoRef.current.past.length) {
+      const entry = appUndoRef.current.past.pop();
+      entry.after = entry.after || captureAppSnapshot();
+      appUndoRef.current.future.push(entry);
+      applyAppSnapshot(entry.before);
+      log("dim", "system", `undid ${entry.label}`);
+      setHistoryVersion((n) => n + 1);
+      return;
+    }
     if (!h || !h.past.length) return;
     const prev = h.past.pop();
     const current = { devices, links };
@@ -588,9 +819,18 @@ function App() {
     setDevices(prev.devices);
     setLinks(prev.links);
     log("dim", "system", `undid ${description}`);
+    setHistoryVersion((n) => n + 1);
   };
   const redo = () => {
     const h = undoRef.current[activeWid];
+    if ((!h || !h.future.length) && appUndoRef.current.future.length) {
+      const entry = appUndoRef.current.future.pop();
+      appUndoRef.current.past.push(entry);
+      applyAppSnapshot(entry.after);
+      log("dim", "system", `redid ${entry.label}`);
+      setHistoryVersion((n) => n + 1);
+      return;
+    }
     if (!h || !h.future.length) return;
     const next = h.future.pop();
     const current = { devices, links };
@@ -600,7 +840,10 @@ function App() {
     setDevices(next.devices);
     setLinks(next.links);
     log("dim", "system", `redid ${description}`);
+    setHistoryVersion((n) => n + 1);
   };
+  const canUndo = !!undoRef.current[activeWid]?.past?.length || !!appUndoRef.current.past.length || historyVersion < 0;
+  const canRedo = !!undoRef.current[activeWid]?.future?.length || !!appUndoRef.current.future.length || historyVersion < 0;
   const [cliHistory, setCliHistory] = useState([]);
   const [events, setEvents] = useState([]);
   const [packets, setPackets] = useState([]);
@@ -614,7 +857,12 @@ function App() {
   const [fileDropActive, setFileDropActive] = useState(false);
   const [ctx, setCtx] = useState(null);  // { x, y, devId }
   const [pendingCmd, setPendingCmd] = useState(null);  // { devId, cmd, nonce }
-  const [bottomPanelHeight, setBottomPanelHeight] = useState(280);
+  const [bottomPanelHeight, setBottomPanelHeight] = useState(() => {
+    try {
+      const saved = Number(localStorage.getItem("openpt:bottom-height"));
+      return Number.isFinite(saved) ? Math.max(120, Math.min(640, saved)) : 280;
+    } catch (e) { return 280; }
+  });
   const [packetTracerSidebarWidth, setPacketTracerSidebarWidth] = useState(340);
   const syncClient = useMemo(() => Sync ? new Sync.OpenPTSyncClient() : null, []);
   const [cloudUser, setCloudUser] = useState(null);
@@ -634,8 +882,21 @@ function App() {
   const [firstDirtyAt, setFirstDirtyAt] = useState(null);
   const [topologyViewState, setTopologyViewState] = useState({});
   const [terminalScrolls, setTerminalScrolls] = useState({});
+  const [clockTick, setClockTick] = useState(0);
   const lastSaveAtRef = useRef(0);
   const saveInFlightRef = useRef(false);
+  const savePromiseRef = useRef(null);
+  const createProjectInFlightRef = useRef(false);
+  const latestSaveStateRef = useRef({});
+
+  useEffect(() => {
+    try { localStorage.setItem("openpt:bottom-height", String(bottomPanelHeight)); } catch (e) {}
+  }, [bottomPanelHeight]);
+  useEffect(() => {
+    if (meaningfulChanges <= 0) return;
+    const t = setInterval(() => setClockTick((n) => n + 1), 1000);
+    return () => clearInterval(t);
+  }, [meaningfulChanges]);
 
   const readOnlyReason = (() => {
     if (shareMode === "read") return "This share link is read-only.";
@@ -649,13 +910,14 @@ function App() {
       setToast({ kind: "warn", msg: readOnlyReason });
       return false;
     }
+    setDirtyTabs((m) => ({ ...m, [activeWid]: true }));
     setMeaningfulChanges((n) => n + 1);
     setFirstDirtyAt((t) => t || Date.now());
     if (cloudProjectId || shareToken) setSyncStatus({ state: "dirty", message: "Unsaved changes" });
     return true;
   };
 
-  const currentProjectTitle = (tabs.find((tab) => tab.id === activeWid)?.name || "Untitled OpenPT project").replace(/\.opt$/i, "");
+  const currentProjectTitle = stripProjectExtension(tabs.find((tab) => tab.id === activeWid)?.name || "Untitled OpenPT project");
   const currentProjectDoc = useMemo(() => projectDocFromState({
     title: currentProjectTitle,
     devices,
@@ -670,6 +932,41 @@ function App() {
       terminalScrolls: terminalScrollPayload(terminalScrolls),
     },
   }), [currentProjectTitle, devices, links, selectedIds, openConsoles, activeBottom, ptActivity, ptSidebarOpen, topologyViewState, terminalScrolls]);
+  latestSaveStateRef.current = {
+    activeWid,
+    currentProjectDoc,
+    cloudProjectId,
+    cloudVersion,
+    cloudBaseDoc,
+    cloudLease,
+    shareToken,
+    meaningfulChanges,
+  };
+  const gradedPtActivity = useMemo(() => gradePacketTracerActivity(ptActivity, devices, links), [ptActivity, devices, links]);
+
+  const exportOtpPackage = () => {
+    const pkg = buildOtpPackage({
+      title: currentProjectTitle,
+      devices,
+      links,
+      uiState: {
+        selectedIds,
+        openConsoles,
+        activeBottom,
+        ptSidebarOpen,
+        topologyViewState,
+        terminalScrolls: terminalScrollPayload(terminalScrolls),
+      },
+      ptActivity: gradedPtActivity || ptActivity,
+      events,
+      packets,
+      cliHistory,
+      cloudProjectId,
+      cloudVersion,
+    });
+    downloadJSON(pkg, safeExportName(currentProjectTitle, "otp"), "application/openpt+json");
+    log("ok", "export", `exported ${safeExportName(currentProjectTitle, "otp")}`);
+  };
 
   const applyProjectDocument = (document, project = null) => {
     setStarterScreenVisible(false);
@@ -686,62 +983,124 @@ function App() {
     if (project) setTabs((ts) => mergeProjectIntoTabs(ts, activeWid, project));
   };
 
+  const resetSyncState = ({ clearProject = false, clearShare = false, clearSaveCounters = false, clearDirty = false, status = null } = {}) => {
+    if (clearProject) {
+      setCloudProjectId(null);
+      setCloudVersion(0);
+      setCloudBaseDoc(null);
+    }
+    if (clearShare) {
+      setShareToken(null);
+      setShareMode(null);
+    }
+    setCloudLease(null);
+    if (clearSaveCounters || clearDirty) {
+      setMeaningfulChanges(0);
+      setFirstDirtyAt(null);
+    }
+    if (clearDirty) {
+      setDirtyTabs((m) => ({ ...m, [activeWid]: false }));
+    }
+    if (status) setSyncStatus(status);
+  };
+
+  const releaseCurrentLease = async () => {
+    const state = latestSaveStateRef.current;
+    if (!syncClient || !state.cloudProjectId || !state.cloudLease || state.shareToken) return;
+    await syncClient.releaseLease(state.cloudProjectId, state.cloudLease.id).catch(() => {});
+  };
+
   const refreshProjects = async () => {
     if (!syncClient || !cloudUser) return;
     const data = await syncClient.listProjects();
     setCloudProjects(data.projects || []);
   };
 
-  const saveCloudNow = async () => {
-    if (!syncClient || saveInFlightRef.current || meaningfulChanges <= 0) return;
-    if (!cloudProjectId || !cloudBaseDoc || !cloudLease) return;
-    const now = Date.now();
-    if (now - lastSaveAtRef.current < SYNC_MIN_SAVE_MS) return;
-    const patches = Sync.buildProjectPatches(cloudBaseDoc, currentProjectDoc);
-    const uiStatePatch = Sync.buildUiPatches(cloudBaseDoc, currentProjectDoc);
-    if (!patches.length && !uiStatePatch.length) {
-      setMeaningfulChanges(0);
-      setFirstDirtyAt(null);
-      return;
-    }
-    const batch = {
-      baseVersion: cloudVersion,
-      leaseId: cloudLease.id,
-      patches,
-      uiStatePatch,
-    };
-    saveInFlightRef.current = true;
-    setSyncStatus({ state: "saving", message: "Saving..." });
-    try {
-      const data = shareToken
-        ? await syncClient.saveSharePatch(shareToken, batch)
-        : await syncClient.savePatch(cloudProjectId, batch);
-      lastSaveAtRef.current = Date.now();
-      setCloudVersion(data.project.version);
-      setCloudBaseDoc(data.document);
-      setMeaningfulChanges(0);
-      setFirstDirtyAt(null);
-      setSyncStatus({ state: "synced", message: `Saved v${data.project.version}` });
-      await Sync.saveLocalDocument(`project:${cloudProjectId}`, data.document, { version: data.project.version });
-    } catch (err) {
-      if (err.status === 409) {
-        setConflict(err.data || { error: err.message });
-        setSyncStatus({ state: "conflict", message: "Server has a newer version" });
-      } else if (err.status === 423) {
-        setCloudLease(null);
-        setSyncStatus({ state: "readonly", message: err.data?.lease?.clientLabel ? `Editing on ${err.data.lease.clientLabel}` : "Edit lease required" });
-      } else if (!navigator.onLine || err.status === 0 || !err.status) {
-        await Sync.enqueue({ projectId: cloudProjectId, shareToken, batch });
-        setSyncStatus({ state: "offline", message: "Offline changes queued" });
-      } else if (err.status === 429) {
-        setSyncStatus({ state: "dirty", message: "Waiting for autosave limit" });
-        setTimeout(() => saveCloudNow(), SYNC_MIN_SAVE_MS);
-      } else {
-        setSyncStatus({ state: "err", message: err.message || "Save failed" });
+  const saveCloudNow = async ({ force = false, queueOffline = true } = {}) => {
+    if (!syncClient) return { ok: false, reason: "sync-unavailable" };
+    if (savePromiseRef.current) {
+      if (force) {
+        await savePromiseRef.current.catch(() => {});
+        return saveCloudNow({ force, queueOffline });
       }
-    } finally {
-      saveInFlightRef.current = false;
+      return { ok: false, reason: "in-flight" };
     }
+    saveInFlightRef.current = true;
+    const runSave = async () => {
+      let state = latestSaveStateRef.current;
+      if (state.meaningfulChanges <= 0) return { ok: true, saved: false };
+      if (!state.cloudProjectId || !state.cloudBaseDoc || !state.cloudLease) {
+        if (force) throw new Error("Save the project and acquire the edit lease before sharing.");
+        return { ok: false, reason: "not-ready" };
+      }
+      const minDelay = SYNC_MIN_SAVE_MS - (Date.now() - lastSaveAtRef.current);
+      if (minDelay > 0) {
+        if (!force) return { ok: false, reason: "rate-limited" };
+        setSyncStatus({ state: "saving", message: "Waiting to save latest changes..." });
+        await new Promise((resolve) => setTimeout(resolve, minDelay));
+      }
+      state = latestSaveStateRef.current;
+      if (state.meaningfulChanges <= 0) return { ok: true, saved: false };
+      if (!state.cloudProjectId || !state.cloudBaseDoc || !state.cloudLease) {
+        if (force) throw new Error("Save the project and acquire the edit lease before sharing.");
+        return { ok: false, reason: "not-ready" };
+      }
+      const patches = Sync.buildProjectPatches(state.cloudBaseDoc, state.currentProjectDoc);
+      const uiStatePatch = Sync.buildUiPatches(state.cloudBaseDoc, state.currentProjectDoc);
+      if (!patches.length && !uiStatePatch.length) {
+        setMeaningfulChanges(0);
+        setFirstDirtyAt(null);
+        return { ok: true, saved: false };
+      }
+      const batch = {
+        baseVersion: state.cloudVersion,
+        leaseId: state.cloudLease.id,
+        patches,
+        uiStatePatch,
+      };
+      setSyncStatus({ state: "saving", message: "Saving..." });
+      try {
+        const data = state.shareToken
+          ? await syncClient.saveSharePatch(state.shareToken, batch)
+          : await syncClient.savePatch(state.cloudProjectId, batch);
+        lastSaveAtRef.current = Date.now();
+        setCloudVersion(data.project.version);
+        setCloudBaseDoc(data.document);
+        setMeaningfulChanges(0);
+        setFirstDirtyAt(null);
+        setDirtyTabs((m) => ({ ...m, [state.activeWid]: false }));
+        setSyncStatus({ state: "synced", message: `Saved v${data.project.version}` });
+        await Sync.saveLocalDocument(state.shareToken ? `share:${state.shareToken}` : `project:${state.cloudProjectId}`, data.document, { version: data.project.version });
+        return { ok: true, saved: true, project: data.project, document: data.document };
+      } catch (err) {
+        if (err.status === 409) {
+          setConflict(err.data || { error: err.message });
+          setSyncStatus({ state: "conflict", message: "Server has a newer version" });
+        } else if (err.status === 423) {
+          setCloudLease(null);
+          setSyncStatus({ state: "readonly", message: err.data?.lease?.clientLabel ? `Editing on ${err.data.lease.clientLabel}` : "Edit lease required" });
+        } else if (!navigator.onLine || err.status === 0 || !err.status) {
+          if (queueOffline) {
+            await Sync.enqueue({ projectId: state.cloudProjectId, shareToken: state.shareToken, batch });
+            setSyncStatus({ state: "offline", message: "Offline changes queued" });
+            return { ok: false, queued: true, reason: "offline" };
+          }
+          setSyncStatus({ state: "err", message: "Save must finish online before sharing" });
+        } else if (err.status === 429) {
+          setSyncStatus({ state: "dirty", message: "Waiting for autosave limit" });
+          if (!force) setTimeout(() => saveCloudNow(), SYNC_MIN_SAVE_MS);
+        } else {
+          setSyncStatus({ state: "err", message: err.message || "Save failed" });
+        }
+        if (force) throw err;
+        return { ok: false, reason: "failed", error: err };
+      }
+    };
+    savePromiseRef.current = runSave().finally(() => {
+      saveInFlightRef.current = false;
+      savePromiseRef.current = null;
+    });
+    return savePromiseRef.current;
   };
 
   useEffect(() => {
@@ -765,11 +1124,29 @@ function App() {
       const rows = await Sync.queued().catch(() => []);
       for (const row of rows) {
         try {
-          if (row.shareToken) await syncClient.saveSharePatch(row.shareToken, row.batch);
-          else await syncClient.savePatch(row.projectId, row.batch);
+          const data = row.shareToken
+            ? await syncClient.saveSharePatch(row.shareToken, row.batch)
+            : await syncClient.savePatch(row.projectId, row.batch);
           await Sync.dequeue(row.id);
+          const active = latestSaveStateRef.current;
+          if ((row.shareToken && row.shareToken === active.shareToken) || (!row.shareToken && row.projectId === active.cloudProjectId)) {
+            setCloudVersion(data.project.version);
+            setCloudBaseDoc(data.document);
+            setMeaningfulChanges(0);
+            setFirstDirtyAt(null);
+            setDirtyTabs((m) => ({ ...m, [active.activeWid]: false }));
+            setSyncStatus({ state: "synced", message: `Queued save synced v${data.project.version}` });
+          }
         } catch (err) {
-          if (err.status === 409) setConflict(err.data || { error: err.message });
+          if (err.status === 409) {
+            setConflict(err.data || { error: err.message });
+            setSyncStatus({ state: "conflict", message: "Queued save has a newer server version" });
+          } else if (err.status === 423) {
+            setCloudLease(null);
+            setSyncStatus({ state: "readonly", message: "Queued save paused until a fresh edit lease is acquired" });
+          } else if (err.status === 429) {
+            setSyncStatus({ state: "offline", message: "Queued save will retry after the autosave limit" });
+          }
           break;
         }
       }
@@ -781,9 +1158,12 @@ function App() {
 
   const createSyncedProject = async () => {
     if (!syncClient || !cloudUser) return setAuthOpen(true);
+    if (createProjectInFlightRef.current) return;
+    createProjectInFlightRef.current = true;
     try {
       setSyncStatus({ state: "saving", message: "Creating cloud project..." });
       const data = await syncClient.createProject(currentProjectTitle, currentProjectDoc);
+      resetSyncState({ clearShare: true, clearDirty: true });
       setCloudProjectId(data.project.id);
       setCloudVersion(data.project.version);
       setCloudBaseDoc(data.document);
@@ -793,20 +1173,32 @@ function App() {
       const lease = await syncClient.acquireLease(data.project.id, true);
       setCloudLease(lease.lease);
       setTabs((ts) => mergeProjectIntoTabs(ts, activeWid, data.project));
+      setDirtyTabs((m) => ({ ...m, [activeWid]: false }));
       setSyncStatus({ state: "synced", message: `Cloud project saved v${data.project.version}` });
       await refreshProjects();
     } catch (err) {
       setSyncStatus({ state: "err", message: err.message || "Could not create project" });
+    } finally {
+      createProjectInFlightRef.current = false;
     }
   };
 
   const openCloudProject = async (projectId) => {
     if (!syncClient) return;
+    if (dirtyTabs[activeWid] || meaningfulChanges > 0) {
+      const ok = await requestConfirm({
+        title: "Open synced project?",
+        message: "This tab has unsaved changes. Opening a synced project will replace the current tab contents.",
+        confirmLabel: "Open project",
+        danger: true,
+      });
+      if (!ok) return;
+    }
     try {
+      await releaseCurrentLease();
       const data = await syncClient.loadProject(projectId);
+      resetSyncState({ clearShare: true, clearDirty: true });
       setCloudProjectId(data.project.id);
-      setShareToken(null);
-      setShareMode(null);
       setCloudVersion(data.project.version);
       setCloudBaseDoc(data.document);
       applyProjectDocument(data.document, data.project);
@@ -840,9 +1232,13 @@ function App() {
   const createShareLink = async (mode) => {
     if (!syncClient || !cloudProjectId) return;
     try {
-      if (meaningfulChanges > 0) await saveCloudNow();
+      if (meaningfulChanges > 0) {
+        const saveResult = await saveCloudNow({ force: true, queueOffline: false });
+        if (!saveResult?.ok) throw new Error("Latest changes were not saved, so the share link was not created.");
+      }
       const data = await syncClient.shareProject(cloudProjectId, mode);
       const absolute = `${location.origin}${data.share.url}`;
+      setLastShareUrl(absolute);
       await navigator.clipboard?.writeText(absolute).catch(() => {});
       setToast({ kind: "ok", msg: `${mode === "edit" ? "Editable" : "Read-only"} link copied` });
     } catch (err) {
@@ -850,8 +1246,29 @@ function App() {
     }
   };
 
+  const logoutCloud = async () => {
+    await releaseCurrentLease();
+    await syncClient?.logout().catch(() => {});
+    setCloudUser(null);
+    setCloudProjects([]);
+    resetSyncState({
+      clearProject: true,
+      clearShare: true,
+      clearSaveCounters: true,
+      status: { state: "local", message: "Local only" },
+    });
+    setProjectsOpen(false);
+  };
+
   const restoreRollback = async (target) => {
     if (!syncClient || !cloudProjectId || shareToken) return;
+    const ok = await requestConfirm({
+      title: `Rollback ${target}?`,
+      message: "OpenPT will restore an older version by creating a new cloud version. Your current server version remains in history.",
+      confirmLabel: "Rollback",
+      danger: true,
+    });
+    if (!ok) return;
     try {
       const data = await syncClient.rollback(cloudProjectId, target);
       setCloudVersion(data.project.version);
@@ -899,6 +1316,8 @@ function App() {
     const match = location.pathname.match(/^\/share\/([^/]+)/);
     if (!match) return;
     const token = decodeURIComponent(match[1]);
+    releaseCurrentLease();
+    resetSyncState({ clearProject: true, clearShare: true, clearDirty: true });
     syncClient.loadShare(token).then((data) => {
       setShareToken(token);
       setShareMode(data.project.mode);
@@ -906,6 +1325,7 @@ function App() {
       setCloudVersion(data.project.version);
       setCloudBaseDoc(data.document);
       applyProjectDocument(data.document, data.project);
+      setDirtyTabs((m) => ({ ...m, [activeWid]: false }));
       setSyncStatus({ state: data.project.mode === "edit" ? "readonly" : "readonly", message: data.project.mode === "edit" ? "Shared project opened. Acquire edit lease to save." : "Read-only share" });
     }).catch((err) => {
       setToast({ kind: "err", msg: err.message || "Could not open share link" });
@@ -1000,6 +1420,7 @@ function App() {
   };
 
   const openImportedTopology = (topology, filename) => {
+    const before = captureAppSnapshot();
     setStarterScreenVisible(false);
     const norm = OPT_Engine.normalizeTopology(topology.devices || {}, topology.links || []);
     const tabName = filename.replace(/\.(json|opt)$/i, "") || "imported-lab";
@@ -1016,6 +1437,7 @@ function App() {
     };
     setTabs((ts) => [...ts, { id, name: `${tabName}.opt` }]);
     setActiveWid(id);
+    skipNextSnapshot.current = true;
     setDevices(norm.devices);
     setLinks(norm.links);
     setSelectedIds([]);
@@ -1026,11 +1448,55 @@ function App() {
     setCloudProjectId(null); setCloudVersion(0); setCloudBaseDoc(null); setCloudLease(null); setShareToken(null); setShareMode(null);
     setEvents([]);
     setPackets([]);
+    setDirtyTabs((m) => ({ ...m, [id]: true }));
     setToast({ kind: "ok", msg: `Imported ${filename}` });
     log("ok", "import", `loaded ${filename}`);
+    pushAppUndo(`imported ${filename}`, before);
+  };
+
+  const openImportedOtpPackage = (pkg, filename) => {
+    const before = captureAppSnapshot();
+    const document = projectDocumentFromOtpPackage(pkg);
+    if (!document) throw new Error("Expected an OpenPT OTP package with a project document.");
+    setStarterScreenVisible(false);
+    const norm = OPT_Engine.normalizeTopology(document.devices || {}, document.links || []);
+    const tabName = stripProjectExtension(document.title || filename) || "imported-lab";
+    const restoredUi = document.uiState || {};
+    snapshotsRef.current[activeWid] = { devices, links, selectedIds, openConsoles, activeBottom, ptActivity, ptSidebarOpen };
+    const id = `w-${Date.now()}`;
+    snapshotsRef.current[id] = {
+      devices: norm.devices,
+      links: norm.links,
+      selectedIds: restoredUi.selectedIds || [],
+      openConsoles: restoredUi.openConsoles || [],
+      activeBottom: (restoredUi.activeBottom && restoredUi.activeBottom !== "pka-report") ? restoredUi.activeBottom : "events",
+      ptActivity: restoredUi.ptActivity || null,
+      ptSidebarOpen: restoredUi.ptSidebarOpen ?? !!restoredUi.ptActivity,
+    };
+    setTabs((ts) => [...ts, { id, name: `${tabName}.otp`, source: "openpt-otp" }]);
+    setActiveWid(id);
+    skipNextSnapshot.current = true;
+    setDevices(norm.devices);
+    setLinks(norm.links);
+    setSelectedIds(restoredUi.selectedIds || []);
+    setOpenConsoles(restoredUi.openConsoles || []);
+    setActiveBottom((restoredUi.activeBottom && restoredUi.activeBottom !== "pka-report") ? restoredUi.activeBottom : "events");
+    setPtActivity(restoredUi.ptActivity || null);
+    setPtSidebarOpen(restoredUi.ptSidebarOpen ?? !!restoredUi.ptActivity);
+    setTopologyViewState(restoredUi.topologyViewState || {});
+    setTerminalScrolls(restoredUi.terminalScrolls || {});
+    setCloudProjectId(null); setCloudVersion(0); setCloudBaseDoc(null); setCloudLease(null); setShareToken(null); setShareMode(null);
+    setEvents(pkg.session?.events || []);
+    setPackets(pkg.session?.packets || []);
+    setCliHistory(pkg.session?.cliHistory || []);
+    setDirtyTabs((m) => ({ ...m, [id]: true }));
+    setToast({ kind: "ok", msg: `Imported ${filename}` });
+    log("ok", "import", `loaded OpenPT package ${filename}`);
+    pushAppUndo(`imported ${filename}`, before);
   };
 
   const openImportedPacketTracer = (activity, filename) => {
+    const before = captureAppSnapshot();
     setStarterScreenVisible(false);
     const topology = buildTopologyFromPacketTracer(activity);
     const norm = OPT_Engine.normalizeTopology(topology.devices || {}, topology.links || []);
@@ -1050,6 +1516,7 @@ function App() {
     };
     setTabs((ts) => [...ts, { id, name: `${title}.pka`, source: "packet-tracer" }]);
     setActiveWid(id);
+    skipNextSnapshot.current = true;
     setDevices(norm.devices);
     setLinks(norm.links);
     setSelectedIds([]);
@@ -1060,6 +1527,9 @@ function App() {
     setCloudProjectId(null); setCloudVersion(0); setCloudBaseDoc(null); setCloudLease(null); setShareToken(null); setShareMode(null);
     setEvents([]);
     setPackets([]);
+    setDirtyTabs((m) => ({ ...m, [id]: true }));
+    setLastImportReport(activity);
+    pushAppUndo(`imported ${filename}`, before);
     if (activity?.unsupported) {
       const shortHash = activity.sourceSha256 ? activity.sourceSha256.slice(0, 12) : activity.sourceHeadHex;
       const decoderError = activity.reverseReport?.decoder?.error;
@@ -1091,6 +1561,11 @@ function App() {
     const name = file.name || "dropped-file";
     const lower = name.toLowerCase();
     try {
+      if (lower.endsWith(".otp")) {
+        const data = JSON.parse(await file.text());
+        openImportedOtpPackage(data, name);
+        return;
+      }
       if (lower.endsWith(".json") || lower.endsWith(".opt")) {
         const data = JSON.parse(await file.text());
         if (!data || typeof data !== "object" || !data.devices || !Array.isArray(data.links)) {
@@ -1104,9 +1579,10 @@ function App() {
         openImportedPacketTracer(activity, name);
         return;
       }
-      throw new Error("Drop an OpenPT .json/.opt file, or a Packet Tracer .pka/.pkt file for extractor diagnostics.");
+      throw new Error("Drop an OpenPT .json/.opt/.otp file, or a Packet Tracer .pka/.pkt file for extractor diagnostics.");
     } catch (err) {
       const msg = err?.message || `Could not import ${name}`;
+      setLastImportReport({ sourceName: name, unsupported: true, reverseReport: { decoder: { status: "failed", error: msg } } });
       setToast({ kind: "err", msg });
       log("err", "import", msg);
     }
@@ -1837,6 +2313,30 @@ function App() {
     return plan;
   };
 
+  const submitPingTarget = (devId, target) => {
+    const cleaned = String(target || "").trim();
+    if (!devId || !cleaned) return;
+    setRecentPingTargets((items) => [cleaned, ...items.filter((item) => item !== cleaned)].slice(0, 8));
+    setPingDialog(null);
+    handlePing(devId, cleaned);
+  };
+
+  const reportImportError = async (activity = lastImportReport) => {
+    if (!syncClient || !activity) return;
+    try {
+      await syncClient.reportError({
+        appVersion: OPENPT_VERSION,
+        page: location.href,
+        userAgent: navigator.userAgent,
+        message: activity?.reverseReport?.decoder?.error || activity?.diagnostics?.decoder?.error || "Packet Tracer import issue",
+        activity,
+      });
+      setToast({ kind: "ok", msg: "Error report sent" });
+    } catch (err) {
+      setToast({ kind: "err", msg: err.message || "Could not send report" });
+    }
+  };
+
   // ── Packet-mode click handler (HUD)
   useEffect(() => {
     if (!packetMode) return;
@@ -1873,13 +2373,18 @@ function App() {
       if (e.target.tagName === "INPUT" || e.target.tagName === "TEXTAREA") return;
       if (e.key === "l") setLinkMode((v) => !v);
       if (e.key === "p") setPacketMode((v) => v ? null : { stage: "src" });
+      if (e.key === "Delete" && selectedLinkId) {
+        onDeleteLink(selectedLinkId);
+        setSelectedLinkId(null);
+        return;
+      }
       if (e.key === "Delete" && selectedIds.length) {
         selectedIds.forEach(id => deleteDevice(id));
       }
     };
     window.addEventListener("keydown", k);
     return () => window.removeEventListener("keydown", k);
-  }, [selectedIds, activeWid, devices, links]);
+  }, [selectedIds, selectedLinkId, activeWid, devices, links]);
 
   const selected = selectedId ? devices[selectedId] : null;
   const cnt = {
@@ -1888,6 +2393,15 @@ function App() {
     hosts: Object.values(devices).filter(d => OPT_Engine.isHostLike?.(d)).length,
     links: links.length,
   };
+  const autosaveDueMs = meaningfulChanges > 0 && (cloudProjectId || shareToken) && cloudLease
+    ? Math.max(0, Math.max(
+        meaningfulChanges >= SYNC_AUTOSAVE_CHANGES ? 0 : SYNC_AUTOSAVE_MS - (firstDirtyAt ? Date.now() - firstDirtyAt : 0),
+        SYNC_MIN_SAVE_MS - (Date.now() - lastSaveAtRef.current)
+      ))
+    : 0;
+  const syncDetail = meaningfulChanges > 0 && (cloudProjectId || shareToken) && cloudLease
+    ? `Autosave in ${Math.ceil(autosaveDueMs / 1000)}s`
+    : syncStatus.message;
 
   return (
     <div
@@ -1900,7 +2414,7 @@ function App() {
       <input
         ref={importFileInputRef}
         type="file"
-        accept=".json,.opt,.pka,.pkt"
+        accept=".json,.opt,.otp,.pka,.pkt"
         style={{ display: "none" }}
         onChange={(e) => {
           const file = e.target.files?.[0];
@@ -1924,21 +2438,31 @@ function App() {
           onNewBlankTab={newBlankTab}
           onNewStarterTab={newStarterTab}
           onImportPacketTracer={openPacketTracerFilePicker}
-          onReset={() => {
+          onExportOtp={exportOtpPackage}
+          onReset={async () => {
+            const ok = await requestConfirm({ title: "Reset to starter?", message: "Replace the current topology with the starter scenario?", confirmLabel: "Reset", danger: true });
+            if (!ok) return;
             if (!markProjectChanged("reset")) return;
             const s = OPT_Engine.makeStarter();
             setDevices(s.devices); setLinks(s.links); setSelectedId(null);
             setEvents([]); setPackets([]); setPtActivity(null);
             log("ok", "system", "scenario reset to starter");
           }}
-          onClearAll={() => { if (!markProjectChanged("clear")) return; setDevices({}); setLinks([]); setSelectedId(null); setEvents([]); setPackets([]); setPtActivity(null); log("warn", "system", "topology cleared"); }}
+          onClearAll={async () => {
+            const ok = await requestConfirm({ title: "Clear topology?", message: "Remove every device and cable from the current tab?", confirmLabel: "Clear", danger: true });
+            if (!ok) return;
+            if (!markProjectChanged("clear")) return;
+            setDevices({}); setLinks([]); setSelectedId(null); setSelectedLinkId(null); setEvents([]); setPackets([]); setPtActivity(null); log("warn", "system", "topology cleared");
+          }}
           onDeleteSelected={() => selectedId && deleteDevice(selectedId)}
           onPing={(srcName, dst) => {
             const src = Object.values(devices).find(d => d.hostname === srcName);
             if (src) handlePing(src.id, dst);
           }}
-          onLab={(key) => {
+          onLab={async (key) => {
             if (key === "starter") {
+              const ok = await requestConfirm({ title: "Load starter lab?", message: "Replace the current topology with the starter lab?", confirmLabel: "Load lab", danger: true });
+              if (!ok) return;
               if (!markProjectChanged("load-lab")) return;
               const s = OPT_Engine.makeStarter();
               setDevices(s.devices); setLinks(s.links); setSelectedId(null);
@@ -1961,11 +2485,17 @@ function App() {
           {syncStatus.message !== "Local only" && (
             <div className={`tb-status-chip ${syncStatus.state}`}>
               <span className="dot"/>
-              {syncStatus.message}
+              {syncDetail}
             </div>
           )}
         </div>
         <div className="tb-actions">
+          <button className="tb-btn icon-only" title="Undo" disabled={!canUndo} onClick={undo}>↶</button>
+          <button className="tb-btn icon-only" title="Redo" disabled={!canRedo} onClick={redo}>↷</button>
+          <button className="tb-btn" onClick={() => setPaletteOpen((v) => !v)}>{paletteOpen ? "Hide palette" : "Palette"}</button>
+          {(cloudProjectId || shareToken) && meaningfulChanges > 0 && cloudLease && (
+            <button className="tb-btn primary" onClick={() => saveCloudNow({ force: true }).catch((err) => setToast({ kind: "err", msg: err.message || "Save failed" }))}>Save Now</button>
+          )}
           {(cloudProjectId || shareToken) && !cloudLease && shareMode !== "read" && (
             <button className="tb-btn primary" onClick={() => acquireCurrentLease(false)}>Edit</button>
           )}
@@ -1984,20 +2514,35 @@ function App() {
         </div>
       </div>
 
+      {readOnlyReason && (
+        <div className="lease-banner">
+          <span>{readOnlyReason}</span>
+          {shareMode !== "read" && <button className="tb-btn primary" onClick={() => acquireCurrentLease(false)}>Edit</button>}
+          {shareMode !== "read" && <button className="tb-btn" onClick={() => acquireCurrentLease(true)}>Take Over</button>}
+        </div>
+      )}
+
       {/* Workspace */}
       <div
         className="workspace"
         style={{
-          "--bottom-panel-height": `${bottomPanelHeight}px`,
+          "--bottom-panel-height": bottomCollapsed ? "32px" : `${bottomPanelHeight}px`,
           "--pt-sidebar-width": `${packetTracerSidebarWidth}px`,
         }}
       >
         {/* (Labs/Diagnostics moved to top menus) */}
+        <div className={`palette-wrap ${paletteOpen ? "" : "collapsed"}`}>
+          <Palette
+            activeLink={forceLinkType || (linkMode ? "auto" : null)}
+            onLinkPick={(type) => { setLinkMode(true); setForceLinkType(type); }}
+          />
+        </div>
         {ptActivity && ptSidebarOpen && (
           <>
             <PacketTracerSidebar
-              activity={ptActivity}
+              activity={gradedPtActivity}
               onClose={() => setPtSidebarOpen(false)}
+              onReportError={() => reportImportError(gradedPtActivity)}
             />
             <div
               className="pt-sidebar-resizer"
@@ -2024,7 +2569,7 @@ function App() {
             {tabs.map((tb) => (
               <div
                 key={tb.id}
-                className={`tab ${activeWid === tb.id ? "active" : ""}`}
+                className={`tab ${activeWid === tb.id ? "active" : ""} ${dirtyTabs[tb.id] ? "dirty" : ""}`}
                 onClick={() => switchTab(tb.id)}
               >
                 <span className="dot"/>
@@ -2051,6 +2596,31 @@ function App() {
             links={links}
             selectedIds={selectedIds}
             onSelect={(id, additive) => selectDevice(id, additive)}
+            selectedLinkId={selectedLinkId}
+            onSelectLink={(id) => { setSelectedLinkId(id); if (id) setSelectedIds([]); }}
+            onMarqueeSelect={(ids, additive) => {
+              setSelectedLinkId(null);
+              setSelectedIds((current) => additive ? [...new Set([...current, ...ids])] : ids);
+            }}
+            onMoveStart={() => {
+              dragStartSnapRef.current = latestTopologyRef.current;
+              suppressHistoryRef.current = true;
+            }}
+            onMoveEnd={(moved) => {
+              const start = dragStartSnapRef.current;
+              suppressHistoryRef.current = false;
+              dragStartSnapRef.current = null;
+              if (!moved || !start) {
+                prevSnap.current = latestTopologyRef.current;
+                return;
+              }
+              const h = undoRef.current[activeWid] || (undoRef.current[activeWid] = { past: [], future: [] });
+              h.past.push(start);
+              if (h.past.length > 80) h.past.shift();
+              h.future = [];
+              prevSnap.current = latestTopologyRef.current;
+              setHistoryVersion((n) => n + 1);
+            }}
             onMoveDevices={(idDeltas) => {
               if (!markProjectChanged("move-devices")) return;
               setDevices((m) => {
@@ -2072,7 +2642,11 @@ function App() {
             onPacketRequest={(srcId, dstId) => {
               const dst = devices[dstId];
               const target = Object.values(dst?.interfaces || {}).find(i => i.ip)?.ip;
-              if (!target) return log("err", "packet", `${dst?.hostname || "destination"} has no IP address`);
+              if (!target) {
+                const msg = `${dst?.hostname || "destination"} has no IP address. Configure an interface IP before sending a packet.`;
+                setToast({ kind: "err", msg });
+                return log("err", "packet", msg);
+              }
               handlePing(srcId, target);
             }}
             simRunning={simRunning}
@@ -2082,18 +2656,23 @@ function App() {
             onViewStateChange={setTopologyViewState}
             starterScreenVisible={starterScreenVisible}
             onCreateProject={createEmptyProjectFromStarterScreen}
+            onCreateStarter={newStarterTab}
+            onImportPacketTracer={openPacketTracerFilePicker}
             onOpenConsole={openConsole}
             onContextMenu={(e, d) => setCtx({ x: e.clientX, y: e.clientY, devId: d.id })}
+            onLinkContextMenu={(e, l) => setCtx({ x: e.clientX, y: e.clientY, linkId: l.id })}
           />
 
           <div className="bottom-panel">
-            <div
-              className="bottom-resizer"
-              role="separator"
-              aria-orientation="horizontal"
-              aria-label="Resize bottom panel"
-              onPointerDown={(event) => beginResize("bottom", event)}
-            />
+            {!bottomCollapsed && (
+              <div
+                className="bottom-resizer"
+                role="separator"
+                aria-orientation="horizontal"
+                aria-label="Resize bottom panel"
+                onPointerDown={(event) => beginResize("bottom", event)}
+              />
+            )}
             <div className="bp-tabs">
               {openConsoles.map((id) => {
                 const dev = devices[id];
@@ -2118,8 +2697,20 @@ function App() {
                 </div>
               ))}
               <div className="bp-spacer"/>
+              {activeBottom === "events" && !bottomCollapsed && (
+                <div className="event-tools">
+                  {["all", "err", "warn", "ok"].map((kind) => (
+                    <button key={kind} className={eventFilter === kind ? "active" : ""} onClick={() => setEventFilter(kind)}>{kind}</button>
+                  ))}
+                  <button onClick={() => navigator.clipboard?.writeText(events.map((e) => `${e.t} ${e.s} ${e.src}: ${e.m}`).join("\n")).catch(() => {})}>Copy</button>
+                  <button onClick={() => setEvents([])}>Clear</button>
+                </div>
+              )}
+              <button className="bp-collapse" title={bottomCollapsed ? "Expand bottom panel" : "Collapse bottom panel"} onClick={() => setBottomCollapsed((v) => !v)}>
+                {bottomCollapsed ? "▴" : "▾"}
+              </button>
             </div>
-            <div style={{ minHeight: 0, overflow: "hidden", position: "relative" }}>
+            {!bottomCollapsed && <div style={{ minHeight: 0, overflow: "hidden", position: "relative" }}>
               {openConsoles.map((id) => (
                 <div key={id} style={{
                   position: "absolute", inset: 0,
@@ -2135,6 +2726,9 @@ function App() {
                     active={activeBottom === id}
                     scrollState={terminalScrolls[id]}
                     onScrollStateChange={(devId, state) => setTerminalScrolls((m) => ({ ...m, [devId]: state }))}
+                    historyState={cliHistory[id] || {}}
+                    onHistoryChange={(history) => setCliHistory((m) => ({ ...(m && !Array.isArray(m) ? m : {}), [id]: history }))}
+                    ghostSuggestions={cliGhostSuggestions}
                   />
                 </div>
               ))}
@@ -2145,12 +2739,12 @@ function App() {
                 </div>
               )}
               <div style={{ position: "absolute", inset: 0, display: activeBottom === "events" ? "block" : "none" }}>
-                <Events events={events} />
+                <Events events={eventFilter === "all" ? events : events.filter((e) => e.s === eventFilter)} />
               </div>
               <div style={{ position: "absolute", inset: 0, display: activeBottom === "packets" ? "block" : "none" }}>
                 <PacketLog events={events.filter(e => e.src === "ping")} />
               </div>
-            </div>
+            </div>}
           </div>
         </div>
 
@@ -2163,9 +2757,17 @@ function App() {
         <div className="file-drop-overlay">
           <div className="file-drop-panel">
             <div className="file-drop-title">Drop lab file</div>
-            <div className="file-drop-subtitle">OpenPT JSON/OPT and Packet Tracer PKA/PKT files open in a new tab.</div>
+            <div className="file-drop-subtitle">OpenPT JSON/OPT/OTP and Packet Tracer PKA/PKT files open in a new tab.</div>
           </div>
         </div>
+      )}
+
+      {lastImportReport && (lastImportReport.unsupported || lastImportReport.reverseReport?.decoder?.error || lastImportReport.diagnostics?.decoder?.error) && (
+        <ImportReportBanner
+          activity={lastImportReport}
+          onReport={() => reportImportError(lastImportReport)}
+          onClose={() => setLastImportReport(null)}
+        />
       )}
 
       {toast && (
@@ -2196,16 +2798,7 @@ function App() {
           onOpen={openCloudProject}
           onCreate={createSyncedProject}
           onRefresh={refreshProjects}
-          onLogout={async () => {
-            await syncClient?.logout().catch(() => {});
-            setCloudUser(null);
-            setCloudProjects([]);
-            setCloudProjectId(null);
-            setCloudLease(null);
-            setCloudBaseDoc(null);
-            setProjectsOpen(false);
-            setSyncStatus({ state: "local", message: "Local only" });
-          }}
+          onLogout={logoutCloud}
           onRollback={restoreRollback}
           canRollback={!!cloudProjectId && !shareToken}
         />
@@ -2215,6 +2808,7 @@ function App() {
         <ShareDialog
           onClose={() => setShareOpen(false)}
           onShare={createShareLink}
+          shareUrl={lastShareUrl}
         />
       )}
 
@@ -2244,6 +2838,27 @@ function App() {
         />
       )}
 
+      {pingDialog && (
+        <PingDialog
+          device={devices[pingDialog.devId]}
+          initialTarget={pingDialog.target}
+          recentTargets={recentPingTargets}
+          onClose={() => setPingDialog(null)}
+          onSubmit={(target) => submitPingTarget(pingDialog.devId, target)}
+        />
+      )}
+
+      {confirmDialog && (
+        <ConfirmDialog
+          title={confirmDialog.title}
+          message={confirmDialog.message}
+          confirmLabel={confirmDialog.confirmLabel}
+          danger={confirmDialog.danger}
+          onCancel={() => resolveConfirm(false)}
+          onConfirm={() => resolveConfirm(true)}
+        />
+      )}
+
       <TweaksPanel>
         <TweakSection label="Theme" />
         <TweakColor label="Accent" value={ACCENTS[t.accent]?.a || ACCENTS.cyan.a}
@@ -2256,6 +2871,8 @@ function App() {
         <TweakSection label="Simulation" />
         <TweakSlider label="Packet speed" min={0.25} max={3} step={0.25} value={t.packetSpeed}
           onChange={(v) => setTweak("packetSpeed", v)} unit="×" />
+        <TweakSection label="CLI" />
+        <TweakToggle label="Ghost suggestions" value={cliGhostSuggestions} onChange={setCliGhostSuggestions} />
         <TweakSection label="Diagnostics" />
         <TweakButton label="Trigger PC1 → SRV1 ping" onClick={() => {
           const pc1 = Object.values(devices).find(d => d.hostname === "PC1");
@@ -2277,11 +2894,25 @@ function App() {
       </TweaksPanel>
 
       {ctx && (
-        <ContextMenu
-          x={ctx.x} y={ctx.y}
-          device={devices[ctx.devId]}
-          onClose={() => setCtx(null)}
-          onAction={(action) => {
+        ctx.linkId ? (
+          <LinkContextMenu
+            x={ctx.x}
+            y={ctx.y}
+            link={links.find((l) => l.id === ctx.linkId)}
+            devices={devices}
+            onClose={() => setCtx(null)}
+            onDelete={() => {
+              onDeleteLink(ctx.linkId);
+              setSelectedLinkId(null);
+              setCtx(null);
+            }}
+          />
+        ) : (
+          <ContextMenu
+            x={ctx.x} y={ctx.y}
+            device={devices[ctx.devId]}
+            onClose={() => setCtx(null)}
+            onAction={(action) => {
             const id = ctx.devId;
             const d = devices[id];
             if (!d) return setCtx(null);
@@ -2313,7 +2944,7 @@ function App() {
               case "delete":
                 deleteDevice(id); break;
               case "ping":
-                handlePing(id, prompt("Ping target IP:", "192.168.20.20") || "");
+                setPingDialog({ devId: id, target: recentPingTargets[0] || "192.168.20.20" });
                 break;
               case "duplicate": {
                 if (!markProjectChanged("duplicate")) break;
@@ -2325,7 +2956,8 @@ function App() {
             }
             setCtx(null);
           }}
-        />
+          />
+        )
       )}
     </div>
   );
@@ -2359,9 +2991,10 @@ function TitleMenus(props) {
     File: [
       { label: "New blank tab", kbd: "⌘N", on: () => { props.onNewBlankTab(); } },
       { label: "New starter scenario tab", on: () => { props.onNewStarterTab(); } },
-      { label: "Import Packet Tracer File...", on: () => { props.onImportPacketTracer(); } },
+      { label: "Import lab file...", on: () => { props.onImportPacketTracer(); } },
       { sep: true },
       { sect: "Export" },
+      { label: "Export project as OTP", on: () => props.onExportOtp() },
       { label: "Export topology as JSON", on: () => { downloadJSON({ devices: props.devices, links: props.links }, "openpt-topology.json"); } },
       { label: "Export selected device config", on: () => {
           const d = props.devices[props.selectedId];
@@ -2553,9 +3186,12 @@ function AuthDialog({ syncClient, onClose, onSignedIn }) {
   const [company, setCompany] = useState("");
   const [startedAt] = useState(Date.now());
   const [error, setError] = useState("");
+  const [submitting, setSubmitting] = useState(false);
   const submit = async (e) => {
     e.preventDefault();
+    if (submitting) return;
     setError("");
+    setSubmitting(true);
     try {
       const data = mode === "login"
         ? await syncClient.login(email, password)
@@ -2563,42 +3199,54 @@ function AuthDialog({ syncClient, onClose, onSignedIn }) {
       onSignedIn(data.user);
     } catch (err) {
       setError(err.message || "Sign in failed");
+    } finally {
+      setSubmitting(false);
     }
   };
   return (
     <ModalShell title="OpenPT account" onClose={onClose}>
       <form className="modal-body" onSubmit={submit}>
         <div className="segmented">
-          <button type="button" className={mode === "login" ? "active" : ""} onClick={() => setMode("login")}>Sign in</button>
-          <button type="button" className={mode === "register" ? "active" : ""} onClick={() => setMode("register")}>Create account</button>
+          <button type="button" disabled={submitting} className={mode === "login" ? "active" : ""} onClick={() => setMode("login")}>Sign in</button>
+          <button type="button" disabled={submitting} className={mode === "register" ? "active" : ""} onClick={() => setMode("register")}>Create account</button>
         </div>
-        <label>Email<input value={email} onChange={(e) => setEmail(e.target.value)} type="email" required /></label>
-        <label>Password<input value={password} onChange={(e) => setPassword(e.target.value)} type="password" minLength={8} required /></label>
+        <label>Email<input value={email} onChange={(e) => setEmail(e.target.value)} type="email" required disabled={submitting} /></label>
+        <label>Password<input value={password} onChange={(e) => setPassword(e.target.value)} type="password" minLength={8} required disabled={submitting} /></label>
         <label className="hp-field">Company<input value={company} onChange={(e) => setCompany(e.target.value)} tabIndex="-1" autoComplete="off" /></label>
         {error && <div className="modal-error">{error}</div>}
-        <button className="tb-btn primary" type="submit">{mode === "login" ? "Sign in" : "Create account"}</button>
+        <button className="tb-btn primary" type="submit" disabled={submitting}>{submitting ? "Working..." : (mode === "login" ? "Sign in" : "Create account")}</button>
       </form>
     </ModalShell>
   );
 }
 
 function ProjectsDialog({ projects, cloudUser, syncStatus, onClose, onOpen, onCreate, onRefresh, onLogout, onRollback, canRollback }) {
+  const [pending, setPending] = useState("");
+  const run = async (name, action) => {
+    if (pending) return;
+    setPending(name);
+    try {
+      await action();
+    } finally {
+      setPending("");
+    }
+  };
   return (
     <ModalShell title="Synced projects" onClose={onClose}>
       <div className="modal-body">
         <div className="account-row">
           <span>{cloudUser?.email}</span>
-          <button className="tb-btn" onClick={onLogout}>Logout</button>
+          <button className="tb-btn" disabled={!!pending} onClick={() => run("logout", onLogout)}>Logout</button>
         </div>
         <div className="sync-line">{syncStatus.message}</div>
         <div className="modal-actions">
-          <button className="tb-btn primary" onClick={onCreate}>Save current project to cloud</button>
-          <button className="tb-btn" onClick={onRefresh}>Refresh</button>
+          <button className="tb-btn primary" disabled={!!pending} onClick={() => run("create", onCreate)}>{pending === "create" ? "Saving..." : "Save current project to cloud"}</button>
+          <button className="tb-btn" disabled={!!pending} onClick={() => run("refresh", onRefresh)}>Refresh</button>
         </div>
         <div className="project-list">
           {!projects.length && <div className="empty-row">No synced projects yet.</div>}
           {projects.map((p) => (
-            <button key={p.id} className="project-row" onClick={() => onOpen(p.id)}>
+            <button key={p.id} className="project-row" disabled={!!pending} onClick={() => run(`open:${p.id}`, () => onOpen(p.id))}>
               <span>{p.title}</span>
               <small>v{p.version} · {Math.round((p.bytes || 0) / 1024)} KB</small>
             </button>
@@ -2609,7 +3257,7 @@ function ProjectsDialog({ projects, cloudUser, syncStatus, onClose, onOpen, onCr
             <div className="modal-sep"/>
             <div className="rollback-row">
               {["1m", "5m", "10m", "30m", "1h"].map((target) => (
-                <button key={target} className="tb-btn" onClick={() => onRollback(target)}>Rollback {target}</button>
+                <button key={target} className="tb-btn" disabled={!!pending} onClick={() => run(`rollback:${target}`, () => onRollback(target))}>Rollback {target}</button>
               ))}
             </div>
           </>
@@ -2619,12 +3267,28 @@ function ProjectsDialog({ projects, cloudUser, syncStatus, onClose, onOpen, onCr
   );
 }
 
-function ShareDialog({ onClose, onShare }) {
+function ShareDialog({ onClose, onShare, shareUrl }) {
+  const [pending, setPending] = useState("");
+  const create = async (mode) => {
+    if (pending) return;
+    setPending(mode);
+    try {
+      await onShare(mode);
+    } finally {
+      setPending("");
+    }
+  };
   return (
     <ModalShell title="Share project" onClose={onClose}>
       <div className="modal-body">
-        <button className="tb-btn" onClick={() => onShare("read")}>Create read-only link</button>
-        <button className="tb-btn primary" onClick={() => onShare("edit")}>Create editable link</button>
+        <button className="tb-btn" disabled={!!pending} onClick={() => create("read")}>{pending === "read" ? "Creating..." : "Create read-only link"}</button>
+        <button className="tb-btn primary" disabled={!!pending} onClick={() => create("edit")}>{pending === "edit" ? "Creating..." : "Create editable link"}</button>
+        {shareUrl && (
+          <div className="share-url">
+            <span>{shareUrl}</span>
+            <button className="tb-btn" onClick={() => navigator.clipboard?.writeText(shareUrl).catch(() => {})}>Copy</button>
+          </div>
+        )}
       </div>
     </ModalShell>
   );
@@ -2639,6 +3303,40 @@ function ConflictDialog({ message, onClose, onLoadServer, onDuplicate, onTakeOve
         <button className="tb-btn" onClick={onDuplicate}>Keep local as duplicate</button>
         <button className="tb-btn primary" onClick={onTakeOver}>Take edit lease</button>
       </div>
+    </ModalShell>
+  );
+}
+
+function ConfirmDialog({ title, message, confirmLabel = "Confirm", danger = false, onCancel, onConfirm }) {
+  return (
+    <ModalShell title={title || "Confirm"} onClose={onCancel}>
+      <div className="modal-body">
+        <div className={danger ? "modal-error" : "sync-line"}>{message}</div>
+        <div className="modal-actions">
+          <button className="tb-btn" onClick={onCancel}>Cancel</button>
+          <button className={`tb-btn ${danger ? "" : "primary"}`} onClick={onConfirm}>{confirmLabel}</button>
+        </div>
+      </div>
+    </ModalShell>
+  );
+}
+
+function PingDialog({ device, initialTarget, recentTargets, onClose, onSubmit }) {
+  const [target, setTarget] = useState(initialTarget || "");
+  const valid = target.trim().length > 0;
+  return (
+    <ModalShell title={`Ping from ${device?.hostname || "device"}`} onClose={onClose}>
+      <form className="modal-body" onSubmit={(e) => { e.preventDefault(); if (valid) onSubmit(target); }}>
+        <label>Target IP or hostname<input value={target} onChange={(e) => setTarget(e.target.value)} autoFocus /></label>
+        {recentTargets?.length > 0 && (
+          <div className="recent-row">
+            {recentTargets.slice(0, 5).map((item) => (
+              <button key={item} type="button" className="tb-btn" onClick={() => setTarget(item)}>{item}</button>
+            ))}
+          </div>
+        )}
+        <button className="tb-btn primary" type="submit" disabled={!valid}>Send ping</button>
+      </form>
     </ModalShell>
   );
 }
@@ -2659,8 +3357,8 @@ function computeDiagnostics(devices, links) {
   return items;
 }
 
-function downloadJSON(data, filename) {
-  const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
+function downloadJSON(data, filename, type = "application/json") {
+  const blob = new Blob([JSON.stringify(data, null, 2)], { type });
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
   a.href = url; a.download = filename; a.click();
@@ -2759,6 +3457,348 @@ function packetTracerAssessmentSections(activity) {
       acc[key] = (acc[key] || 0) + 1;
       return acc;
     }, {})).map(([name, count]) => ({ name, count })),
+  };
+}
+
+function packetTracerRubricLeafComponent(label, pathParts = []) {
+  const text = [...pathParts, label].join(" ").toLowerCase();
+  if (/\blink\b|connection|cable/.test(text)) return "Device Connections";
+  if (/channel/.test(text)) return "EtherChannel Configuration";
+  if (/trunk|port mode/.test(text)) return "Trunk Configuration";
+  if (/gateway|address|mask|ip\b/.test(text)) return "IP Configuration";
+  return "Assessment Items";
+}
+
+function packetTracerRubricLeafPoints(label, pathParts = []) {
+  const component = packetTracerRubricLeafComponent(label, pathParts);
+  if (component === "EtherChannel Configuration") return 3;
+  return 1;
+}
+
+function packetTracerItemsFromRubricPattern(pattern) {
+  if (!pattern || typeof pattern !== "object") return [];
+  const items = [];
+  const walk = (value, parts) => {
+    if (Array.isArray(value)) {
+      for (const entry of value) {
+        if (typeof entry === "string") {
+          const pathParts = [...parts, entry];
+          items.push({
+            name: entry,
+            path: pathParts.join(" / "),
+            pathParts,
+            parentPath: parts.join(" / "),
+            rootName: parts[0] || "Assessment Items",
+            components: packetTracerRubricLeafComponent(entry, parts),
+            points: packetTracerRubricLeafPoints(entry, parts),
+          });
+        } else {
+          walk(entry, parts);
+        }
+      }
+      return;
+    }
+    if (value && typeof value === "object") {
+      for (const [key, child] of Object.entries(value)) walk(child, [...parts, key]);
+    }
+  };
+  walk(pattern, []);
+  return items;
+}
+
+function packetTracerGradeSourceItems(activity) {
+  const imported = packetTracerVisibleAssessmentItems(activity, activity?.assessmentItems || []);
+  if (imported.length) return imported;
+  return packetTracerItemsFromRubricPattern(activity?.rubricPattern || []);
+}
+
+function packetTracerNormText(value) {
+  return String(value || "").trim().toLowerCase().replace(/\s+/g, " ");
+}
+
+function packetTracerIfaceKey(value) {
+  return packetTracerNormText(value)
+    .replace(/\bfastethernet\b/g, "fa")
+    .replace(/\bgigabitethernet\b/g, "gi")
+    .replace(/\bserial\b/g, "se")
+    .replace(/\bport-channel\b/g, "po")
+    .replace(/\bethernet\b/g, "eth")
+    .replace(/\s+/g, "");
+}
+
+function packetTracerDeviceByName(devices, name) {
+  const wanted = packetTracerNormText(name);
+  if (!wanted) return null;
+  return Object.values(devices || {}).find((device) => {
+    return [device.hostname, device.name, device.packetTracer?.name].some((candidate) => packetTracerNormText(candidate) === wanted);
+  }) || null;
+}
+
+function packetTracerEscapeRegex(value) {
+  return String(value || "").replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function packetTracerExtractDeviceFromText(devices, text) {
+  const source = packetTracerNormText(text);
+  if (!source) return null;
+  return Object.values(devices || {}).find((device) => {
+    return [device.hostname, device.name, device.packetTracer?.name].some((candidate) => {
+      const name = packetTracerNormText(candidate);
+      return name && new RegExp(`(^|[^a-z0-9_-])${packetTracerEscapeRegex(name)}([^a-z0-9_-]|$)`, "i").test(source);
+    });
+  }) || null;
+}
+
+function packetTracerIfaceByName(device, name) {
+  const wanted = packetTracerIfaceKey(name);
+  if (!device || !wanted) return null;
+  return Object.keys(device.interfaces || {}).find((iface) => packetTracerIfaceKey(iface) === wanted || packetTracerIfaceKey(OPT_Engine.shortIfaceName?.(iface) || iface) === wanted) || null;
+}
+
+function packetTracerExtractIfaceFromText(device, text) {
+  if (!device) return null;
+  const source = String(text || "");
+  const ifacePattern = /\b(?:FastEthernet|GigabitEthernet|Serial|Ethernet|Port-channel|Fa|Gi|Se|Eth|Po)\s*\d+(?:\/\d+){0,3}\b/gi;
+  const matches = source.match(ifacePattern) || [];
+  for (const match of matches) {
+    const iface = packetTracerIfaceByName(device, match);
+    if (iface) return iface;
+  }
+  return null;
+}
+
+function packetTracerItemTarget(item, devices) {
+  const parts = packetTracerAssessmentPathParts(item);
+  let device = null;
+  let iface = null;
+  for (const part of parts) {
+    device = packetTracerDeviceByName(devices, part);
+    if (device) break;
+  }
+  if (!device) device = packetTracerExtractDeviceFromText(devices, [item?.path, item?.name, item?.parentPath].filter(Boolean).join(" / "));
+  if (device) {
+    for (const part of parts) {
+      iface = packetTracerIfaceByName(device, part);
+      if (iface) break;
+    }
+    if (!iface) iface = packetTracerExtractIfaceFromText(device, item?.path || item?.name);
+  }
+  return { device, iface, parts };
+}
+
+function packetTracerFindLink(devices, links, device, iface) {
+  if (!device || !iface) return null;
+  return (links || []).find((link) => {
+    return (link.a === device.id && link.ai === iface) || (link.b === device.id && link.bi === iface);
+  }) || null;
+}
+
+function packetTracerLinkPeer(devices, link, device) {
+  if (!link || !device) return {};
+  const peerId = link.a === device.id ? link.b : link.a;
+  const peerIface = link.a === device.id ? link.bi : link.ai;
+  return { peer: devices?.[peerId], peerIface };
+}
+
+function packetTracerExpectedLinkPeer(text) {
+  const source = String(text || "");
+  return (
+    source.match(/link to\s+([^:\/]+):?\s*connects to\s+([a-z-]+\s*\d+(?:\/\d+){0,3})/i) ||
+    source.match(/connects to\s+([^:\/]+):\s*([a-z-]+\s*\d+(?:\/\d+){0,3})/i) ||
+    source.match(/cable to\s+([^:\/]+):\s*([a-z-]+\s*\d+(?:\/\d+){0,3})/i)
+  );
+}
+
+function packetTracerExpandIfaceRange(text, device) {
+  const raw = String(text || "").trim();
+  const range = raw.match(/^(.+?)(\d+)\s*-\s*(\d+)$/);
+  if (!range) {
+    const iface = packetTracerIfaceByName(device, raw);
+    return iface ? [iface] : [];
+  }
+  const prefix = range[1];
+  const start = Number(range[2]);
+  const end = Number(range[3]);
+  if (!Number.isFinite(start) || !Number.isFinite(end) || end < start) return [];
+  const out = [];
+  for (let n = start; n <= end; n++) {
+    const iface = packetTracerIfaceByName(device, `${prefix}${n}`);
+    if (iface) out.push(iface);
+  }
+  return out;
+}
+
+function packetTracerAnswerExpectations(activity, devices) {
+  const expected = {};
+  for (const [deviceName, commands] of Object.entries(activity?.answerCommands || {})) {
+    const device = packetTracerDeviceByName(devices, deviceName);
+    if (!device) continue;
+    const devExpected = expected[device.id] = expected[device.id] || { hostname: deviceName, interfaces: {} };
+    let ifaces = [];
+    for (const raw of commands || []) {
+      const cmd = packetTracerNormText(raw);
+      let match = cmd.match(/^hostname (.+)$/);
+      if (match) {
+        devExpected.hostname = match[1];
+        continue;
+      }
+      match = cmd.match(/^interface range (.+)$/);
+      if (match) {
+        ifaces = packetTracerExpandIfaceRange(match[1], device);
+        continue;
+      }
+      match = cmd.match(/^interface (.+)$/);
+      if (match) {
+        const iface = packetTracerIfaceByName(device, match[1]);
+        ifaces = iface ? [iface] : [];
+        continue;
+      }
+      const setForIfaces = (fn) => {
+        for (const iface of ifaces) {
+          devExpected.interfaces[iface] = devExpected.interfaces[iface] || {};
+          fn(devExpected.interfaces[iface]);
+        }
+      };
+      match = cmd.match(/^switchport mode (access|trunk)$/);
+      if (match) setForIfaces((data) => { data.mode = match[1]; });
+      match = cmd.match(/^switchport access vlan (\d+)$/);
+      if (match) setForIfaces((data) => { data.vlan = Number(match[1]); data.mode = data.mode || "access"; });
+      match = cmd.match(/^switchport trunk native vlan (\d+)$/);
+      if (match) setForIfaces((data) => { data.nativeVlan = Number(match[1]); data.mode = "trunk"; });
+      match = cmd.match(/^switchport trunk allowed vlan (.+)$/);
+      if (match) setForIfaces((data) => { data.allowedVlans = match[1]; data.mode = "trunk"; });
+      match = cmd.match(/^channel-group (\d+) mode (\S+)$/);
+      if (match) setForIfaces((data) => { data.channelGroup = { id: Number(match[1]), mode: match[2] }; });
+      match = cmd.match(/^ip address (\S+) (\S+)$/);
+      if (match) setForIfaces((data) => { data.ip = match[1]; data.mask = match[2]; });
+    }
+  }
+  return expected;
+}
+
+function packetTracerCompare(actual, expected) {
+  return packetTracerNormText(actual) === packetTracerNormText(expected);
+}
+
+function packetTracerGradeItem(item, context) {
+  const points = Number(item?.points) || 0;
+  const text = packetTracerAssessmentText(item);
+  const { device, iface } = packetTracerItemTarget(item, context.devices);
+  const expected = device ? context.expected[device.id] : null;
+  const expectedIface = iface ? expected?.interfaces?.[iface] : null;
+  const actualIface = iface ? device?.interfaces?.[iface] : null;
+  const correct = (feedback = "Passed") => ({ ...item, points, earnedPoints: points, correct: true, status: "Correct", feedback });
+  const incorrect = (feedback = "Does not match the expected state") => ({ ...item, points, earnedPoints: 0, correct: false, status: "Incorrect", feedback });
+  const unchecked = (feedback = "OpenPT does not have a checker for this Packet Tracer item yet") => ({ ...item, points, earnedPoints: 0, correct: false, unchecked: true, status: "Unchecked", feedback });
+
+  if (/display name|host ?name/.test(text) && device && expected?.hostname) {
+    return packetTracerCompare(device.hostname, expected.hostname)
+      ? correct(`${device.hostname} matches`)
+      : incorrect(`Expected hostname ${expected.hostname}`);
+  }
+
+  if (/link type|cable type/.test(text) && device && iface) {
+    const link = packetTracerFindLink(context.devices, context.links, device, iface);
+    if (!link) return incorrect(`No link on ${device.hostname} ${iface}`);
+    if (/serial/.test(text)) return /serial/i.test(link.type || link.packetTracer?.type || "") ? correct("Serial link") : incorrect("Expected serial link");
+    if (/copper|ethernet|straight/.test(text) || /trunk configuration/.test(text)) {
+      return /serial/i.test(link.type || "") ? incorrect("Expected Ethernet/copper link") : correct("Ethernet link");
+    }
+    return correct("Link type present");
+  }
+
+  if (/link to|connects to|connection|cable/.test(text) && device && iface) {
+    const peerMatch = packetTracerExpectedLinkPeer(text);
+    if (!peerMatch) return unchecked("Expected link peer was not decoded for this item");
+    const link = packetTracerFindLink(context.devices, context.links, device, iface);
+    if (!link) return incorrect(`No link on ${device.hostname} ${iface}`);
+    const { peer, peerIface } = packetTracerLinkPeer(context.devices, link, device);
+    const peerNameOk = packetTracerCompare(peer?.hostname, peerMatch[1]) || packetTracerCompare(peer?.name, peerMatch[1]) || packetTracerCompare(peer?.packetTracer?.name, peerMatch[1]);
+    const peerIfaceOk = packetTracerIfaceKey(peerIface) === packetTracerIfaceKey(peerMatch[2]);
+    return peerNameOk && peerIfaceOk
+      ? correct(`Linked to ${peer.hostname} ${peerIface}`)
+      : incorrect(`Expected link to ${peerMatch[1]} ${peerMatch[2]}`);
+  }
+
+  if (/port mode|switchport mode/.test(text) && actualIface) {
+    const want = expectedIface?.mode || (/trunk/.test(text) ? "trunk" : /access/.test(text) ? "access" : null);
+    if (!want) return unchecked();
+    return actualIface.mode === want ? correct(`${iface} is ${want}`) : incorrect(`Expected ${iface} switchport mode ${want}`);
+  }
+
+  if (/channel group/.test(text) && actualIface) {
+    const want = expectedIface?.channelGroup?.id;
+    if (!want) return unchecked();
+    return Number(actualIface.channelGroup?.id) === Number(want)
+      ? correct(`${iface} is in channel-group ${want}`)
+      : incorrect(`Expected ${iface} in channel-group ${want}`);
+  }
+
+  if (/channel mode/.test(text) && actualIface) {
+    const want = expectedIface?.channelGroup?.mode;
+    if (!want) return unchecked();
+    return packetTracerCompare(actualIface.channelGroup?.mode, want)
+      ? correct(`${iface} channel mode ${want}`)
+      : incorrect(`Expected ${iface} channel mode ${want}`);
+  }
+
+  const value = item?.value || item?.attrs?.value || item?.attrs?.expected || "";
+  if (/ip address/.test(text) && actualIface && /\d+\.\d+\.\d+\.\d+/.test(value)) {
+    return packetTracerCompare(actualIface.ip, value) ? correct(`${iface} IP matches`) : incorrect(`Expected ${iface} IP ${value}`);
+  }
+  if (/subnet mask/.test(text) && actualIface && /\d+\.\d+\.\d+\.\d+/.test(value)) {
+    return packetTracerCompare(actualIface.mask, value) ? correct(`${iface} mask matches`) : incorrect(`Expected ${iface} mask ${value}`);
+  }
+  if (/default gateway/.test(text) && device && /\d+\.\d+\.\d+\.\d+/.test(value)) {
+    const gateways = Object.values(device.interfaces || {}).map((ifc) => ifc.gw).filter(Boolean);
+    return gateways.some((gw) => packetTracerCompare(gw, value)) ? correct("Default gateway matches") : incorrect(`Expected default gateway ${value}`);
+  }
+  if (value && device) {
+    const config = packetTracerNormText(OPT_Engine.serializeConfig?.(device) || "");
+    if (config.includes(packetTracerNormText(value))) return correct("Expected config value found");
+  }
+  return unchecked();
+}
+
+function packetTracerProgressFromItems(items) {
+  const totalPoints = items.reduce((sum, item) => sum + (Number(item.points) || 0), 0);
+  const earnedPoints = items.reduce((sum, item) => sum + (Number(item.earnedPoints) || 0), 0);
+  const totalItems = items.length;
+  const earnedItems = items.filter((item) => item.correct).length;
+  return {
+    percent: totalPoints ? Math.round((earnedPoints / totalPoints) * 100) : 0,
+    score: `${earnedPoints}/${totalPoints}`,
+    itemCount: `${earnedItems}/${totalItems}`,
+    components: Object.values(items.reduce((acc, item) => {
+      const name = item.components || "Other";
+      acc[name] = acc[name] || { name, earnedItems: 0, items: 0, earnedPoints: 0, points: 0 };
+      acc[name].items += 1;
+      acc[name].points += Number(item.points) || 0;
+      if (item.correct) acc[name].earnedItems += 1;
+      acc[name].earnedPoints += Number(item.earnedPoints) || 0;
+      return acc;
+    }, {})).map((component) => ({
+      name: component.name,
+      items: `${component.earnedItems}/${component.items}`,
+      score: `${component.earnedPoints}/${component.points}`,
+    })),
+  };
+}
+
+function gradePacketTracerActivity(activity, devices, links) {
+  if (!activity) return null;
+  const sourceItems = packetTracerGradeSourceItems(activity);
+  if (!sourceItems.length) return activity;
+  const context = {
+    devices,
+    links,
+    expected: packetTracerAnswerExpectations(activity, devices),
+  };
+  const assessmentItems = sourceItems.map((item) => packetTracerGradeItem(item, context));
+  return {
+    ...activity,
+    assessmentItems,
+    progress: packetTracerProgressFromItems(assessmentItems),
   };
 }
 
@@ -2947,9 +3987,11 @@ function buildPacketTracerAssessmentTree(items) {
 function packetTracerComponentSummary(items) {
   return Object.values((items || []).reduce((acc, item) => {
     const name = item.components || "Other";
-    acc[name] = acc[name] || { name, items: 0, points: 0 };
+    acc[name] = acc[name] || { name, items: 0, points: 0, earnedItems: 0, earnedPoints: 0 };
     acc[name].items += 1;
     acc[name].points += Number(item.points) || 0;
+    if (item.correct) acc[name].earnedItems += 1;
+    acc[name].earnedPoints += Number(item.earnedPoints) || 0;
     return acc;
   }, {}));
 }
@@ -2957,19 +3999,21 @@ function packetTracerComponentSummary(items) {
 function PacketTracerAssessmentSummary({ items }) {
   const components = packetTracerComponentSummary(items);
   const totalPoints = items.reduce((sum, item) => sum + (Number(item.points) || 0), 0);
+  const earnedPoints = items.reduce((sum, item) => sum + (Number(item.earnedPoints) || 0), 0);
+  const earnedItems = items.filter((item) => item.correct).length;
   return (
     <aside className="pt-check-summary">
       <div className="pt-check-score">
-        <div><strong>Score</strong><span>0/{totalPoints}</span></div>
-        <div><strong>Item Count</strong><span>0/{items.length}</span></div>
+        <div><strong>Score</strong><span>{earnedPoints}/{totalPoints}</span></div>
+        <div><strong>Item Count</strong><span>{earnedItems}/{items.length}</span></div>
       </div>
       <div className="pt-component-table">
         <div className="pt-component-head"><span>Component</span><span>Items/Total</span><span>Score</span></div>
         {components.map((component) => (
           <div className="pt-component-row" key={component.name}>
             <span title={component.name}>{component.name}</span>
-            <span>0/{component.items}</span>
-            <span>0/{component.points}</span>
+            <span>{component.earnedItems || 0}/{component.items}</span>
+            <span>{component.earnedPoints || 0}/{component.points}</span>
           </div>
         ))}
       </div>
@@ -2981,12 +4025,31 @@ function PacketTracerAssessmentRows({ items, empty }) {
   const rows = useMemo(() => buildPacketTracerAssessmentTree(items || []), [items]);
   const expandableKeys = useMemo(() => rows.filter((row) => row.children.length).map((row) => row.key), [rows]);
   const [expanded, setExpanded] = useState(() => new Set(expandableKeys));
+  const [showIncorrectOnly, setShowIncorrectOnly] = useState(() => (items || []).some((item) => item.correct === false));
+  const [query, setQuery] = useState("");
   useEffect(() => {
     setExpanded(new Set(expandableKeys));
   }, [expandableKeys.join("|")]);
   const allExpanded = expandableKeys.length > 0 && expandableKeys.every((key) => expanded.has(key));
   if (!items?.length) return <div className="pt-check-empty">{empty}</div>;
-  const visibleRows = rows.filter((row) => row.parentKeys.every((key) => expanded.has(key)));
+  const visibleKeys = new Set();
+  if (showIncorrectOnly) {
+    for (const row of rows) {
+      if (row.item && !row.item.correct) {
+        visibleKeys.add(row.key);
+        row.parentKeys.forEach((key) => visibleKeys.add(key));
+      }
+    }
+  }
+  const q = query.trim().toLowerCase();
+  const visibleRows = rows.filter((row) => {
+    if (!row.parentKeys.every((key) => expanded.has(key))) return false;
+    if (showIncorrectOnly && !visibleKeys.has(row.key)) return false;
+    if (!q) return true;
+    const item = row.item;
+    return [row.name, item?.status, item?.components, item?.feedback, item?.path].filter(Boolean).join(" ").toLowerCase().includes(q);
+  });
+  const uncheckedCount = (items || []).filter((item) => item.unchecked).length;
   const toggleNode = (key) => {
     setExpanded((current) => {
       const next = new Set(current);
@@ -2998,8 +4061,10 @@ function PacketTracerAssessmentRows({ items, empty }) {
     <div className="pt-check-layout">
       <div className="pt-check-main">
         <div className="pt-check-actions">
+          <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Search assessment items" />
           <button type="button" onClick={() => setExpanded(allExpanded ? new Set() : new Set(expandableKeys))}>Expand/Collapse All</button>
-          <button type="button">Show Incorrect Items</button>
+          <button type="button" onClick={() => setShowIncorrectOnly((value) => !value)}>{showIncorrectOnly ? "Show All Items" : "Show Incorrect Items"}</button>
+          {uncheckedCount > 0 && <span className="pt-check-note">{uncheckedCount} unchecked by OpenPT</span>}
         </div>
         <div className="pt-check-grid" role="table" aria-label="Packet Tracer assessment items">
           <div className="pt-check-row pt-check-head" role="row">
@@ -3016,13 +4081,13 @@ function PacketTracerAssessmentRows({ items, empty }) {
                       {expanded.has(row.key) ? "-" : "+"}
                     </button>
                   ) : <span className="pt-check-spacer" />}
-                  {item && <span className="pt-check-x">x</span>}
+                  {item && <span className="pt-check-x">{item.correct ? "✓" : "x"}</span>}
                   <span>{row.name}</span>
                 </span>
-                <span>{item ? (item.status || "Incorrect") : ""}</span>
-                <span>{item?.points || ""}</span>
+                <span>{item ? (item.status || "Unchecked") : ""}</span>
+                <span>{item ? `${Number(item.earnedPoints) || 0}/${Number(item.points) || 0}` : ""}</span>
                 <span title={item?.components || ""}>{item?.components || ""}</span>
-                <span title={item?.attrs?.incorrectFeedback || item?.attrs?.feedback || ""}>{item?.attrs?.incorrectFeedback || item?.attrs?.feedback || ""}</span>
+                <span title={item?.feedback || item?.attrs?.incorrectFeedback || item?.attrs?.feedback || ""}>{item?.feedback || item?.attrs?.incorrectFeedback || item?.attrs?.feedback || ""}</span>
               </div>
             );
           })}
@@ -3114,6 +4179,42 @@ function ContextMenu({ x, y, device, onClose, onAction }) {
       <div className="ctxmenu-item danger" onClick={() => onAction("delete")}>
         <span className="icn">{Icon.trash()}</span>
         <span>Delete device</span>
+        <span className="kbd">Del</span>
+      </div>
+    </div>
+  );
+}
+
+function LinkContextMenu({ x, y, link, devices, onClose, onDelete }) {
+  const ref = useRef(null);
+  useEffect(() => {
+    const onDocDown = (e) => { if (ref.current && !ref.current.contains(e.target)) onClose(); };
+    const onKey = (e) => { if (e.key === "Escape") onClose(); };
+    document.addEventListener("mousedown", onDocDown);
+    document.addEventListener("keydown", onKey);
+    return () => { document.removeEventListener("mousedown", onDocDown); document.removeEventListener("keydown", onKey); };
+  }, []);
+  if (!link) return null;
+  const vw = window.innerWidth, vh = window.innerHeight;
+  const W = 240, H = 140;
+  const px = Math.min(x, vw - W - 8);
+  const py = Math.min(y, vh - H - 8);
+  const a = devices[link.a];
+  const b = devices[link.b];
+  return (
+    <div className="ctxmenu" ref={ref} style={{ left: px, top: py }}>
+      <div className="ctxmenu-head">
+        <div>
+          <div className="name">Cable</div>
+          <div style={{ fontSize: 10.5, color: "var(--fg-3)", fontFamily: "var(--font-mono)" }}>
+            {a?.hostname || "A"} {ifaceName(link.ai)} ↔ {b?.hostname || "B"} {ifaceName(link.bi)}
+          </div>
+        </div>
+        <div className="meta">{link.type || "auto"}</div>
+      </div>
+      <div className="ctxmenu-item danger" onClick={onDelete}>
+        <span className="icn">{Icon.trash()}</span>
+        <span>Delete cable</span>
         <span className="kbd">Del</span>
       </div>
     </div>
@@ -3438,7 +4539,7 @@ function RubricNode({ node, depth }) {
   );
 }
 
-function PacketTracerSidebar({ activity, onClose }) {
+function PacketTracerSidebar({ activity, onClose, onReportError }) {
   const [topTab, setTopTab] = useState("instructions");
   if (!activity) return null;
 
@@ -3451,12 +4552,16 @@ function PacketTracerSidebar({ activity, onClose }) {
   const components = progress?.components || [];
   const title = activity.title || activity.sourceName || "Packet Tracer Activity";
   const isPerfect = typeof progress?.percent === "number" && progress.percent >= 100;
+  const hasImportIssue = activity.unsupported || activity.reverseReport?.decoder?.error || activity.diagnostics?.decoder?.error;
 
   return (
     <div className="pt-sidebar">
       <div className="pt-sb-head">
         <div className="pt-sb-title" title={title}>{title}</div>
         <div className="pt-sb-head-right">
+          {hasImportIssue && onReportError && (
+            <button className="tb-btn" style={{ padding: "3px 7px", fontSize: 11 }} onClick={onReportError}>Report Error</button>
+          )}
           <div className={`pt-sb-score ${isPerfect ? "ok" : ""}`} title="Progress">
             <span className="pt-sb-score-primary">{primary}</span>
             {secondary && <span className="pt-sb-score-secondary">{secondary}</span>}
@@ -3574,6 +4679,20 @@ function PacketLog({ events }) {
           <span className="m">{e.m}</span>
         </div>
       ))}
+    </div>
+  );
+}
+
+function ImportReportBanner({ activity, onReport, onClose }) {
+  const decoderError = activity?.reverseReport?.decoder?.error || activity?.diagnostics?.decoder?.error;
+  return (
+    <div className="import-report-banner">
+      <div>
+        <strong>{activity?.sourceName || "Packet Tracer import"}</strong>
+        <span>{decoderError || "This Packet Tracer file could not be fully decoded."}</span>
+      </div>
+      <button className="tb-btn primary" onClick={onReport}>Report Error</button>
+      <button className="icon-btn" onClick={onClose}>×</button>
     </div>
   );
 }

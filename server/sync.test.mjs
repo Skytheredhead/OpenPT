@@ -28,6 +28,21 @@ test("applies object-map style project patches", () => {
   assert.equal(next.links.length, 1);
 });
 
+test("rejects missing replace/remove paths and handles root replacement", () => {
+  assert.throws(() => applyJsonPatch({ title: "Lab" }, [
+    { op: "replace", path: "/missing", value: "Nope" }
+  ]), /Patch path not found/);
+  assert.throws(() => applyJsonPatch({ title: "Lab" }, [
+    { op: "remove", path: "/missing" }
+  ]), /Patch path not found/);
+  assert.deepEqual(applyJsonPatch({ title: "Lab" }, [
+    { op: "replace", path: "", value: { title: "Root", devices: {} } }
+  ]), { title: "Root", devices: {} });
+  assert.throws(() => applyJsonPatch({ title: "Lab" }, [
+    { op: "remove", path: "" }
+  ]), /document root/);
+});
+
 test("requires current base version and valid edit lease for patch saves", async () => {
   const { dir, store } = await makeStore();
   try {
@@ -52,6 +67,31 @@ test("requires current base version and valid edit lease for patch saves", async
       patches: [],
       uiStatePatch: []
     }), /newer project version|Autosave rate limit/);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test("share links load the latest saved project document", async () => {
+  const { dir, store } = await makeStore();
+  try {
+    const user = store.createUser("share@example.com", "hash");
+    const project = await store.createProject(user.id, "Lab", { schemaVersion: 1, title: "Lab", devices: {}, links: [], uiState: {} });
+    store.db.prepare("UPDATE projects SET last_save_at=? WHERE id=?").run(new Date(Date.now() - 11_000).toISOString(), project.id);
+    project.last_save_at = new Date(Date.now() - 11_000).toISOString();
+    const lease = store.acquireLease(project.id, { clientId: "client-a", clientLabel: "Mac browser", userId: user.id });
+    const saved = await store.savePatch(project, {
+      baseVersion: 1,
+      leaseId: lease.lease_id,
+      clientId: "client-a",
+      patches: [{ op: "replace", path: "/title", value: "Latest Lab" }],
+      uiStatePatch: []
+    });
+    const share = store.createShare(saved.project.id, "read");
+    const sharedProject = store.getProjectByShare(share.token);
+    const sharedDocument = await store.loadProjectDocument(sharedProject);
+    assert.equal(sharedProject.head_version, 2);
+    assert.equal(sharedDocument.title, "Latest Lab");
   } finally {
     await rm(dir, { recursive: true, force: true });
   }

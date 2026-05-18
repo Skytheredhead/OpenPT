@@ -67,17 +67,10 @@
       radial-gradient(circle at 85% 20%, var(--fg-1) 0 1.2px, transparent 1.5px),
       radial-gradient(circle at 15% 80%, var(--fg-1) 0 1.2px, transparent 1.5px),
       radial-gradient(circle at 85% 80%, var(--fg-1) 0 1.2px, transparent 1.5px);
+    opacity: 0.85;
   }
   .tb-logo .glyph::before, .tb-logo .glyph::after {
-    content: ""; position: absolute; inset: 0;
-    background:
-      linear-gradient(45deg, transparent 47%, var(--fg-3) 47% 53%, transparent 53%),
-      linear-gradient(-45deg, transparent 47%, var(--fg-3) 47% 53%, transparent 53%);
-    -webkit-mask: linear-gradient(#000, #000);
-    opacity: .6;
-  }
-  .tb-logo .glyph::after {
-    background: radial-gradient(circle at 50% 50%, var(--bg-1) 0 3px, transparent 3.5px);
+    content: none;
   }
   .tb-menus { display: flex; gap: 2px; position: relative; }
   .tb-menu {

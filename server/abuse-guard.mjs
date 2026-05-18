@@ -8,6 +8,9 @@ const DEFAULT_LIMITS = {
   shareCreateUser: { limit: 60, windowMs: 60 * 60_000 },
   patchUser: { limit: 360, windowMs: 60 * 60_000 },
   sharePatchToken: { limit: 240, windowMs: 60 * 60_000 },
+  errorReportIp: { limit: 5, windowMs: 60 * 60_000 },
+  errorReportFingerprint: { limit: 2, windowMs: 24 * 60 * 60_000 },
+  errorReportUser: { limit: 10, windowMs: 60 * 60_000 },
 };
 
 export function clientIp(req) {

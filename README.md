@@ -4,9 +4,18 @@ Tired of packet tracer's trash ui and terrible mac support? Voila! OpenPT
 
 Features:
 - pt file importer
+- `.otp` project export/import with readable JSON packages
 - switches
 - routers
 - commands
+
+## OTP package format
+
+OpenPT `.otp` files are non-obfuscated JSON packages. They store the normalized
+project document, Packet Tracer assignment content when present, generated
+running/startup configs and flash files per device, session logs, and provenance
+metadata. The format is meant to carry the practical contents a `.pka` activity
+needs while keeping everything inspectable and diff-friendly.
 
 ## Self-hosted sync MVP
 

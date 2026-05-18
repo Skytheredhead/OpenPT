@@ -123,13 +123,13 @@ function isParentConfigCommand(cmd) {
   return CONFIG_PARENT_COMMAND_PATTERNS.some((pattern) => pattern.test(cmd));
 }
 
-function CLI({ device, devices = {}, links = [], onApply, onPing, pendingCmd, active, scrollState, onScrollStateChange }) {
+function CLI({ device, devices = {}, links = [], onApply, onPing, pendingCmd, active, scrollState, onScrollStateChange, historyState, onHistoryChange, ghostSuggestions = true }) {
   const ref = React.useRef(null);
   const inputRef = React.useRef(null);
   const [lines, setLines] = React.useState([]);
   const [mode, setMode] = React.useState({ name: "user" });
   const [input, setInput] = React.useState("");
-  const [history, setHistory] = React.useState({});
+  const [history, setHistory] = React.useState(historyState || {});
   const [histIdx, setHistIdx] = React.useState(-1);
   const lastPendingNonce = React.useRef(0);
 
@@ -140,6 +140,10 @@ function CLI({ device, devices = {}, links = [], onApply, onPing, pendingCmd, ac
     setInput("");
     setHistIdx(-1);
   }, [device?.id]);
+
+  React.useEffect(() => {
+    setHistory(historyState || {});
+  }, [device?.id, historyState]);
 
   React.useEffect(() => {
     if (ref.current) ref.current.scrollTop = ref.current.scrollHeight;
@@ -213,8 +217,20 @@ function CLI({ device, devices = {}, links = [], onApply, onPing, pendingCmd, ac
     for (const iface of ifaces) apply({ kind, iface, ...data });
   }
 
+  function closestCommand(cmd) {
+    const key = mode.name === "conf-if-range" ? "conf-if" : mode.name;
+    const pool = COMMAND_HINTS[key] || [];
+    const first = String(cmd || "").split(/\s+/)[0].toLowerCase();
+    if (!first) return "";
+    return pool.find((hint) => hint.toLowerCase().startsWith(first))
+      || pool.find((hint) => hint.toLowerCase().includes(first))
+      || "";
+  }
+
   function invalid(cmd, note = "") {
-    push("err", `% Invalid input detected at '^' marker.${note ? ` ${note}` : ""}`);
+    const closest = closestCommand(cmd);
+    const suffix = note || (closest ? ` Try "${closest}".` : "");
+    push("err", `% Invalid input detected at '^' marker.${suffix ? ` ${suffix}` : ""}`);
   }
 
   function isSwitchPlatform() {
@@ -885,12 +901,22 @@ function CLI({ device, devices = {}, links = [], onApply, onPing, pendingCmd, ac
     const v = input;
     if (v.trim()) {
       const key = mode.name;
-      setHistory((h) => ({ ...h, [key]: [...(h[key] || []), v].slice(-100) }));
+      setHistory((h) => {
+        const next = { ...h, [key]: [...(h[key] || []), v].slice(-100) };
+        onHistoryChange && onHistoryChange(next);
+        return next;
+      });
     }
     handle(v);
     setInput("");
     setHistIdx(-1);
   }
+
+  const ghostCompletion = (() => {
+    if (!ghostSuggestions || !input.trim()) return "";
+    const completed = completeCommand(input, mode, device);
+    return completed && completed !== input && completed.toLowerCase().startsWith(input.toLowerCase()) ? completed.slice(input.length) : "";
+  })();
 
   function onKeyDown(e) {
     const modeHist = history[mode.name] || [];
@@ -920,7 +946,10 @@ function CLI({ device, devices = {}, links = [], onApply, onPing, pendingCmd, ac
         {lines.map((l, i) => <div key={i} className={`cli-line ${l.cls}`}>{l.text}</div>)}
         <form className="cli-prompt-row" onSubmit={submit}>
           <span className="cli-prompt">{promptFor()}</span>
-          <input className="cli-input" ref={inputRef} value={input} onChange={(e) => setInput(e.target.value)} onKeyDown={onKeyDown} autoFocus spellCheck={false} autoComplete="off" />
+          <span className="cli-input-wrap">
+            <input className="cli-input" ref={inputRef} value={input} onChange={(e) => setInput(e.target.value)} onKeyDown={onKeyDown} autoFocus spellCheck={false} autoComplete="off" />
+            {ghostCompletion && <span className="cli-ghost" style={{ marginLeft: `${input.length}ch` }}>{ghostCompletion}</span>}
+          </span>
         </form>
         <div style={{ flex: 1 }} />
       </div>

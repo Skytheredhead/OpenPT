@@ -7,7 +7,8 @@ function Topology(props) {
     linkMode, setLinkMode, forceLinkType, packetMode, setPacketMode,
     onLinkRequest, onPacketRequest, simRunning, packets, activeHopDeviceId,
     viewState, onViewStateChange,
-    starterScreenVisible, onCreateProject,
+    starterScreenVisible, onCreateProject, onCreateStarter, onImportPacketTracer,
+    selectedLinkId, onSelectLink, onLinkContextMenu, onMarqueeSelect,
   } = props;
   const selSet = React.useMemo(() => new Set(selectedIds || []), [selectedIds]);
 
@@ -20,8 +21,9 @@ function Topology(props) {
   const [drag, setDrag] = React.useState(null);   // { id, ox, oy }
   const [linkPick, setLinkPick] = React.useState(null);  // { devId, iface }
   const [portPicker, setPortPicker] = React.useState(null);  // { devId }
+  const [portSearch, setPortSearch] = React.useState("");
+  const [marquee, setMarquee] = React.useState(null);
   const [toast, setToast] = React.useState(null);
-  const linkLabelLayoutRef = React.useRef({});
 
   React.useEffect(() => {
     if (!toast) return;
@@ -102,8 +104,42 @@ function Topology(props) {
       window.addEventListener("mousemove", move);
       window.addEventListener("mouseup", up);
     } else if (e.button === 0 && !e.target.closest(".node") && !e.target.closest(".link-label")) {
-      onSelect && onSelect(null);
-      if (linkMode) { setLinkPick(null); setPortPicker(null); }
+      const start = {
+        clientX: e.clientX,
+        clientY: e.clientY,
+        world: screenToWorld(e.clientX, e.clientY),
+        additive: e.shiftKey || e.metaKey || e.ctrlKey,
+        moved: false,
+      };
+      const move = (ev) => {
+        const dx = ev.clientX - start.clientX;
+        const dy = ev.clientY - start.clientY;
+        if (!start.moved && Math.hypot(dx, dy) < 5) return;
+        start.moved = true;
+        setMarquee({ a: start.world, b: screenToWorld(ev.clientX, ev.clientY) });
+      };
+      const up = (ev) => {
+        window.removeEventListener("mousemove", move);
+        window.removeEventListener("mouseup", up);
+        if (start.moved) {
+          const end = screenToWorld(ev.clientX, ev.clientY);
+          const minX = Math.min(start.world.x, end.x);
+          const maxX = Math.max(start.world.x, end.x);
+          const minY = Math.min(start.world.y, end.y);
+          const maxY = Math.max(start.world.y, end.y);
+          const ids = Object.values(devices)
+            .filter((d) => d.x >= minX && d.x <= maxX && d.y >= minY && d.y <= maxY)
+            .map((d) => d.id);
+          onMarqueeSelect ? onMarqueeSelect(ids, start.additive) : onSelect && onSelect(null);
+        } else {
+          onSelect && onSelect(null);
+          onSelectLink && onSelectLink(null);
+          if (linkMode) { setLinkPick(null); setPortPicker(null); }
+        }
+        setMarquee(null);
+      };
+      window.addEventListener("mousemove", move);
+      window.addEventListener("mouseup", up);
     }
   };
 
@@ -144,6 +180,7 @@ function Topology(props) {
     if (e.button !== 0) return;
     if (linkMode) {
       setPortPicker({ devId: d.id });
+      setPortSearch("");
       e.stopPropagation();
       return;
     }
@@ -179,6 +216,7 @@ function Topology(props) {
     }
     const startX = e.clientX, startY = e.clientY;
     setDrag({ id: d.id, groupIds, startPositions, startX, startY, moved: false });
+    props.onMoveStart && props.onMoveStart();
     e.stopPropagation();
   };
   React.useEffect(() => {
@@ -198,6 +236,7 @@ function Topology(props) {
       if (!drag.moved && props.onOpenConsole) {
         props.onOpenConsole(drag.id);
       }
+      props.onMoveEnd && props.onMoveEnd(!!drag.moved);
       setDrag(null);
     };
     window.addEventListener("mousemove", move);
@@ -227,6 +266,11 @@ function Topology(props) {
   const ifaceName = window.OPT_Engine.shortIfaceName;
   const cableType = window.OPT_Engine.normalizeCableType?.(forceLinkType || "auto") || "auto";
   const cableLabel = window.OPT_Engine.cableTypeLabel?.(cableType) || "Auto cable";
+  const endpointColorFor = (id) => {
+    let hash = 0;
+    for (const ch of String(id || "")) hash = (hash * 31 + ch.charCodeAt(0)) >>> 0;
+    return `oklch(0.77 0.14 ${Math.round((hash * 137.508) % 360)})`;
+  };
 
   const isIfaceTaken = (devId, iface) => links.some(l => (l.a === devId && l.ai === iface) || (l.b === devId && l.bi === iface));
 
@@ -276,20 +320,16 @@ function Topology(props) {
 
   const portGroupsFor = (dev) => {
     const groups = new Map();
+    const q = portSearch.trim().toLowerCase();
     for (const iface of Object.keys(dev?.interfaces || {})) {
       const info = window.OPT_Engine.ifacePortInfo?.(dev, iface) || { group: "Other", label: iface };
+      if (q && !`${iface} ${info.label || ""} ${info.group || ""}`.toLowerCase().includes(q)) continue;
       if (!groups.has(info.group)) groups.set(info.group, []);
       groups.get(info.group).push({ iface, info });
     }
     return Array.from(groups.entries());
   };
   const linkLabelPositions = React.useMemo(() => {
-    const layoutMemory = linkLabelLayoutRef.current;
-    const activeLinkIds = new Set(links.map((l) => l.id));
-    Object.keys(layoutMemory).forEach((id) => {
-      if (!activeLinkIds.has(id)) delete layoutMemory[id];
-    });
-
     const pairGroups = new Map();
     links.forEach((l) => {
       const key = [l.a, l.b].filter(Boolean).sort().join(":");
@@ -303,86 +343,29 @@ function Topology(props) {
       });
     }
 
-    const placed = Object.values(devices || {}).map((d) => ({
-      left: d.x - 38,
-      right: d.x + 38,
-      top: d.y - 34,
-      bottom: d.y + 58,
-    }));
     const positions = {};
-    const overlapArea = (box, other) => {
-      const x = Math.max(0, Math.min(box.right, other.right) - Math.max(box.left, other.left));
-      const y = Math.max(0, Math.min(box.bottom, other.bottom) - Math.max(box.top, other.top));
-      return x * y;
-    };
-    const overlapPenalty = (box) => placed.reduce((sum, other) => sum + overlapArea(box, other), 0);
-
     links.forEach((l) => {
       const a = devices[l.a], b = devices[l.b];
       if (!a || !b) return;
       const dx = b.x - a.x, dy = b.y - a.y;
       const len = Math.hypot(dx, dy) || 1;
-      const nx = -dy / len, ny = dx / len;
       const tx = dx / len, ty = dy / len;
       const slot = pairSlots[l.id] || { offset: 0, count: 1 };
-      const label = `${ifaceName(l.ai)} ↔ ${ifaceName(l.bi)}`;
-      const width = Math.min(168, Math.max(62, label.length * 6.1 + 12));
-      const height = 20;
-      const basePerp = slot.count > 1 ? slot.offset * 30 : 16;
-      const previous = layoutMemory[l.id];
-      const perpOptions = slot.count > 1
-        ? [basePerp, basePerp + Math.sign(basePerp || 1) * 20, basePerp - Math.sign(basePerp || 1) * 20, -basePerp || 28]
-        : [16, -16, 36, -36, 56, -56];
-      const alongOptions = [0, -34, 34, -68, 68];
-
-      const candidateFor = (along, perp) => {
-        const x = (a.x + b.x) / 2 + nx * perp + tx * along;
-        const y = (a.y + b.y) / 2 + ny * perp + ty * along;
-        const box = {
-          left: x - width / 2 - 8,
-          right: x + width / 2 + 8,
-          top: y - height / 2 - 6,
-          bottom: y + height / 2 + 6,
-        };
-        const collision = overlapPenalty(box);
-        const settleCost = Math.abs(along) * 0.8 + Math.abs(perp - basePerp) * 0.45;
-        const memoryCost = previous ? Math.hypot(along - previous.along, perp - previous.perp) * 2.8 : 0;
-        return {
-          along,
-          perp,
-          x,
-          y,
-          box,
-          score: collision * 4 + settleCost + memoryCost,
-        };
+      const midShift = slot.count > 1 ? slot.offset * 68 : 0;
+      const chipGap = Math.max(20, Math.min(42, len * 0.14));
+      const mx = (a.x + b.x) / 2 + tx * midShift;
+      const my = (a.y + b.y) / 2 + ty * midShift;
+      let angle = Math.atan2(dy, dx) * 180 / Math.PI;
+      if (angle > 90) angle -= 180;
+      if (angle < -90) angle += 180;
+      positions[l.id] = {
+        angle,
+        a: { x: mx - tx * chipGap, y: my - ty * chipGap },
+        b: { x: mx + tx * chipGap, y: my + ty * chipGap },
       };
-
-      const candidates = [];
-      for (const along of alongOptions) {
-        for (const perp of perpOptions) {
-          candidates.push(candidateFor(along, perp));
-        }
-      }
-
-      let chosen = candidates.reduce((best, candidate) => (
-        !best || candidate.score < best.score ? candidate : best
-      ), null);
-
-      if (previous) {
-        const remembered = candidateFor(previous.along, previous.perp);
-        const improvement = remembered.score - (chosen?.score || 0);
-        if (drag || improvement < 260) {
-          chosen = remembered;
-        }
-      }
-
-      if (!chosen) chosen = candidateFor(0, basePerp);
-      placed.push(chosen.box);
-      layoutMemory[l.id] = { along: chosen.along, perp: chosen.perp };
-      positions[l.id] = { x: chosen.x, y: chosen.y, label };
     });
     return positions;
-  }, [devices, links, drag]);
+  }, [devices, links]);
 
   const fit = () => {
     const wrap = wrapRef.current;
@@ -458,6 +441,13 @@ function Topology(props) {
             <button className="port-picker-close" onClick={() => setPortPicker(null)} title="Close port selector">×</button>
           </div>
           <div className="port-picker-shell">
+            <input
+              className="port-picker-search"
+              value={portSearch}
+              onChange={(e) => setPortSearch(e.target.value)}
+              placeholder="Filter ports"
+              autoFocus
+            />
             {portGroupsFor(devices[portPicker.devId]).map(([group, ports]) => (
               <div key={group} className="port-picker-group">
                 <div className="port-picker-group-title">{group}</div>
@@ -468,7 +458,7 @@ function Topology(props) {
                     return (
                       <button
                         key={iface}
-                        className={`port-button ${isSelected ? "selected" : ""} ${status.warning ? "warn" : ""}`}
+                        className={`port-button ${isSelected ? "selected" : ""} ${status.warning ? "warn" : ""} ${!status.disabled && linkPick ? "compatible" : ""}`}
                         disabled={status.disabled}
                         title={status.reason || status.warning || iface}
                         onClick={() => choosePort(devices[portPicker.devId], iface)}
@@ -498,17 +488,9 @@ function Topology(props) {
       {starterScreenVisible && (
         <div className="starter-screen" aria-label="Start a project">
           <div className="starter-message">
-            drag in a .pka file or{" "}
-            <button
-              type="button"
-              className="starter-create"
-              onClick={(e) => {
-                e.stopPropagation();
-                onCreateProject && onCreateProject();
-              }}
-            >
-              create a new project
-            </button>
+            <button type="button" className="starter-action primary" onClick={(e) => { e.stopPropagation(); onCreateProject && onCreateProject(); }}>New Blank</button>
+            <button type="button" className="starter-action" onClick={(e) => { e.stopPropagation(); onCreateStarter && onCreateStarter(); }}>Starter Lab</button>
+            <button type="button" className="starter-action" onClick={(e) => { e.stopPropagation(); onImportPacketTracer && onImportPacketTracer(); }}>Import PKA File</button>
           </div>
         </div>
       )}
@@ -560,18 +542,50 @@ function Topology(props) {
           const a = devices[l.a], b = devices[l.b];
           if (!a || !b) return null;
           const labelPosition = linkLabelPositions[l.id];
-          const mx = labelPosition?.x ?? (a.x + b.x) / 2;
-          const my = labelPosition?.y ?? (a.y + b.y) / 2;
+          const dx = b.x - a.x, dy = b.y - a.y;
+          const len = Math.hypot(dx, dy) || 1;
+          const tx = dx / len, ty = dy / len;
+          const fallback = {
+            angle: Math.atan2(dy, dx) * 180 / Math.PI,
+            a: { x: (a.x + b.x) / 2 - tx * 28, y: (a.y + b.y) / 2 - ty * 28 },
+            b: { x: (a.x + b.x) / 2 + tx * 28, y: (a.y + b.y) / 2 + ty * 28 },
+          };
+          const geom = labelPosition || fallback;
           return (
-            <div
-              key={`lbl-${l.id}`}
-              className="link-label"
-              style={{ left: mx, top: my }}
-              onDoubleClick={() => onDeleteLink && onDeleteLink(l.id)}
-              title={`${ifaceName(l.ai)} ↔ ${ifaceName(l.bi)}. Double-click to remove`}
-            >
-              <span title={l.ai}>{ifaceName(l.ai)}</span> ↔ <span title={l.bi}>{ifaceName(l.bi)}</span>
-            </div>
+            <React.Fragment key={`lbl-${l.id}`}>
+              <div
+                className="link-label endpoint-a"
+                data-selected={selectedLinkId === l.id ? "1" : "0"}
+                style={{
+                  left: geom.a.x,
+                  top: geom.a.y,
+                  "--link-label-angle": `${geom.angle}deg`,
+                  "--link-endpoint-color": endpointColorFor(a.id),
+                }}
+                onClick={(e) => { e.stopPropagation(); onSelectLink && onSelectLink(l.id); }}
+                onContextMenu={(e) => { e.preventDefault(); e.stopPropagation(); onLinkContextMenu && onLinkContextMenu(e, l); }}
+                onDoubleClick={() => onDeleteLink && onDeleteLink(l.id)}
+                title={`${a.hostname} ${l.ai}. Double-click to remove link.`}
+              >
+                <span title={l.ai}>{ifaceName(l.ai)}</span>
+              </div>
+              <div
+                className="link-label endpoint-b"
+                data-selected={selectedLinkId === l.id ? "1" : "0"}
+                style={{
+                  left: geom.b.x,
+                  top: geom.b.y,
+                  "--link-label-angle": `${geom.angle}deg`,
+                  "--link-endpoint-color": endpointColorFor(b.id),
+                }}
+                onClick={(e) => { e.stopPropagation(); onSelectLink && onSelectLink(l.id); }}
+                onContextMenu={(e) => { e.preventDefault(); e.stopPropagation(); onLinkContextMenu && onLinkContextMenu(e, l); }}
+                onDoubleClick={() => onDeleteLink && onDeleteLink(l.id)}
+                title={`${b.hostname} ${l.bi}. Double-click to remove link.`}
+              >
+                <span title={l.bi}>{ifaceName(l.bi)}</span>
+              </div>
+            </React.Fragment>
           );
         })}
 
@@ -608,6 +622,18 @@ function Topology(props) {
           </div>
         ))}
       </div>
+
+      {marquee && (
+        <div
+          className="marquee"
+          style={{
+            left: Math.min(marquee.a.x, marquee.b.x) * panRef.current.k + panRef.current.x,
+            top: Math.min(marquee.a.y, marquee.b.y) * panRef.current.k + panRef.current.y,
+            width: Math.abs(marquee.b.x - marquee.a.x) * panRef.current.k,
+            height: Math.abs(marquee.b.y - marquee.a.y) * panRef.current.k,
+          }}
+        />
+      )}
 
       {toast && (
         <div className={`toast ${toast.kind || ""}`}>
