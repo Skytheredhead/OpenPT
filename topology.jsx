@@ -21,6 +21,7 @@ function Topology(props) {
   const [linkPick, setLinkPick] = React.useState(null);  // { devId, iface }
   const [portPicker, setPortPicker] = React.useState(null);  // { devId }
   const [toast, setToast] = React.useState(null);
+  const linkLabelLayoutRef = React.useRef({});
 
   React.useEffect(() => {
     if (!toast) return;
@@ -283,6 +284,12 @@ function Topology(props) {
     return Array.from(groups.entries());
   };
   const linkLabelPositions = React.useMemo(() => {
+    const layoutMemory = linkLabelLayoutRef.current;
+    const activeLinkIds = new Set(links.map((l) => l.id));
+    Object.keys(layoutMemory).forEach((id) => {
+      if (!activeLinkIds.has(id)) delete layoutMemory[id];
+    });
+
     const pairGroups = new Map();
     links.forEach((l) => {
       const key = [l.a, l.b].filter(Boolean).sort().join(":");
@@ -303,9 +310,12 @@ function Topology(props) {
       bottom: d.y + 58,
     }));
     const positions = {};
-    const overlaps = (box) => placed.some((other) => !(
-      box.right < other.left || box.left > other.right || box.bottom < other.top || box.top > other.bottom
-    ));
+    const overlapArea = (box, other) => {
+      const x = Math.max(0, Math.min(box.right, other.right) - Math.max(box.left, other.left));
+      const y = Math.max(0, Math.min(box.bottom, other.bottom) - Math.max(box.top, other.top));
+      return x * y;
+    };
+    const overlapPenalty = (box) => placed.reduce((sum, other) => sum + overlapArea(box, other), 0);
 
     links.forEach((l) => {
       const a = devices[l.a], b = devices[l.b];
@@ -319,47 +329,60 @@ function Topology(props) {
       const width = Math.min(168, Math.max(62, label.length * 6.1 + 12));
       const height = 20;
       const basePerp = slot.count > 1 ? slot.offset * 30 : 16;
+      const previous = layoutMemory[l.id];
       const perpOptions = slot.count > 1
         ? [basePerp, basePerp + Math.sign(basePerp || 1) * 20, basePerp - Math.sign(basePerp || 1) * 20, -basePerp || 28]
         : [16, -16, 36, -36, 56, -56];
       const alongOptions = [0, -34, 34, -68, 68];
-      let chosen = null;
-      for (const along of alongOptions) {
-        for (const perp of perpOptions) {
-          const x = (a.x + b.x) / 2 + nx * perp + tx * along;
-          const y = (a.y + b.y) / 2 + ny * perp + ty * along;
-          const box = {
-            left: x - width / 2 - 8,
-            right: x + width / 2 + 8,
-            top: y - height / 2 - 6,
-            bottom: y + height / 2 + 6,
-          };
-          if (!overlaps(box)) {
-            chosen = { x, y, box };
-            break;
-          }
-        }
-        if (chosen) break;
-      }
-      if (!chosen) {
-        const x = (a.x + b.x) / 2 + nx * basePerp;
-        const y = (a.y + b.y) / 2 + ny * basePerp;
-        chosen = {
+
+      const candidateFor = (along, perp) => {
+        const x = (a.x + b.x) / 2 + nx * perp + tx * along;
+        const y = (a.y + b.y) / 2 + ny * perp + ty * along;
+        const box = {
+          left: x - width / 2 - 8,
+          right: x + width / 2 + 8,
+          top: y - height / 2 - 6,
+          bottom: y + height / 2 + 6,
+        };
+        const collision = overlapPenalty(box);
+        const settleCost = Math.abs(along) * 0.8 + Math.abs(perp - basePerp) * 0.45;
+        const memoryCost = previous ? Math.hypot(along - previous.along, perp - previous.perp) * 2.8 : 0;
+        return {
+          along,
+          perp,
           x,
           y,
-          box: {
-            left: x - width / 2 - 8,
-            right: x + width / 2 + 8,
-            top: y - height / 2 - 6,
-            bottom: y + height / 2 + 6,
-          },
+          box,
+          score: collision * 4 + settleCost + memoryCost,
         };
+      };
+
+      const candidates = [];
+      for (const along of alongOptions) {
+        for (const perp of perpOptions) {
+          candidates.push(candidateFor(along, perp));
+        }
       }
+
+      let chosen = candidates.reduce((best, candidate) => (
+        !best || candidate.score < best.score ? candidate : best
+      ), null);
+
+      if (previous) {
+        const remembered = candidateFor(previous.along, previous.perp);
+        const improvement = remembered.score - (chosen?.score || 0);
+        if (drag || improvement < 260) {
+          chosen = remembered;
+        }
+      }
+
+      if (!chosen) chosen = candidateFor(0, basePerp);
       placed.push(chosen.box);
+      layoutMemory[l.id] = { along: chosen.along, perp: chosen.perp };
       positions[l.id] = { x: chosen.x, y: chosen.y, label };
     });
     return positions;
-  }, [devices, links]);
+  }, [devices, links, drag]);
 
   const fit = () => {
     const wrap = wrapRef.current;
