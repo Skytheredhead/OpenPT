@@ -350,6 +350,135 @@ const SYNC_AUTOSAVE_CHANGES = 20;
 const SYNC_AUTOSAVE_MS = 60_000;
 const SYNC_MIN_SAVE_MS = 10_000;
 
+const SERVER_CONFIG_SECTIONS = [
+  ["http", "HTTP"],
+  ["dhcp", "DHCP"],
+  ["dhcpv6", "DHCPv6"],
+  ["tftp", "TFTP"],
+  ["dns", "DNS"],
+  ["syslog", "SYSLOG"],
+  ["aaa", "AAA"],
+  ["ntp", "NTP"],
+  ["email", "EMAIL"],
+  ["ftp", "FTP"],
+  ["iot", "IoT"],
+  ["vm", "VM Management"],
+  ["radiusEap", "Radius EAP"],
+  ["prp", "PRP"],
+];
+
+const SERVER_FILE_LIBRARY = [
+  "asa842-k8.bin",
+  "asa923-k8.bin",
+  "c1841-advipservicesk9-mz.124-15.T1.bin",
+  "c1841-ipbase-mz.123-14.T7.bin",
+  "c1841-ipbasek9-mz.124-12.bin",
+  "c1900-universalk9-mz.SPA.155-3.M4a.bin",
+  "c2600-advipservicesk9-mz.124-15.T1.bin",
+  "c2600-i-mz.122-28.bin",
+  "c2600-ipbasek9-mz.124-8.bin",
+  "c2800nm-advipservicesk9-mz.124-15.T1.bin",
+  "c2800nm-advipservicesk9-mz.151-4.M4.bin",
+  "c2800nm-ipbase-mz.123-14.T7.bin",
+  "c2900-universalk9-mz.SPA.155-3.M4a.bin",
+  "cat3k_caa-universalk9.16.03.02.SPA.bin",
+];
+
+const SERVER_WEB_FILES = [
+  { name: "copyrights.html", editable: true, content: "<h1>OpenPT Server</h1>" },
+  { name: "cscoptlogo177x111.jpg", editable: false, content: "" },
+  { name: "helloworld.html", editable: true, content: "<h1>Hello world</h1>" },
+  { name: "image.html", editable: true, content: "<img src=\"cscoptlogo177x111.jpg\" alt=\"logo\">" },
+  { name: "index.html", editable: true, content: "<h1>Server-PT</h1>" },
+];
+
+const SERVER_DESKTOP_APPS = [
+  ["ip", "IP Configuration", "106"],
+  ["terminal", "Terminal", ">"],
+  ["cmd", "Command Prompt", "run"],
+  ["browser", "Web Browser", "http:"],
+  ["wireless", "PC Wireless", "ANT"],
+  ["vpn", "VPN", "VPN"],
+  ["accounting", "AAA Accounting", "AAA"],
+  ["traffic", "Traffic Generator", "+mail"],
+  ["mib", "MIB Browser", "MIB"],
+  ["communicator", "Cisco IP Communicator", "HEAD"],
+  ["email", "Email", "mail"],
+  ["pppoe", "PPPoE Dialer", "modem"],
+  ["editor", "Text Editor", "text"],
+  ["firewall", "Firewall", "IPv4"],
+  ["ipv6firewall", "IPv6 Firewall", "IPv6"],
+  ["netflow", "Netflow Collector", "chart"],
+  ["iox", "IoX IDE", "SDK"],
+  ["ssh", "Telnet / SSH Client", ">lock"],
+  ["iotmon", "IoT Monitor", "cloud"],
+  ["iotide", "IoT IDE", "cloud"],
+];
+
+function defaultServerConfig(device = {}) {
+  const services = device.services || {};
+  const dhcpPools = device.dhcp?.pools || {};
+  const primaryPool = Object.entries(dhcpPools)[0];
+  return {
+    http: {
+      http: services.http ?? true,
+      https: services.https ?? true,
+      files: SERVER_WEB_FILES,
+    },
+    dhcp: {
+      service: services.dhcp ?? false,
+      selectedPool: primaryPool?.[0] || "serverPool",
+      pools: Object.entries(dhcpPools).map(([name, pool]) => ({
+        poolName: name,
+        defaultGateway: pool.defaultRouter || "0.0.0.0",
+        dnsServer: pool.dnsServer || "0.0.0.0",
+        startIp: pool.startIp || pool.network || "209.165.200.0",
+        subnetMask: pool.mask || "255.255.255.0",
+        maxUsers: pool.maxUsers || 512,
+        tftpServer: pool.tftpServer || "0.0.0.0",
+        wlcAddress: pool.wlcAddress || "0.0.0.0",
+      })),
+    },
+    dhcpv6: { service: services.dhcpv6 ?? false, pools: [], prefixes: [], delegations: [], localPools: [] },
+    tftp: { service: services.tftp ?? true, files: SERVER_FILE_LIBRARY },
+    dns: { service: services.dns ?? true, records: [] },
+    syslog: { service: services.syslog ?? true, logs: [] },
+    aaa: { service: services.aaa ?? true, radiusPort: "1645", clients: [], users: [] },
+    ntp: { service: services.ntp ?? true, auth: false, key: "", password: "", date: "2019-10-12", time: "09:15:20" },
+    email: { smtp: services.smtp ?? true, pop3: services.pop3 ?? true, domain: "", users: [] },
+    ftp: { service: services.ftp ?? true, users: [{ username: "cisco", password: "cisco", permission: "RWDNL" }], files: SERVER_FILE_LIBRARY.slice(0, 8) },
+    iot: { service: services.iot ?? false, registrations: [], devices: [] },
+    vm: { service: services.vm ?? true, vms: [] },
+    radiusEap: { allowEapMd5: false },
+    prp: { enabled: false },
+  };
+}
+
+function ensureServerConfig(device = {}) {
+  const base = defaultServerConfig(device);
+  const saved = cloneState(device.serverConfig || {});
+  const merged = { ...base, ...saved };
+  for (const key of Object.keys(base)) {
+    merged[key] = { ...base[key], ...(saved[key] || {}) };
+  }
+  if (!merged.dhcp.pools?.length) merged.dhcp.pools = defaultServerConfig(device).dhcp.pools;
+  if (!merged.http.files?.length) merged.http.files = SERVER_WEB_FILES;
+  if (!merged.tftp.files?.length) merged.tftp.files = SERVER_FILE_LIBRARY;
+  if (!merged.ftp.files?.length) merged.ftp.files = SERVER_FILE_LIBRARY.slice(0, 8);
+  return merged;
+}
+
+function ipParts(ip) {
+  const parts = String(ip || "").split(".").map((n) => Number(n));
+  return parts.length === 4 && parts.every((n) => Number.isInteger(n) && n >= 0 && n <= 255) ? parts : null;
+}
+
+function networkFromIpMask(ip, mask) {
+  const a = ipParts(ip), b = ipParts(mask);
+  if (!a || !b) return ip || "0.0.0.0";
+  return a.map((part, i) => part & b[i]).join(".");
+}
+
 function cloneState(value) {
   return value == null ? value : JSON.parse(JSON.stringify(value));
 }
@@ -566,6 +695,9 @@ function App() {
   const [confirmDialog, setConfirmDialog] = useState(null);
   const [lastShareUrl, setLastShareUrl] = useState("");
   const [lastImportReport, setLastImportReport] = useState(null);
+  const [serverModuleOpen, setServerModuleOpen] = useState(false);
+  const [serverModuleTab, setServerModuleTab] = useState("config");
+  const [serverConfigSection, setServerConfigSection] = useState("http");
   const [cliGhostSuggestions, setCliGhostSuggestions] = useState(() => {
     try { return localStorage.getItem("openpt:cli-ghost") !== "0"; } catch (e) { return true; }
   });
@@ -702,6 +834,7 @@ function App() {
     setActiveBottom((snap?.activeBottom && snap.activeBottom !== "pka-report") ? snap.activeBottom : "events");
     setPtActivity(snap?.ptActivity || null);
     setPtSidebarOpen(snap?.ptSidebarOpen ?? !!snap?.ptActivity);
+    setServerModuleOpen(false);
   };
   const newBlankTab = () => {
     setStarterScreenVisible(false);
@@ -711,6 +844,7 @@ function App() {
     setTabs((ts) => [...ts, { id, name: `untitled-${ts.length}.opt` }]);
     setActiveWid(id);
     setDevices({}); setLinks([]); setSelectedId(null); setOpenConsoles([]); setActiveBottom("events"); setPtActivity(null); setPtSidebarOpen(false);
+    setServerModuleOpen(false);
     setCloudProjectId(null); setCloudVersion(0); setCloudBaseDoc(null); setCloudLease(null); setShareToken(null); setShareMode(null); setSyncStatus({ state: cloudUser ? "local" : "local", message: cloudUser ? "Signed in" : "Local only" });
   };
   const newStarterTab = () => {
@@ -724,6 +858,7 @@ function App() {
     setActiveWid(id);
     skipNextSnapshot.current = true;
     setDevices(s.devices); setLinks(s.links); setSelectedId(null); setOpenConsoles([]); setActiveBottom("events"); setPtActivity(null); setPtSidebarOpen(false);
+    setServerModuleOpen(false);
     setCloudProjectId(null); setCloudVersion(0); setCloudBaseDoc(null); setCloudLease(null); setShareToken(null); setShareMode(null); setSyncStatus({ state: cloudUser ? "local" : "local", message: cloudUser ? "Signed in" : "Local only" });
     setDirtyTabs((m) => ({ ...m, [id]: true }));
     pushAppUndo("opened starter lab", before);
@@ -2188,6 +2323,30 @@ function App() {
   };
   const onApply = (cmd) => onApplyToDevice(selectedId, cmd);
 
+  const updateServerDevice = (devId, mutator, message) => {
+    if (!devId) return;
+    if (!markProjectChanged("server-config")) return;
+    const hostname = devices[devId]?.hostname || "Server";
+    setDevices((m) => {
+      const current = m[devId];
+      if (!current || current.kind !== "server") return m;
+      const base = OPT_Engine.normalizeDevice(current);
+      const d = {
+        ...base,
+        services: { ...(base.services || {}) },
+        dhcp: cloneState(base.dhcp || { excluded: [], pools: {}, bindings: [] }),
+        users: { ...(base.users || {}) },
+        files: { ...(base.files || {}) },
+        serverConfig: ensureServerConfig(base),
+      };
+      mutator(d, d.serverConfig);
+      d.serverConfig = ensureServerConfig(d);
+      const next = { ...m, [devId]: OPT_Engine.recalcConnectedRoutes(d) };
+      return OPT_Engine.recomputeDynamicRoutes(next, links);
+    });
+    if (message) log("ok", hostname, message);
+  };
+
   // ── Ping & packet animation
   const animatePath = (plan, snapshot, onDone) => {
     if (!plan.hops.length) { onDone?.(); return; }
@@ -2340,6 +2499,16 @@ function App() {
     setSelectedId(id);
     setOpenConsoles((cs) => cs.includes(id) ? cs : [...cs, id]);
     setActiveBottom(id);
+  };
+  const openServerModule = (id) => {
+    setSelectedId(id);
+    setServerModuleOpen(true);
+    setServerModuleTab("config");
+  };
+  const openDeviceModule = (id) => {
+    const device = devices[id];
+    if (device?.kind === "server") openServerModule(id);
+    else openConsole(id);
   };
   const consoleDevice = openConsole;
   const closeConsole = (id) => {
@@ -2644,7 +2813,7 @@ function App() {
             onCreateProject={createEmptyProjectFromStarterScreen}
             onCreateStarter={newStarterTab}
             onImportPacketTracer={openPacketTracerFilePicker}
-            onOpenConsole={openConsole}
+            onOpenConsole={openDeviceModule}
             onContextMenu={(e, d) => setCtx({ x: e.clientX, y: e.clientY, devId: d.id })}
             onLinkContextMenu={(e, l) => setCtx({ x: e.clientX, y: e.clientY, linkId: l.id })}
           />
@@ -2734,7 +2903,17 @@ function App() {
           </div>
         </div>
 
-        {/* Inspector removed — info now accessible via right-click → show commands */}
+        {serverModuleOpen && selected?.kind === "server" && (
+          <ServerModuleSidebar
+            device={selected}
+            activeTab={serverModuleTab}
+            activeConfig={serverConfigSection}
+            onTabChange={setServerModuleTab}
+            onConfigChange={setServerConfigSection}
+            onUpdate={(mutator, message) => updateServerDevice(selected.id, mutator, message)}
+            onClose={() => setServerModuleOpen(false)}
+          />
+        )}
       </div>
 
       {/* (status bar removed) */}
@@ -2903,6 +3082,8 @@ function App() {
             const d = devices[id];
             if (!d) return setCtx(null);
             switch (action) {
+              case "server-module":
+                openServerModule(id); break;
               case "console":
                 openConsole(id); break;
               case "show-int":
@@ -4084,6 +4265,405 @@ function PacketTracerAssessmentRows({ items, empty }) {
   );
 }
 
+function ServerModuleSidebar({ device, activeTab, activeConfig, onTabChange, onConfigChange, onUpdate, onClose }) {
+  const cfg = ensureServerConfig(device);
+  return (
+    <aside className="server-module-sidebar" aria-label={`${device.hostname} server module`}>
+      <div className="server-module-head">
+        <div className="server-module-title">
+          <span>{device.hostname}</span>
+          <small>Server-PT</small>
+        </div>
+        <button className="server-module-close" type="button" onClick={onClose} title="Close server module">×</button>
+      </div>
+      <div className="server-module-tabs" role="tablist" aria-label="Server module tabs">
+        <button type="button" className={activeTab === "config" ? "active" : ""} onClick={() => onTabChange("config")}>Config</button>
+        <button type="button" className={activeTab === "desktop" ? "active" : ""} onClick={() => onTabChange("desktop")}>Desktop</button>
+      </div>
+      {activeTab === "desktop" ? (
+        <ServerDesktopPanel />
+      ) : (
+        <ServerConfigPanel device={device} cfg={cfg} activeConfig={activeConfig} onConfigChange={onConfigChange} onUpdate={onUpdate} />
+      )}
+    </aside>
+  );
+}
+
+function ServerConfigPanel({ device, cfg, activeConfig, onConfigChange, onUpdate }) {
+  return (
+    <div className="server-config-shell">
+      <div className="server-config-nav" aria-label="Server Config sections">
+        <div className="server-config-nav-title">CONFIG</div>
+        {SERVER_CONFIG_SECTIONS.map(([key, label]) => (
+          <button key={key} type="button" className={activeConfig === key ? "active" : ""} onClick={() => onConfigChange(key)}>{label}</button>
+        ))}
+      </div>
+      <div className="server-config-body">
+        {activeConfig === "http" && <HttpConfig cfg={cfg.http} onUpdate={onUpdate} />}
+        {activeConfig === "dhcp" && <DhcpConfig cfg={cfg.dhcp} onUpdate={onUpdate} />}
+        {activeConfig === "dhcpv6" && <Dhcpv6Config cfg={cfg.dhcpv6} onUpdate={onUpdate} />}
+        {activeConfig === "tftp" && <TftpConfig cfg={cfg.tftp} onUpdate={onUpdate} />}
+        {activeConfig === "dns" && <DnsConfig cfg={cfg.dns} onUpdate={onUpdate} />}
+        {activeConfig === "syslog" && <SyslogConfig cfg={cfg.syslog} onUpdate={onUpdate} device={device} />}
+        {activeConfig === "aaa" && <AaaConfig cfg={cfg.aaa} onUpdate={onUpdate} />}
+        {activeConfig === "ntp" && <NtpConfig cfg={cfg.ntp} onUpdate={onUpdate} />}
+        {activeConfig === "email" && <EmailConfig cfg={cfg.email} onUpdate={onUpdate} />}
+        {activeConfig === "ftp" && <FtpConfig cfg={cfg.ftp} onUpdate={onUpdate} />}
+        {activeConfig === "iot" && <SimpleRegistryConfig title="Registration Server" section="iot" cfg={cfg.iot} onUpdate={onUpdate} serviceName="iot" />}
+        {activeConfig === "vm" && <VmConfig cfg={cfg.vm} onUpdate={onUpdate} />}
+        {activeConfig === "radiusEap" && <RadiusEapConfig cfg={cfg.radiusEap} onUpdate={onUpdate} />}
+        {activeConfig === "prp" && <PrpConfig cfg={cfg.prp} onUpdate={onUpdate} />}
+      </div>
+    </div>
+  );
+}
+
+function ServiceSwitch({ label = "Service", value, onChange }) {
+  return (
+    <div className="server-service-row">
+      <span>{label}</span>
+      <label><input type="radio" checked={!!value} onChange={() => onChange(true)} /> On</label>
+      <label><input type="radio" checked={!value} onChange={() => onChange(false)} /> Off</label>
+    </div>
+  );
+}
+
+function ServerTable({ columns, rows, selectedIndex, onSelect, empty = "No entries" }) {
+  return (
+    <div className="server-table">
+      <div className="server-table-head" style={{ gridTemplateColumns: columns.map((c) => c.width || "1fr").join(" ") }}>
+        {columns.map((c) => <span key={c.key}>{c.label}</span>)}
+      </div>
+      <div className="server-table-body">
+        {!rows.length && <div className="server-table-empty">{empty}</div>}
+        {rows.map((row, i) => (
+          <button key={row.id || row.name || row.username || i} type="button" className={`server-table-row ${selectedIndex === i ? "selected" : ""}`} style={{ gridTemplateColumns: columns.map((c) => c.width || "1fr").join(" ") }} onClick={() => onSelect?.(i)}>
+            {columns.map((c) => <span key={c.key}>{row[c.key] || ""}</span>)}
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function HttpConfig({ cfg, onUpdate }) {
+  const [selected, setSelected] = useState(null);
+  const files = cfg.files || SERVER_WEB_FILES;
+  const setToggle = (key, value) => onUpdate((d, c) => {
+    c.http[key] = value;
+    d.services[key] = value;
+  }, `${key.toUpperCase()} service ${value ? "enabled" : "disabled"}`);
+  const editFile = (index) => {
+    const file = files[index];
+    if (!file?.editable) return;
+    const content = window.prompt(`Edit ${file.name}`, file.content || "");
+    if (content == null) return;
+    onUpdate((d, c) => {
+      c.http.files[index] = { ...c.http.files[index], content };
+      d.files[`flash:${file.name}`] = content;
+    }, `${file.name} updated`);
+  };
+  return (
+    <div className="server-section">
+      <h3>HTTP</h3>
+      <div className="server-two-col">
+        <ServiceSwitch label="HTTP" value={cfg.http} onChange={(v) => setToggle("http", v)} />
+        <ServiceSwitch label="HTTPS" value={cfg.https} onChange={(v) => setToggle("https", v)} />
+      </div>
+      <h4>File Manager</h4>
+      <ServerTable columns={[{ key: "name", label: "File Name" }, { key: "edit", label: "Edit", width: "76px" }, { key: "del", label: "Delete", width: "86px" }]} rows={files.map((f) => ({ ...f, edit: f.editable ? "(edit)" : "", del: "(delete)" }))} selectedIndex={selected} onSelect={setSelected} />
+      <div className="server-actions">
+        <button type="button" onClick={() => {
+          const name = window.prompt("New file name", "newfile.html");
+          if (!name) return;
+          onUpdate((d, c) => { c.http.files.push({ name, editable: true, content: "" }); d.files[`flash:${name}`] = ""; }, `${name} created`);
+        }}>New File</button>
+        <button type="button" onClick={() => {
+          const name = window.prompt("Import file name");
+          if (!name) return;
+          onUpdate((d, c) => { c.http.files.push({ name, editable: /\.(html?|txt)$/i.test(name), content: "" }); d.files[`flash:${name}`] = ""; }, `${name} imported`);
+        }}>Import</button>
+        <button type="button" disabled={selected == null} onClick={() => editFile(selected)}>Edit</button>
+        <button type="button" disabled={selected == null} onClick={() => onUpdate((d, c) => { const [removed] = c.http.files.splice(selected, 1); if (removed) delete d.files[`flash:${removed.name}`]; }, "HTTP file removed")}>Delete</button>
+      </div>
+    </div>
+  );
+}
+
+function DhcpConfig({ cfg, onUpdate }) {
+  const first = cfg.pools?.[0] || {};
+  const [form, setForm] = useState({
+    poolName: cfg.selectedPool || first.poolName || "serverPool",
+    defaultGateway: first.defaultGateway || "0.0.0.0",
+    dnsServer: first.dnsServer || "0.0.0.0",
+    startIp: first.startIp || "209.165.200.0",
+    subnetMask: first.subnetMask || "255.255.255.0",
+    maxUsers: first.maxUsers || 512,
+    tftpServer: first.tftpServer || "0.0.0.0",
+    wlcAddress: first.wlcAddress || "0.0.0.0",
+  });
+  useEffect(() => {
+    const selected = cfg.pools?.find((p) => p.poolName === cfg.selectedPool) || cfg.pools?.[0];
+    if (selected) setForm({ ...selected });
+  }, [cfg.selectedPool, cfg.pools?.length]);
+  const setField = (key, value) => setForm((f) => ({ ...f, [key]: value }));
+  return (
+    <div className="server-section">
+      <h3>DHCP</h3>
+      <ServiceSwitch value={cfg.service} onChange={(v) => onUpdate((d, c) => { c.dhcp.service = v; d.services.dhcp = v; }, `DHCP service ${v ? "enabled" : "disabled"}`)} />
+      <div className="server-form-grid">
+        <label>Pool Name<input value={form.poolName} onChange={(e) => setField("poolName", e.target.value)} /></label>
+        <label>Default Gateway<input value={form.defaultGateway} onChange={(e) => setField("defaultGateway", e.target.value)} /></label>
+        <label>DNS Server<input value={form.dnsServer} onChange={(e) => setField("dnsServer", e.target.value)} /></label>
+        <label>Start IP Address<input value={form.startIp} onChange={(e) => setField("startIp", e.target.value)} /></label>
+        <label>Subnet Mask<input value={form.subnetMask} onChange={(e) => setField("subnetMask", e.target.value)} /></label>
+        <label>Maximum Number of Users<input value={form.maxUsers} onChange={(e) => setField("maxUsers", e.target.value)} /></label>
+        <label>TFTP Server<input value={form.tftpServer} onChange={(e) => setField("tftpServer", e.target.value)} /></label>
+        <label>WLC Address<input value={form.wlcAddress} onChange={(e) => setField("wlcAddress", e.target.value)} /></label>
+      </div>
+      <div className="server-actions">
+        <button type="button" onClick={() => setForm({ poolName: "", defaultGateway: "0.0.0.0", dnsServer: "0.0.0.0", startIp: "", subnetMask: "255.255.255.0", maxUsers: 512, tftpServer: "0.0.0.0", wlcAddress: "0.0.0.0" })}>Add</button>
+        <button type="button" onClick={() => onUpdate((d, c) => {
+          const pool = { ...form, poolName: form.poolName || "serverPool" };
+          const idx = c.dhcp.pools.findIndex((p) => p.poolName === pool.poolName);
+          if (idx >= 0) c.dhcp.pools[idx] = pool; else c.dhcp.pools.push(pool);
+          c.dhcp.selectedPool = pool.poolName;
+          d.dhcp.pools[pool.poolName] = { network: networkFromIpMask(pool.startIp, pool.subnetMask), mask: pool.subnetMask, defaultRouter: pool.defaultGateway, dnsServer: pool.dnsServer, startIp: pool.startIp, maxUsers: pool.maxUsers, tftpServer: pool.tftpServer, wlcAddress: pool.wlcAddress };
+        }, "DHCP pool saved")}>Save</button>
+        <button type="button" onClick={() => onUpdate((d, c) => { c.dhcp.pools = c.dhcp.pools.filter((p) => p.poolName !== form.poolName); delete d.dhcp.pools[form.poolName]; c.dhcp.selectedPool = c.dhcp.pools[0]?.poolName || ""; }, "DHCP pool removed")}>Remove</button>
+      </div>
+      <ServerTable columns={[{ key: "poolName", label: "Pool Name" }, { key: "defaultGateway", label: "Default Gateway" }, { key: "dnsServer", label: "DNS Server" }, { key: "startIp", label: "Start IP Address" }, { key: "subnetMask", label: "Subnet Mask" }, { key: "maxUsers", label: "Max User", width: "72px" }]} rows={cfg.pools || []} onSelect={(i) => setForm({ ...cfg.pools[i] })} />
+    </div>
+  );
+}
+
+function Dhcpv6Config({ cfg, onUpdate }) {
+  return (
+    <div className="server-section">
+      <h3>DHCPv6</h3>
+      <ServiceSwitch value={cfg.service} onChange={(v) => onUpdate((d, c) => { c.dhcpv6.service = v; d.services.dhcpv6 = v; }, `DHCPv6 service ${v ? "enabled" : "disabled"}`)} />
+      <div className="server-actions">
+        <button type="button" onClick={() => { const poolName = window.prompt("DHCPv6 pool name", "IPv6Pool"); if (!poolName) return; onUpdate((d, c) => { c.dhcpv6.pools.push({ poolName, dnsServer: "", domainName: "" }); }, "DHCPv6 pool created"); }}>Create Pool</button>
+        <button type="button" onClick={() => onUpdate((d, c) => { c.dhcpv6.pools.pop(); }, "DHCPv6 pool removed")}>Remove Pool</button>
+      </div>
+      <h4>IPv6 Address Prefix</h4>
+      <ServerTable columns={[{ key: "prefix", label: "Prefix" }, { key: "length", label: "Prefix Length" }, { key: "valid", label: "Valid Lifetime" }, { key: "preferred", label: "Preferred Lifetime" }]} rows={cfg.prefixes || []} />
+      <h4>IPv6 Prefix-Delegation</h4>
+      <ServerTable columns={[{ key: "prefix", label: "Prefix" }, { key: "duid", label: "DUID" }, { key: "pool", label: "Local Pool" }, { key: "valid", label: "Valid Lifetime" }]} rows={cfg.delegations || []} />
+      <h4>IPv6 Local Pool</h4>
+      <ServerTable columns={[{ key: "poolName", label: "Pool Name" }, { key: "prefix", label: "Prefix" }, { key: "length", label: "Prefix Length" }]} rows={cfg.localPools || []} />
+    </div>
+  );
+}
+
+function TftpConfig({ cfg, onUpdate }) {
+  const [selected, setSelected] = useState(null);
+  return (
+    <div className="server-section">
+      <h3>TFTP</h3>
+      <ServiceSwitch value={cfg.service} onChange={(v) => onUpdate((d, c) => { c.tftp.service = v; d.services.tftp = v; }, `TFTP service ${v ? "enabled" : "disabled"}`)} />
+      <ServerTable columns={[{ key: "name", label: "File" }]} rows={(cfg.files || []).map((name) => ({ name }))} selectedIndex={selected} onSelect={setSelected} />
+      <div className="server-actions">
+        <button type="button" onClick={() => { const name = window.prompt("TFTP file name"); if (!name) return; onUpdate((d, c) => { c.tftp.files = [...new Set([...(c.tftp.files || []), name])]; d.files[`flash:${name}`] = d.files[`flash:${name}`] || ""; }, `${name} added`); }}>Add File</button>
+        <button type="button" disabled={selected == null} onClick={() => onUpdate((d, c) => { const [name] = c.tftp.files.splice(selected, 1); if (name) delete d.files[`flash:${name}`]; }, "TFTP file removed")}>Remove File</button>
+      </div>
+    </div>
+  );
+}
+
+function DnsConfig({ cfg, onUpdate }) {
+  const [record, setRecord] = useState({ name: "", type: "A Record", detail: "" });
+  const [selected, setSelected] = useState(null);
+  return (
+    <div className="server-section">
+      <h3>DNS</h3>
+      <ServiceSwitch label="DNS Service" value={cfg.service} onChange={(v) => onUpdate((d, c) => { c.dns.service = v; d.services.dns = v; }, `DNS service ${v ? "enabled" : "disabled"}`)} />
+      <div className="server-form-grid compact">
+        <label>Name<input value={record.name} onChange={(e) => setRecord({ ...record, name: e.target.value })} /></label>
+        <label>Type<select value={record.type} onChange={(e) => setRecord({ ...record, type: e.target.value })}><option>A Record</option><option>AAAA Record</option><option>CNAME</option><option>MX</option></select></label>
+        <label className="span-2">Address<input value={record.detail} onChange={(e) => setRecord({ ...record, detail: e.target.value })} /></label>
+      </div>
+      <div className="server-actions">
+        <button type="button" onClick={() => onUpdate((d, c) => { c.dns.records.push({ ...record, no: c.dns.records.length + 1 }); }, "DNS record added")}>Add</button>
+        <button type="button" onClick={() => onUpdate((d, c) => { if (selected != null) c.dns.records[selected] = { ...record, no: selected + 1 }; }, "DNS record saved")}>Save</button>
+        <button type="button" onClick={() => onUpdate((d, c) => { if (selected != null) c.dns.records.splice(selected, 1); }, "DNS record removed")}>Remove</button>
+      </div>
+      <ServerTable columns={[{ key: "no", label: "No.", width: "56px" }, { key: "name", label: "Name" }, { key: "type", label: "Type" }, { key: "detail", label: "Detail" }]} rows={cfg.records || []} selectedIndex={selected} onSelect={(i) => { setSelected(i); setRecord({ ...cfg.records[i] }); }} />
+      <button className="server-inline-button" type="button" onClick={() => onUpdate((d, c) => { c.dns.cacheClearedAt = Date.now(); }, "DNS cache cleared")}>DNS Cache</button>
+    </div>
+  );
+}
+
+function SyslogConfig({ cfg, onUpdate, device }) {
+  const logs = cfg.logs?.length ? cfg.logs : (device.logging || []);
+  return (
+    <div className="server-section">
+      <h3>Syslog</h3>
+      <ServiceSwitch value={cfg.service} onChange={(v) => onUpdate((d, c) => { c.syslog.service = v; d.services.syslog = v; }, `Syslog service ${v ? "enabled" : "disabled"}`)} />
+      <ServerTable columns={[{ key: "time", label: "Time" }, { key: "host", label: "HostName" }, { key: "message", label: "Message" }]} rows={logs} empty="No syslog messages" />
+      <div className="server-actions"><button type="button" onClick={() => onUpdate((d, c) => { c.syslog.logs = []; d.logging = []; }, "Syslog cleared")}>Clear Log</button></div>
+    </div>
+  );
+}
+
+function AaaConfig({ cfg, onUpdate }) {
+  const [client, setClient] = useState({ clientName: "", clientIp: "", serverType: "Radius", key: "" });
+  const [user, setUser] = useState({ username: "", password: "" });
+  return (
+    <div className="server-section">
+      <h3>AAA</h3>
+      <div className="server-service-row wide">
+        <span>Service</span>
+        <label><input type="radio" checked={!!cfg.service} onChange={() => onUpdate((d, c) => { c.aaa.service = true; d.services.aaa = true; }, "AAA enabled")} /> On</label>
+        <label><input type="radio" checked={!cfg.service} onChange={() => onUpdate((d, c) => { c.aaa.service = false; d.services.aaa = false; }, "AAA disabled")} /> Off</label>
+        <label>Radius Port<input value={cfg.radiusPort || "1645"} onChange={(e) => onUpdate((d, c) => { c.aaa.radiusPort = e.target.value; }, "Radius port updated")} /></label>
+      </div>
+      <h4>Network Configuration</h4>
+      <div className="server-form-grid compact">
+        <label>Client Name<input value={client.clientName} onChange={(e) => setClient({ ...client, clientName: e.target.value })} /></label>
+        <label>Client IP<input value={client.clientIp} onChange={(e) => setClient({ ...client, clientIp: e.target.value })} /></label>
+        <label>Secret<input value={client.key} onChange={(e) => setClient({ ...client, key: e.target.value })} /></label>
+        <label>ServerType<select value={client.serverType} onChange={(e) => setClient({ ...client, serverType: e.target.value })}><option>Radius</option><option>Tacacs+</option></select></label>
+      </div>
+      <div className="server-actions"><button type="button" onClick={() => onUpdate((d, c) => { c.aaa.clients.push(client); }, "AAA client added")}>Add</button></div>
+      <ServerTable columns={[{ key: "clientName", label: "Client Name" }, { key: "clientIp", label: "Client IP" }, { key: "serverType", label: "Server Type" }, { key: "key", label: "Key" }]} rows={cfg.clients || []} />
+      <h4>User Setup</h4>
+      <div className="server-form-grid compact">
+        <label>Username<input value={user.username} onChange={(e) => setUser({ ...user, username: e.target.value })} /></label>
+        <label>Password<input value={user.password} onChange={(e) => setUser({ ...user, password: e.target.value })} /></label>
+      </div>
+      <div className="server-actions"><button type="button" onClick={() => onUpdate((d, c) => { if (!user.username) return; c.aaa.users.push(user); d.users[user.username] = { secret: user.password }; }, "AAA user added")}>Add</button></div>
+      <ServerTable columns={[{ key: "username", label: "Username" }, { key: "password", label: "Password" }]} rows={cfg.users || []} />
+    </div>
+  );
+}
+
+function NtpConfig({ cfg, onUpdate }) {
+  return (
+    <div className="server-section">
+      <h3>NTP</h3>
+      <ServiceSwitch value={cfg.service} onChange={(v) => onUpdate((d, c) => { c.ntp.service = v; d.services.ntp = v; }, `NTP service ${v ? "enabled" : "disabled"}`)} />
+      <fieldset className="server-fieldset">
+        <legend>Authentication</legend>
+        <label><input type="radio" checked={!!cfg.auth} onChange={() => onUpdate((d, c) => { c.ntp.auth = true; }, "NTP authentication enabled")} /> Enable</label>
+        <label><input type="radio" checked={!cfg.auth} onChange={() => onUpdate((d, c) => { c.ntp.auth = false; }, "NTP authentication disabled")} /> Disable</label>
+        <label>Key<input value={cfg.key || ""} onChange={(e) => onUpdate((d, c) => { c.ntp.key = e.target.value; }, "NTP key updated")} /></label>
+        <label>Password<input value={cfg.password || ""} onChange={(e) => onUpdate((d, c) => { c.ntp.password = e.target.value; }, "NTP password updated")} /></label>
+      </fieldset>
+      <div className="server-form-grid compact">
+        <label>Date<input type="date" value={cfg.date || ""} onChange={(e) => onUpdate((d, c) => { c.ntp.date = e.target.value; }, "NTP date updated")} /></label>
+        <label>Time<input type="time" step="1" value={cfg.time || ""} onChange={(e) => onUpdate((d, c) => { c.ntp.time = e.target.value; }, "NTP time updated")} /></label>
+      </div>
+    </div>
+  );
+}
+
+function EmailConfig({ cfg, onUpdate }) {
+  const [user, setUser] = useState({ username: "", password: "" });
+  return (
+    <div className="server-section">
+      <h3>EMAIL</h3>
+      <div className="server-two-col">
+        <ServiceSwitch label="SMTP Service" value={cfg.smtp} onChange={(v) => onUpdate((d, c) => { c.email.smtp = v; d.services.smtp = v; }, `SMTP ${v ? "enabled" : "disabled"}`)} />
+        <ServiceSwitch label="POP3 Service" value={cfg.pop3} onChange={(v) => onUpdate((d, c) => { c.email.pop3 = v; d.services.pop3 = v; }, `POP3 ${v ? "enabled" : "disabled"}`)} />
+      </div>
+      <label className="server-wide-label">Domain Name:<input value={cfg.domain || ""} onChange={(e) => onUpdate((d, c) => { c.email.domain = e.target.value; }, "Email domain set")} /></label>
+      <h4>User Setup</h4>
+      <div className="server-form-grid compact">
+        <label>User<input value={user.username} onChange={(e) => setUser({ ...user, username: e.target.value })} /></label>
+        <label>Password<input value={user.password} onChange={(e) => setUser({ ...user, password: e.target.value })} /></label>
+      </div>
+      <div className="server-actions">
+        <button type="button" onClick={() => onUpdate((d, c) => { if (user.username) c.email.users.push(user); }, "Email user added")}>+</button>
+        <button type="button" onClick={() => onUpdate((d, c) => { c.email.users.pop(); }, "Email user removed")}>-</button>
+        <button type="button" onClick={() => onUpdate((d, c) => { const target = c.email.users.find((u) => u.username === user.username); if (target) target.password = user.password; }, "Email password changed")}>Change Password</button>
+      </div>
+      <ServerTable columns={[{ key: "username", label: "User" }, { key: "password", label: "Password" }]} rows={cfg.users || []} />
+    </div>
+  );
+}
+
+function FtpConfig({ cfg, onUpdate }) {
+  const [user, setUser] = useState({ username: "", password: "", permission: "R" });
+  const [selectedFile, setSelectedFile] = useState(null);
+  const togglePerm = (letter, checked) => setUser((u) => {
+    const next = checked ? [...new Set(`${u.permission}${letter}`.split(""))].join("") : u.permission.replace(letter, "");
+    return { ...u, permission: next };
+  });
+  return (
+    <div className="server-section">
+      <h3>FTP</h3>
+      <ServiceSwitch value={cfg.service} onChange={(v) => onUpdate((d, c) => { c.ftp.service = v; d.services.ftp = v; }, `FTP ${v ? "enabled" : "disabled"}`)} />
+      <h4>User Setup</h4>
+      <div className="server-form-grid compact">
+        <label>Username<input value={user.username} onChange={(e) => setUser({ ...user, username: e.target.value })} /></label>
+        <label>Password<input value={user.password} onChange={(e) => setUser({ ...user, password: e.target.value })} /></label>
+      </div>
+      <div className="server-checkbox-row">
+        {["W", "R", "D", "N", "L"].map((p) => <label key={p}><input type="checkbox" checked={user.permission.includes(p)} onChange={(e) => togglePerm(p, e.target.checked)} /> {({ W: "Write", R: "Read", D: "Delete", N: "Rename", L: "List" })[p]}</label>)}
+      </div>
+      <div className="server-actions"><button type="button" onClick={() => onUpdate((d, c) => { if (user.username) c.ftp.users.push(user); }, "FTP user added")}>Add</button></div>
+      <ServerTable columns={[{ key: "username", label: "Username" }, { key: "password", label: "Password" }, { key: "permission", label: "Permission" }]} rows={cfg.users || []} />
+      <ServerTable columns={[{ key: "name", label: "File" }]} rows={(cfg.files || []).map((name) => ({ name }))} selectedIndex={selectedFile} onSelect={setSelectedFile} />
+      <div className="server-actions"><button type="button" disabled={selectedFile == null} onClick={() => onUpdate((d, c) => { c.ftp.files.splice(selectedFile, 1); }, "FTP file removed")}>Remove</button></div>
+    </div>
+  );
+}
+
+function SimpleRegistryConfig({ title, section, cfg, onUpdate, serviceName }) {
+  return (
+    <div className="server-section">
+      <h3>{title}</h3>
+      {section === "iot" && <p className="server-note">This service runs on top of the HTTP or HTTPS service.</p>}
+      <ServiceSwitch value={cfg.service} onChange={(v) => onUpdate((d, c) => { c[section].service = v; d.services[serviceName] = v; }, `${title} ${v ? "enabled" : "disabled"}`)} />
+      <ServerTable columns={[{ key: "name", label: "Name" }, { key: "status", label: "Status" }]} rows={cfg.registrations || []} />
+      <ServerTable columns={[{ key: "id", label: "Device" }, { key: "status", label: "Status" }]} rows={cfg.devices || []} />
+      <div className="server-actions"><button type="button" onClick={() => onUpdate((d, c) => { c[section].registrations = []; c[section].devices = []; }, `${title} entries deleted`)}>Delete</button></div>
+    </div>
+  );
+}
+
+function VmConfig({ cfg, onUpdate }) {
+  return (
+    <div className="server-section">
+      <h3>VM Management</h3>
+      <ServiceSwitch value={cfg.service} onChange={(v) => onUpdate((d, c) => { c.vm.service = v; d.services.vm = v; }, `VM Management ${v ? "enabled" : "disabled"}`)} />
+      <ServerTable columns={[{ key: "vm", label: "VM" }, { key: "status", label: "Status" }]} rows={cfg.vms || []} />
+    </div>
+  );
+}
+
+function RadiusEapConfig({ cfg, onUpdate }) {
+  return (
+    <div className="server-section">
+      <h3>EAP Configuration</h3>
+      <label className="server-check"><input type="checkbox" checked={!!cfg.allowEapMd5} onChange={(e) => onUpdate((d, c) => { c.radiusEap.allowEapMd5 = e.target.checked; d.services.radius = e.target.checked; }, `EAP-MD5 ${e.target.checked ? "allowed" : "disabled"}`)} /> Allow EAP-MD5</label>
+    </div>
+  );
+}
+
+function PrpConfig({ cfg, onUpdate }) {
+  return (
+    <div className="server-section">
+      <h3>PRP Configuration</h3>
+      <label className="server-check"><input type="checkbox" checked={!!cfg.enabled} onChange={(e) => onUpdate((d, c) => { c.prp.enabled = e.target.checked; d.services.prp = e.target.checked; }, `PRP ${e.target.checked ? "enabled" : "disabled"}`)} /> Enable PRP</label>
+    </div>
+  );
+}
+
+function ServerDesktopPanel() {
+  return (
+    <div className="server-desktop-panel" aria-label="Server Desktop tools">
+      {SERVER_DESKTOP_APPS.map(([key, label, glyph]) => (
+        <div key={key} className="server-desktop-app" aria-disabled="true" title={`${label} (not implemented yet)`}>
+          <div className={`server-desktop-icon ${key}`}><span>{glyph}</span></div>
+          <span>{label}</span>
+        </div>
+      ))}
+    </div>
+  );
+}
+
 function ContextMenu({ x, y, device, onClose, onAction }) {
   const ref = useRef(null);
   useEffect(() => {
@@ -4100,6 +4680,7 @@ function ContextMenu({ x, y, device, onClose, onAction }) {
   const W = 240, H = 320;
   const px = Math.min(x, vw - W - 8);
   const py = Math.min(y, vh - H - 8);
+  const showDeviceCommands = device.kind !== "pc";
   return (
     <div className="ctxmenu" ref={ref} style={{ left: px, top: py }}>
       <div className="ctxmenu-head">
@@ -4112,6 +4693,12 @@ function ContextMenu({ x, y, device, onClose, onAction }) {
         </div>
         <div className="meta">{device.powered ? "ON" : "OFF"}</div>
       </div>
+      {device.kind === "server" && (
+        <div className="ctxmenu-item" onClick={() => onAction("server-module")}>
+          <span className="icn">{Icon.settings()}</span>
+          <span>Open Server Module</span>
+        </div>
+      )}
       <div className="ctxmenu-item" onClick={() => onAction("console")}>
         <span className="icn">{Icon.terminal()}</span>
         <span>Open Console</span>
@@ -4121,33 +4708,37 @@ function ContextMenu({ x, y, device, onClose, onAction }) {
         <span className="icn">{Icon.packet()}</span>
         <span>Send ping…</span>
       </div>
-      <div className="ctxmenu-sep"/>
-      <div className="ctxmenu-item" onClick={() => onAction("show-int")}>
-        <span className="icn">⌘</span>
-        <span>Show interfaces</span>
-      </div>
-      {OPT_Engine.isRouterLike?.(device) && (
-        <div className="ctxmenu-item" onClick={() => onAction("show-route")}>
-          <span className="icn">⌘</span>
-          <span>Show routing table</span>
-        </div>
+      {showDeviceCommands && (
+        <>
+          <div className="ctxmenu-sep"/>
+          <div className="ctxmenu-item" onClick={() => onAction("show-int")}>
+            <span className="icn">⌘</span>
+            <span>Show interfaces</span>
+          </div>
+          {OPT_Engine.isRouterLike?.(device) && (
+            <div className="ctxmenu-item" onClick={() => onAction("show-route")}>
+              <span className="icn">⌘</span>
+              <span>Show routing table</span>
+            </div>
+          )}
+          {OPT_Engine.isSwitchLike?.(device) && (
+            <div className="ctxmenu-item" onClick={() => onAction("show-vlan")}>
+              <span className="icn">⌘</span>
+              <span>Show VLANs</span>
+            </div>
+          )}
+          {OPT_Engine.isSwitchLike?.(device) && (
+            <div className="ctxmenu-item" onClick={() => onAction("show-mac")}>
+              <span className="icn">⌘</span>
+              <span>Show MAC address table</span>
+            </div>
+          )}
+          <div className="ctxmenu-item" onClick={() => onAction("show-run")}>
+            <span className="icn">⌘</span>
+            <span>Show running-config</span>
+          </div>
+        </>
       )}
-      {OPT_Engine.isSwitchLike?.(device) && (
-        <div className="ctxmenu-item" onClick={() => onAction("show-vlan")}>
-          <span className="icn">⌘</span>
-          <span>Show VLANs</span>
-        </div>
-      )}
-      {OPT_Engine.isSwitchLike?.(device) && (
-        <div className="ctxmenu-item" onClick={() => onAction("show-mac")}>
-          <span className="icn">⌘</span>
-          <span>Show MAC address table</span>
-        </div>
-      )}
-      <div className="ctxmenu-item" onClick={() => onAction("show-run")}>
-        <span className="icn">⌘</span>
-        <span>Show running-config</span>
-      </div>
       <div className="ctxmenu-sep"/>
       <div className="ctxmenu-item" onClick={() => onAction("power")}>
         <span className="icn">{Icon.power()}</span>
