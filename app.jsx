@@ -393,27 +393,58 @@ const SERVER_WEB_FILES = [
 ];
 
 const SERVER_DESKTOP_APPS = [
-  ["ip", "IP Configuration", "106"],
-  ["terminal", "Terminal", ">"],
-  ["cmd", "Command Prompt", "run"],
-  ["browser", "Web Browser", "http:"],
-  ["wireless", "PC Wireless", "ANT"],
-  ["vpn", "VPN", "VPN"],
-  ["accounting", "AAA Accounting", "AAA"],
-  ["traffic", "Traffic Generator", "+mail"],
-  ["mib", "MIB Browser", "MIB"],
-  ["communicator", "Cisco IP Communicator", "HEAD"],
-  ["email", "Email", "mail"],
-  ["pppoe", "PPPoE Dialer", "modem"],
-  ["editor", "Text Editor", "text"],
-  ["firewall", "Firewall", "IPv4"],
-  ["ipv6firewall", "IPv6 Firewall", "IPv6"],
-  ["netflow", "Netflow Collector", "chart"],
-  ["iox", "IoX IDE", "SDK"],
-  ["ssh", "Telnet / SSH Client", ">lock"],
-  ["iotmon", "IoT Monitor", "cloud"],
-  ["iotide", "IoT IDE", "cloud"],
+  { key: "ip", label: "IP Configuration", kind: "Network" },
+  { key: "browser", label: "Web Browser", kind: "Application" },
+  { key: "wireless", label: "PC Wireless", kind: "Network" },
+  { key: "vpn", label: "VPN", kind: "Security" },
+  { key: "accounting", label: "AAA Accounting", kind: "Logs" },
+  { key: "traffic", label: "Traffic Generator", kind: "Utility" },
+  { key: "mib", label: "MIB Browser", kind: "Application" },
+  { key: "communicator", label: "Cisco IP Communicator", kind: "Voice" },
+  { key: "email", label: "Email", kind: "Application" },
+  { key: "pppoe", label: "PPPoE Dialer", kind: "Network" },
+  { key: "editor", label: "Text Editor", kind: "Application" },
+  { key: "firewall", label: "Firewall", kind: "Security" },
+  { key: "ipv6firewall", label: "IPv6 Firewall", kind: "Security" },
+  { key: "netflow", label: "Netflow Collector", kind: "Analytics" },
+  { key: "iox", label: "IoX IDE", kind: "Developer" },
+  { key: "iotmon", label: "IoT Monitor", kind: "IoT" },
+  { key: "iotide", label: "IoT IDE", kind: "IoT" },
 ];
+
+const ENDPOINT_DESKTOP_APPS = [
+  { key: "ip", label: "IP Configuration", kind: "Network" },
+  { key: "dialup", label: "Dial-up", kind: "Network" },
+  { key: "browser", label: "Web Browser", kind: "Application" },
+  { key: "wireless", label: "PC Wireless", kind: "Network" },
+  { key: "vpn", label: "VPN", kind: "Security" },
+  { key: "traffic", label: "Traffic Generator", kind: "Utility" },
+  { key: "mib", label: "MIB Browser", kind: "Application" },
+  { key: "communicator", label: "Cisco IP Communicator", kind: "Voice" },
+  { key: "email", label: "Email", kind: "Application" },
+  { key: "pppoe", label: "PPPoE Dialer", kind: "Network" },
+  { key: "editor", label: "Text Editor", kind: "Application" },
+  { key: "firewall", label: "Firewall", kind: "Security" },
+  { key: "ipv6firewall", label: "IPv6 Firewall", kind: "Security" },
+  { key: "netflow", label: "Netflow Collector", kind: "Analytics" },
+  { key: "iox", label: "IoX IDE", kind: "Developer" },
+  { key: "tftp", label: "TFTP Service", kind: "Service" },
+  { key: "bluetooth", label: "Bluetooth", kind: "Network" },
+  { key: "iotmon", label: "IoT Monitor", kind: "IoT" },
+  { key: "iotide", label: "IoT IDE", kind: "IoT" },
+];
+
+function isEndpointAppsDevice(device) {
+  return device?.kind === "pc" || device?.kind === "laptop";
+}
+
+function endpointAppByKey(key) {
+  return ENDPOINT_DESKTOP_APPS.find((app) => app.key === key) || null;
+}
+
+function endpointAppTabId(wid, deviceId, appKey) {
+  return `app:${wid}:${deviceId}:${appKey}`;
+}
 
 function defaultServerConfig(device = {}) {
   const services = device.services || {};
@@ -698,6 +729,25 @@ function App() {
   const [serverModuleOpen, setServerModuleOpen] = useState(false);
   const [serverModuleTab, setServerModuleTab] = useState("config");
   const [serverConfigSection, setServerConfigSection] = useState("http");
+  const [serverModuleWidth, setServerModuleWidth] = useState(() => {
+    try {
+      const saved = Number(localStorage.getItem("openpt:server-module-width"));
+      return Number.isFinite(saved) ? Math.max(430, Math.min(saved, 780)) : 680;
+    } catch (e) {
+      return 680;
+    }
+  });
+  const [appsSidebarOpen, setAppsSidebarOpen] = useState(false);
+  const [appsSidebarWidth, setAppsSidebarWidth] = useState(() => {
+    try {
+      const saved = Number(localStorage.getItem("openpt:apps-sidebar-width"));
+      return Number.isFinite(saved) ? Math.max(380, Math.min(saved, 560)) : 420;
+    } catch (e) {
+      return 420;
+    }
+  });
+  const [openAppTabs, setOpenAppTabs] = useState([]);
+  const [activeCenterTab, setActiveCenterTab] = useState("topology");
   const [cliGhostSuggestions, setCliGhostSuggestions] = useState(() => {
     try { return localStorage.getItem("openpt:cli-ghost") !== "0"; } catch (e) { return true; }
   });
@@ -709,6 +759,12 @@ function App() {
   useEffect(() => {
     latestTopologyRef.current = { devices, links };
   }, [devices, links]);
+  useEffect(() => {
+    try { localStorage.setItem("openpt:server-module-width", String(serverModuleWidth)); } catch (e) {}
+  }, [serverModuleWidth]);
+  useEffect(() => {
+    try { localStorage.setItem("openpt:apps-sidebar-width", String(appsSidebarWidth)); } catch (e) {}
+  }, [appsSidebarWidth]);
 
   useEffect(() => {
     try { localStorage.setItem("openpt:bottom-collapsed", bottomCollapsed ? "1" : "0"); } catch (e) {}
@@ -835,6 +891,8 @@ function App() {
     setPtActivity(snap?.ptActivity || null);
     setPtSidebarOpen(snap?.ptSidebarOpen ?? !!snap?.ptActivity);
     setServerModuleOpen(false);
+    setAppsSidebarOpen(false);
+    setActiveCenterTab("topology");
   };
   const newBlankTab = () => {
     setStarterScreenVisible(false);
@@ -845,6 +903,8 @@ function App() {
     setActiveWid(id);
     setDevices({}); setLinks([]); setSelectedId(null); setOpenConsoles([]); setActiveBottom("events"); setPtActivity(null); setPtSidebarOpen(false);
     setServerModuleOpen(false);
+    setAppsSidebarOpen(false);
+    setActiveCenterTab("topology");
     setCloudProjectId(null); setCloudVersion(0); setCloudBaseDoc(null); setCloudLease(null); setShareToken(null); setShareMode(null); setSyncStatus({ state: cloudUser ? "local" : "local", message: cloudUser ? "Signed in" : "Local only" });
   };
   const newStarterTab = () => {
@@ -859,6 +919,8 @@ function App() {
     skipNextSnapshot.current = true;
     setDevices(s.devices); setLinks(s.links); setSelectedId(null); setOpenConsoles([]); setActiveBottom("events"); setPtActivity(null); setPtSidebarOpen(false);
     setServerModuleOpen(false);
+    setAppsSidebarOpen(false);
+    setActiveCenterTab("topology");
     setCloudProjectId(null); setCloudVersion(0); setCloudBaseDoc(null); setCloudLease(null); setShareToken(null); setShareMode(null); setSyncStatus({ state: cloudUser ? "local" : "local", message: cloudUser ? "Signed in" : "Local only" });
     setDirtyTabs((m) => ({ ...m, [id]: true }));
     pushAppUndo("opened starter lab", before);
@@ -888,10 +950,13 @@ function App() {
       setActiveBottom((snap?.activeBottom && snap.activeBottom !== "pka-report") ? snap.activeBottom : "events");
       setPtActivity(snap?.ptActivity || null);
       setPtSidebarOpen(snap?.ptSidebarOpen ?? !!snap?.ptActivity);
+      setAppsSidebarOpen(false);
+      setActiveCenterTab("topology");
     } else {
       delete snapshotsRef.current[id];
     }
     setTabs(remaining);
+    setOpenAppTabs((items) => items.filter((item) => item.wid !== id));
     setDirtyTabs((m) => {
       const next = { ...m };
       delete next[id];
@@ -1108,6 +1173,8 @@ function App() {
     setPtSidebarOpen(document?.uiState?.ptSidebarOpen ?? !!document?.uiState?.ptActivity);
     setTopologyViewState(document?.uiState?.topologyViewState || {});
     setTerminalScrolls(document?.uiState?.terminalScrolls || {});
+    setAppsSidebarOpen(false);
+    setActiveCenterTab("topology");
     if (project) setTabs((ts) => mergeProjectIntoTabs(ts, activeWid, project));
   };
 
@@ -1498,11 +1565,23 @@ function App() {
     const startY = event.clientY;
     const startHeight = bottomPanelHeight;
     const startWidth = packetTracerSidebarWidth;
+    const startServerWidth = serverModuleWidth;
+    const startAppsWidth = appsSidebarWidth;
     document.body.classList.add("is-resizing-layout");
     const onMove = (moveEvent) => {
       if (kind === "sidebar") {
         const maxWidth = Math.max(300, Math.min(window.innerWidth * 0.48, window.innerWidth - 420));
         setPacketTracerSidebarWidth(Math.max(260, Math.min(maxWidth, startWidth + moveEvent.clientX - startX)));
+        return;
+      }
+      if (kind === "server") {
+        const maxWidth = Math.max(460, Math.min(window.innerWidth * 0.58, window.innerWidth - 420));
+        setServerModuleWidth(Math.max(430, Math.min(maxWidth, startServerWidth - (moveEvent.clientX - startX))));
+        return;
+      }
+      if (kind === "apps") {
+        const maxWidth = Math.max(360, Math.min(window.innerWidth * 0.44, window.innerWidth - 420));
+        setAppsSidebarWidth(Math.max(380, Math.min(maxWidth, startAppsWidth - (moveEvent.clientX - startX))));
         return;
       }
       const maxHeight = Math.max(180, window.innerHeight - 170);
@@ -2502,12 +2581,39 @@ function App() {
   };
   const openServerModule = (id) => {
     setSelectedId(id);
+    setAppsSidebarOpen(false);
     setServerModuleOpen(true);
     setServerModuleTab("config");
+    setActiveCenterTab("topology");
+  };
+  const openEndpointApp = (id, appKey) => {
+    const device = devices[id];
+    const app = endpointAppByKey(appKey);
+    if (!device || !isEndpointAppsDevice(device) || !app) return;
+    const tabId = endpointAppTabId(activeWid, id, app.key);
+    setSelectedId(id);
+    setServerModuleOpen(false);
+    setAppsSidebarOpen(true);
+    setOpenAppTabs((items) => (
+      items.some((item) => item.id === tabId)
+        ? items
+        : [...items, { id: tabId, wid: activeWid, deviceId: id, appKey: app.key }]
+    ));
+    setActiveCenterTab(tabId);
+  };
+  const closeEndpointApp = (tabId) => {
+    setOpenAppTabs((items) => items.filter((item) => item.id !== tabId));
+    setActiveCenterTab((cur) => cur === tabId ? "topology" : cur);
   };
   const openDeviceModule = (id) => {
     const device = devices[id];
     if (device?.kind === "server") openServerModule(id);
+    else if (isEndpointAppsDevice(device)) {
+      setSelectedId(id);
+      setServerModuleOpen(false);
+      setAppsSidebarOpen(true);
+      setActiveCenterTab("topology");
+    }
     else openConsole(id);
   };
   const consoleDevice = openConsole;
@@ -2517,6 +2623,17 @@ function App() {
       if (cur !== id) return cur;
       const remaining = openConsoles.filter(x => x !== id);
       return remaining.length ? remaining[remaining.length - 1] : "events";
+    });
+  };
+  const updateEndpointDevice = (id, mutator, message = "app settings updated") => {
+    if (!markProjectChanged("endpoint-app")) return;
+    setDevices((m) => {
+      const current = m[id];
+      if (!current) return m;
+      const nextDevice = cloneState(current);
+      mutator(nextDevice);
+      log("ok", current.hostname, message);
+      return { ...m, [id]: nextDevice };
     });
   };
 
@@ -2549,6 +2666,21 @@ function App() {
   }, [selectedIds, selectedLinkId, activeWid, devices, links]);
 
   const selected = selectedId ? devices[selectedId] : null;
+  const appsSelected = selected && isEndpointAppsDevice(selected);
+  const appTabsForWorkspace = openAppTabs.filter((item) => item.wid === activeWid && devices[item.deviceId]);
+  const activeAppTab = activeCenterTab === "topology" ? null : appTabsForWorkspace.find((item) => item.id === activeCenterTab);
+  const activeAppDevice = activeAppTab ? devices[activeAppTab.deviceId] : null;
+  const activeEndpointApp = activeAppTab ? endpointAppByKey(activeAppTab.appKey) : null;
+  useEffect(() => {
+    if (appsSidebarOpen && !appsSelected) setAppsSidebarOpen(false);
+  }, [appsSidebarOpen, appsSelected, selectedId]);
+  useEffect(() => {
+    setOpenAppTabs((items) => {
+      const next = items.filter((item) => item.wid !== activeWid || devices[item.deviceId]);
+      return next.length === items.length ? items : next;
+    });
+    if (activeCenterTab !== "topology" && !activeAppTab) setActiveCenterTab("topology");
+  }, [devices, activeWid, activeCenterTab, activeAppTab]);
   const cnt = {
     routers: Object.values(devices).filter(d => OPT_Engine.isRouterLike?.(d) && !OPT_Engine.isSwitchLike?.(d)).length,
     switches: Object.values(devices).filter(d => OPT_Engine.isSwitchLike?.(d)).length,
@@ -2652,8 +2784,6 @@ function App() {
           )}
         </div>
         <div className="tb-actions">
-          <button className="tb-btn icon-only" title="Undo" disabled={!canUndo} onClick={undo}>↶</button>
-          <button className="tb-btn icon-only" title="Redo" disabled={!canRedo} onClick={redo}>↷</button>
           {(cloudProjectId || shareToken) && meaningfulChanges > 0 && cloudLease && (
             <button className="tb-btn primary" onClick={() => saveCloudNow({ force: true }).catch((err) => setToast({ kind: "err", msg: err.message || "Save failed" }))}>Save Now</button>
           )}
@@ -2689,6 +2819,8 @@ function App() {
         style={{
           "--bottom-panel-height": bottomCollapsed ? "32px" : `${bottomPanelHeight}px`,
           "--pt-sidebar-width": `${packetTracerSidebarWidth}px`,
+          "--server-module-width": `${serverModuleWidth}px`,
+          "--apps-sidebar-width": `${appsSidebarWidth}px`,
         }}
       >
         {/* (Labs/Diagnostics moved to top menus) */}
@@ -2724,8 +2856,8 @@ function App() {
             {tabs.map((tb) => (
               <div
                 key={tb.id}
-                className={`tab ${activeWid === tb.id ? "active" : ""} ${dirtyTabs[tb.id] ? "dirty" : ""}`}
-                onClick={() => switchTab(tb.id)}
+                className={`tab ${activeWid === tb.id && activeCenterTab === "topology" ? "active" : ""} ${dirtyTabs[tb.id] ? "dirty" : ""}`}
+                onClick={() => activeWid === tb.id ? setActiveCenterTab("topology") : switchTab(tb.id)}
               >
                 <span className="dot"/>
                 <span style={{ overflow: "hidden", textOverflow: "ellipsis" }}>{tb.name}</span>
@@ -2739,84 +2871,124 @@ function App() {
               </div>
             ))}
             <div className="tab-new" title="New blank tab" onClick={newBlankTab}>+</div>
+            {appTabsForWorkspace.map((item) => {
+              const dev = devices[item.deviceId];
+              const app = endpointAppByKey(item.appKey);
+              if (!dev || !app) return null;
+              return (
+                <div
+                  key={item.id}
+                  className={`tab app-page-tab ${activeCenterTab === item.id ? "active" : ""}`}
+                  onClick={() => setActiveCenterTab(item.id)}
+                  title={`${dev.hostname} - ${app.label}`}
+                >
+                  <AppLibraryIcon kind={app.key} className="tab-app-icon" />
+                  <span style={{ overflow: "hidden", textOverflow: "ellipsis" }}>{dev.hostname} - {app.label}</span>
+                  <span
+                    className="close"
+                    onClick={(e) => { e.stopPropagation(); closeEndpointApp(item.id); }}
+                    title="Close app"
+                  >×</span>
+                </div>
+              );
+            })}
             <div className="tab-spacer"/>
-            <div className="tab-tools">
+            {activeCenterTab === "topology" && <div className="tab-tools">
               <div className={`tab-tool ${linkMode ? "active" : ""}`} title="Cable mode (L)" onClick={() => setLinkMode(!linkMode)}>{Icon.link()}</div>
               <div className={`tab-tool ${packetMode ? "active" : ""}`} title="Packet mode (P)" onClick={() => setPacketMode(packetMode ? null : { stage: "src" })}>{Icon.packet()}</div>
-            </div>
+            </div>}
           </div>
 
-          <Topology
-            devices={devices}
-            links={links}
-            selectedIds={selectedIds}
-            onSelect={(id, additive) => selectDevice(id, additive)}
-            selectedLinkId={selectedLinkId}
-            onSelectLink={(id) => { setSelectedLinkId(id); if (id) setSelectedIds([]); }}
-            onMarqueeSelect={(ids, additive) => {
-              setSelectedLinkId(null);
-              setSelectedIds((current) => additive ? [...new Set([...current, ...ids])] : ids);
-            }}
-            onMoveStart={() => {
-              dragStartSnapRef.current = latestTopologyRef.current;
-              suppressHistoryRef.current = true;
-            }}
-            onMoveEnd={(moved) => {
-              const start = dragStartSnapRef.current;
-              suppressHistoryRef.current = false;
-              dragStartSnapRef.current = null;
-              if (!moved || !start) {
-                prevSnap.current = latestTopologyRef.current;
-                return;
-              }
-              const h = undoRef.current[activeWid] || (undoRef.current[activeWid] = { past: [], future: [] });
-              h.past.push(start);
-              if (h.past.length > 80) h.past.shift();
-              h.future = [];
-              prevSnap.current = latestTopologyRef.current;
-              setHistoryVersion((n) => n + 1);
-            }}
-            onMoveDevices={(idDeltas) => {
-              if (!markProjectChanged("move-devices")) return;
-              setDevices((m) => {
-                const next = { ...m };
-                for (const { id, x, y } of idDeltas) {
-                  if (next[id]) next[id] = { ...next[id], x, y };
+          {activeAppTab && activeAppDevice && activeEndpointApp ? (
+            <EndpointAppWorkspace
+              tab={activeAppTab}
+              app={activeEndpointApp}
+              device={activeAppDevice}
+              devices={devices}
+              links={links}
+              onClose={() => closeEndpointApp(activeAppTab.id)}
+              onUpdateDevice={(mutator, message) => updateEndpointDevice(activeAppDevice.id, mutator, message)}
+              onApplyCommand={(cmd) => onApplyToDevice(activeAppDevice.id, cmd)}
+              onPing={handlePing}
+              scrollState={terminalScrolls[activeAppTab.id] || terminalScrolls[activeAppDevice.id]}
+              onScrollStateChange={(devId, state) => setTerminalScrolls((m) => ({ ...m, [activeAppTab.id]: state }))}
+              historyState={cliHistory[activeAppTab.id] || {}}
+              onHistoryChange={(history) => setCliHistory((m) => ({ ...(m && !Array.isArray(m) ? m : {}), [activeAppTab.id]: history }))}
+              ghostSuggestions={cliGhostSuggestions}
+            />
+          ) : (
+            <Topology
+              devices={devices}
+              links={links}
+              selectedIds={selectedIds}
+              onSelect={(id, additive) => selectDevice(id, additive)}
+              selectedLinkId={selectedLinkId}
+              onSelectLink={(id) => { setSelectedLinkId(id); if (id) setSelectedIds([]); }}
+              onMarqueeSelect={(ids, additive) => {
+                setSelectedLinkId(null);
+                setSelectedIds((current) => additive ? [...new Set([...current, ...ids])] : ids);
+              }}
+              onMoveStart={() => {
+                dragStartSnapRef.current = latestTopologyRef.current;
+                suppressHistoryRef.current = true;
+              }}
+              onMoveEnd={(moved) => {
+                const start = dragStartSnapRef.current;
+                suppressHistoryRef.current = false;
+                dragStartSnapRef.current = null;
+                if (!moved || !start) {
+                  prevSnap.current = latestTopologyRef.current;
+                  return;
                 }
-                return next;
-              });
-            }}
-            onAddDevice={addDevice}
-            onDeleteLink={onDeleteLink}
-            linkMode={linkMode}
-            setLinkMode={setLinkMode}
-            forceLinkType={forceLinkType || "auto"}
-            packetMode={packetMode}
-            setPacketMode={setPacketMode}
-            onLinkRequest={onLinkRequest}
-            onPacketRequest={(srcId, dstId) => {
-              const dst = devices[dstId];
-              const target = Object.values(dst?.interfaces || {}).find(i => i.ip)?.ip;
-              if (!target) {
-                const msg = `${dst?.hostname || "destination"} has no IP address. Configure an interface IP before sending a packet.`;
-                setToast({ kind: "err", msg });
-                return log("err", "packet", msg);
-              }
-              handlePing(srcId, target);
-            }}
-            simRunning={simRunning}
-            packets={packets}
-            activeHopDeviceId={activeHopDeviceId}
-            viewState={topologyViewState}
-            onViewStateChange={setTopologyViewState}
-            starterScreenVisible={starterScreenVisible}
-            onCreateProject={createEmptyProjectFromStarterScreen}
-            onCreateStarter={newStarterTab}
-            onImportPacketTracer={openPacketTracerFilePicker}
-            onOpenConsole={openDeviceModule}
-            onContextMenu={(e, d) => setCtx({ x: e.clientX, y: e.clientY, devId: d.id })}
-            onLinkContextMenu={(e, l) => setCtx({ x: e.clientX, y: e.clientY, linkId: l.id })}
-          />
+                const h = undoRef.current[activeWid] || (undoRef.current[activeWid] = { past: [], future: [] });
+                h.past.push(start);
+                if (h.past.length > 80) h.past.shift();
+                h.future = [];
+                prevSnap.current = latestTopologyRef.current;
+                setHistoryVersion((n) => n + 1);
+              }}
+              onMoveDevices={(idDeltas) => {
+                if (!markProjectChanged("move-devices")) return;
+                setDevices((m) => {
+                  const next = { ...m };
+                  for (const { id, x, y } of idDeltas) {
+                    if (next[id]) next[id] = { ...next[id], x, y };
+                  }
+                  return next;
+                });
+              }}
+              onAddDevice={addDevice}
+              onDeleteLink={onDeleteLink}
+              linkMode={linkMode}
+              setLinkMode={setLinkMode}
+              forceLinkType={forceLinkType || "auto"}
+              packetMode={packetMode}
+              setPacketMode={setPacketMode}
+              onLinkRequest={onLinkRequest}
+              onPacketRequest={(srcId, dstId) => {
+                const dst = devices[dstId];
+                const target = Object.values(dst?.interfaces || {}).find(i => i.ip)?.ip;
+                if (!target) {
+                  const msg = `${dst?.hostname || "destination"} has no IP address. Configure an interface IP before sending a packet.`;
+                  setToast({ kind: "err", msg });
+                  return log("err", "packet", msg);
+                }
+                handlePing(srcId, target);
+              }}
+              simRunning={simRunning}
+              packets={packets}
+              activeHopDeviceId={activeHopDeviceId}
+              viewState={topologyViewState}
+              onViewStateChange={setTopologyViewState}
+              starterScreenVisible={starterScreenVisible}
+              onCreateProject={createEmptyProjectFromStarterScreen}
+              onCreateStarter={newStarterTab}
+              onImportPacketTracer={openPacketTracerFilePicker}
+              onOpenConsole={openDeviceModule}
+              onContextMenu={(e, d) => setCtx({ x: e.clientX, y: e.clientY, devId: d.id })}
+              onLinkContextMenu={(e, l) => setCtx({ x: e.clientX, y: e.clientY, linkId: l.id })}
+            />
+          )}
 
           <div className="bottom-panel">
             {!bottomCollapsed && (
@@ -2903,16 +3075,43 @@ function App() {
           </div>
         </div>
 
+        {appsSidebarOpen && appsSelected && (
+          <>
+            <div
+              className="apps-sidebar-resizer"
+              role="separator"
+              aria-orientation="vertical"
+              aria-label="Resize apps sidebar"
+              onPointerDown={(event) => beginResize("apps", event)}
+            />
+            <AppsSidebar
+              device={selected}
+              activeAppKey={activeAppTab?.deviceId === selected.id ? activeAppTab.appKey : null}
+              onOpenApp={(appKey) => openEndpointApp(selected.id, appKey)}
+              onClose={() => setAppsSidebarOpen(false)}
+            />
+          </>
+        )}
+
         {serverModuleOpen && selected?.kind === "server" && (
-          <ServerModuleSidebar
-            device={selected}
-            activeTab={serverModuleTab}
-            activeConfig={serverConfigSection}
-            onTabChange={setServerModuleTab}
-            onConfigChange={setServerConfigSection}
-            onUpdate={(mutator, message) => updateServerDevice(selected.id, mutator, message)}
-            onClose={() => setServerModuleOpen(false)}
-          />
+          <>
+            <div
+              className="server-module-resizer"
+              role="separator"
+              aria-orientation="vertical"
+              aria-label="Resize server module"
+              onPointerDown={(event) => beginResize("server", event)}
+            />
+            <ServerModuleSidebar
+              device={selected}
+              activeTab={serverModuleTab}
+              activeConfig={serverConfigSection}
+              onTabChange={setServerModuleTab}
+              onConfigChange={setServerConfigSection}
+              onUpdate={(mutator, message) => updateServerDevice(selected.id, mutator, message)}
+              onClose={() => setServerModuleOpen(false)}
+            />
+          </>
         )}
       </div>
 
@@ -3084,6 +3283,9 @@ function App() {
             switch (action) {
               case "server-module":
                 openServerModule(id); break;
+              case "apps":
+                openEndpointApp(id, "ip");
+                break;
               case "console":
                 openConsole(id); break;
               case "show-int":
@@ -4651,16 +4853,534 @@ function PrpConfig({ cfg, onUpdate }) {
   );
 }
 
+function AppsSidebar({ device, activeAppKey, onOpenApp, onClose }) {
+  const meta = DeviceCatalog.find(c => c.platform === device.platform && c.kind === device.kind) || DeviceCatalog.find(c => c.kind === device.kind) || DeviceCatalog[0];
+
+  return (
+    <aside className="apps-sidebar" aria-label={`${device.hostname} apps`}>
+      <div className="apps-head">
+        <div className="apps-device-mark" style={{ color: meta.color }}>
+          {React.createElement(Glyph[device.kind] || Glyph.pc, { size: 24 })}
+        </div>
+        <div className="apps-title">
+          <span>{device.hostname}</span>
+          <small>Apps</small>
+        </div>
+        <button className="apps-close" type="button" onClick={onClose} title="Close apps">×</button>
+      </div>
+
+      <div className="apps-library" aria-label="App library">
+        {ENDPOINT_DESKTOP_APPS.map((item) => (
+          <button
+            key={item.key}
+            type="button"
+            className={`apps-card ${activeAppKey === item.key ? "active" : ""}`}
+            onClick={() => onOpenApp(item.key)}
+            title={item.label}
+          >
+            <AppLibraryIcon kind={item.key} />
+            <span>{item.label}</span>
+          </button>
+        ))}
+      </div>
+    </aside>
+  );
+}
+
+function EndpointAppWorkspace({
+  tab, app, device, devices, links, onClose, onUpdateDevice, onApplyCommand, onPing,
+  scrollState, onScrollStateChange, historyState, onHistoryChange, ghostSuggestions,
+}) {
+  const isCliApp = app.action === "console";
+  return (
+    <div className="endpoint-app-page">
+      <div className="endpoint-app-head">
+        <AppLibraryIcon kind={app.key} />
+        <div className="endpoint-app-title">
+          <span>{device.hostname} - {app.label}</span>
+          <small>{app.kind}</small>
+        </div>
+        <button type="button" className="endpoint-app-close" onClick={onClose} title="Close app">×</button>
+      </div>
+      {isCliApp ? (
+        <div className="endpoint-cli-panel">
+          <CLI
+            device={device}
+            devices={devices}
+            links={links}
+            onApply={onApplyCommand}
+            onPing={onPing}
+            pendingCmd={null}
+            active={true}
+            scrollState={scrollState}
+            onScrollStateChange={onScrollStateChange}
+            historyState={historyState}
+            onHistoryChange={onHistoryChange}
+            ghostSuggestions={ghostSuggestions}
+          />
+        </div>
+      ) : (
+        <EndpointAppBody tab={tab} app={app} device={device} onUpdateDevice={onUpdateDevice} />
+      )}
+    </div>
+  );
+}
+
+function EndpointAppBody({ app, device, onUpdateDevice }) {
+  if (app.key === "ip" || app.key === "wireless") {
+    return <EndpointIpApp app={app} device={device} preferWireless={app.key === "wireless"} onUpdateDevice={onUpdateDevice} />;
+  }
+  if (app.key === "editor") {
+    return <EndpointTextEditorApp device={device} onUpdateDevice={onUpdateDevice} />;
+  }
+  if (app.key === "browser") {
+    return <EndpointBrowserApp app={app} device={device} onUpdateDevice={onUpdateDevice} />;
+  }
+  if (app.key === "email") {
+    return <EndpointEmailApp app={app} device={device} onUpdateDevice={onUpdateDevice} />;
+  }
+  return <EndpointUtilityApp app={app} device={device} onUpdateDevice={onUpdateDevice} />;
+}
+
+function appSettings(device, key) {
+  return device.appSettings?.[key] || {};
+}
+
+function setAppSetting(key, field, value) {
+  return (device) => {
+    device.appSettings = device.appSettings || {};
+    device.appSettings[key] = { ...(device.appSettings[key] || {}), [field]: value };
+  };
+}
+
+function EndpointIpApp({ app, device, preferWireless, onUpdateDevice }) {
+  const ifaceNames = Object.keys(device.interfaces || {});
+  const preferred = preferWireless && device.interfaces?.wlan0 ? "wlan0" : (device.interfaces?.eth0 ? "eth0" : ifaceNames[0]);
+  const [ifaceNameValue, setIfaceNameValue] = useState(preferred);
+  useEffect(() => {
+    if (!device.interfaces?.[ifaceNameValue]) setIfaceNameValue(preferred);
+  }, [device.id, preferred, ifaceNameValue]);
+  const ifc = device.interfaces?.[ifaceNameValue] || {};
+  const updateIface = (field, value) => onUpdateDevice((d) => {
+    d.interfaces[ifaceNameValue] = { ...(d.interfaces[ifaceNameValue] || {}), [field]: value || null };
+  }, `${ifaceName(ifaceNameValue)} ${field} updated`);
+  const setDhcp = (enabled) => onUpdateDevice((d) => {
+    d.interfaces[ifaceNameValue] = { ...(d.interfaces[ifaceNameValue] || {}), dhcp: enabled };
+  }, `${ifaceName(ifaceNameValue)} DHCP ${enabled ? "enabled" : "disabled"}`);
+  return (
+    <div className="endpoint-app-body">
+      <div className="endpoint-form-panel wide">
+        <div className="endpoint-panel-title">{app.label}</div>
+        <div className="endpoint-form-grid">
+          <label>Interface
+            <select value={ifaceNameValue || ""} onChange={(e) => setIfaceNameValue(e.target.value)}>
+              {ifaceNames.map((name) => <option key={name} value={name}>{ifaceName(name)}</option>)}
+            </select>
+          </label>
+          <label>Assignment
+            <select value={ifc.dhcp ? "dhcp" : "static"} onChange={(e) => setDhcp(e.target.value === "dhcp")}>
+              <option value="static">Static</option>
+              <option value="dhcp">DHCP</option>
+            </select>
+          </label>
+          <label>IPv4 Address<input value={ifc.ip || ""} onChange={(e) => updateIface("ip", e.target.value)} placeholder="192.168.1.10" /></label>
+          <label>Subnet Mask<input value={ifc.mask || ""} onChange={(e) => updateIface("mask", e.target.value)} placeholder="255.255.255.0" /></label>
+          <label>Default Gateway<input value={ifc.gw || ""} onChange={(e) => updateIface("gw", e.target.value)} placeholder="192.168.1.1" /></label>
+          <label>DNS Server<input value={ifc.dns || ""} onChange={(e) => updateIface("dns", e.target.value)} placeholder="8.8.8.8" /></label>
+          {preferWireless && <label>SSID<input value={ifc.ssid || ""} onChange={(e) => updateIface("ssid", e.target.value)} placeholder="OpenPT-WLAN" /></label>}
+          {preferWireless && <label>Authentication<input value={ifc.auth || ""} onChange={(e) => updateIface("auth", e.target.value)} placeholder="WPA2-PSK" /></label>}
+        </div>
+      </div>
+      <EndpointInterfaceSummary device={device} />
+    </div>
+  );
+}
+
+function EndpointInterfaceSummary({ device }) {
+  const rows = Object.entries(device.interfaces || {}).map(([name, ifc]) => ({
+    name,
+    ip: ifc.ip || "unassigned",
+    mask: ifc.mask || "unassigned",
+    gw: ifc.gw || "unassigned",
+    mac: ifc.mac || "unknown",
+    state: ifc.admUp === false ? "admin down" : (ifc.up ? "up" : "down"),
+  }));
+  return (
+    <div className="endpoint-table-panel">
+      <div className="endpoint-panel-title">Interfaces</div>
+      <div className="endpoint-table">
+        <div className="endpoint-table-head"><span>Interface</span><span>Address</span><span>Gateway</span><span>State</span></div>
+        {rows.map((row) => (
+          <div key={row.name} className="endpoint-table-row">
+            <span title={row.name}>{ifaceName(row.name)}</span>
+            <span title={`${row.ip} / ${row.mask}`}>{row.ip}</span>
+            <span title={row.gw}>{row.gw}</span>
+            <span className={row.state === "up" ? "up" : ""}>{row.state}</span>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function EndpointTextEditorApp({ device, onUpdateDevice }) {
+  const files = device.files || {};
+  const name = appSettings(device, "editor").file || "desktop:notes.txt";
+  const content = files[name] || "";
+  const saveName = (value) => onUpdateDevice((d) => {
+    const prev = d.appSettings?.editor?.file || "desktop:notes.txt";
+    d.appSettings = d.appSettings || {};
+    d.appSettings.editor = { ...(d.appSettings.editor || {}), file: value };
+    d.files = d.files || {};
+    if (!d.files[value]) d.files[value] = d.files[prev] || "";
+  }, "Text Editor file selected");
+  return (
+    <div className="endpoint-app-body single">
+      <div className="endpoint-form-panel fill">
+        <div className="endpoint-panel-title">Text Editor</div>
+        <label className="endpoint-wide-label">File<input value={name} onChange={(e) => saveName(e.target.value || "desktop:notes.txt")} /></label>
+        <textarea
+          className="endpoint-textarea"
+          value={content}
+          onChange={(e) => onUpdateDevice((d) => {
+            d.files = d.files || {};
+            d.files[name] = e.target.value;
+          }, "Text Editor saved")}
+        />
+      </div>
+    </div>
+  );
+}
+
+function EndpointBrowserApp({ app, device, onUpdateDevice }) {
+  const settings = appSettings(device, app.key);
+  const url = settings.url || "http://192.168.20.20";
+  return (
+    <div className="endpoint-app-body single">
+      <div className="endpoint-browser-panel">
+        <div className="endpoint-browser-bar">
+          <input value={url} onChange={(e) => onUpdateDevice(setAppSetting(app.key, "url", e.target.value), "Web Browser URL updated")} />
+          <button type="button" onClick={() => onUpdateDevice(setAppSetting(app.key, "lastLoaded", url), "Web Browser loaded")}>Go</button>
+        </div>
+        <div className="endpoint-browser-page">
+          <div className="endpoint-browser-url">{settings.lastLoaded || url}</div>
+          <h3>OpenPT Browser</h3>
+          <p>HTTP requests from {device.hostname} use this target address in simulations and notes.</p>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function EndpointEmailApp({ app, device, onUpdateDevice }) {
+  const settings = appSettings(device, app.key);
+  const set = (field, value) => onUpdateDevice(setAppSetting(app.key, field, value), "Email updated");
+  return (
+    <div className="endpoint-app-body">
+      <div className="endpoint-form-panel">
+        <div className="endpoint-panel-title">Account</div>
+        <div className="endpoint-form-grid">
+          <label>Email Address<input value={settings.address || ""} onChange={(e) => set("address", e.target.value)} placeholder={`${device.hostname.toLowerCase()}@openpt.local`} /></label>
+          <label>Incoming Server<input value={settings.pop3 || ""} onChange={(e) => set("pop3", e.target.value)} placeholder="192.168.20.20" /></label>
+          <label>Outgoing Server<input value={settings.smtp || ""} onChange={(e) => set("smtp", e.target.value)} placeholder="192.168.20.20" /></label>
+          <label>Password<input value={settings.password || ""} onChange={(e) => set("password", e.target.value)} placeholder="password" /></label>
+        </div>
+      </div>
+      <div className="endpoint-form-panel">
+        <div className="endpoint-panel-title">Compose</div>
+        <div className="endpoint-form-grid">
+          <label>To<input value={settings.to || ""} onChange={(e) => set("to", e.target.value)} /></label>
+          <label>Subject<input value={settings.subject || ""} onChange={(e) => set("subject", e.target.value)} /></label>
+        </div>
+        <textarea className="endpoint-textarea compact" value={settings.body || ""} onChange={(e) => set("body", e.target.value)} />
+      </div>
+    </div>
+  );
+}
+
+function EndpointUtilityApp({ app, device, onUpdateDevice }) {
+  const settings = appSettings(device, app.key);
+  const spec = endpointUtilitySpec(app.key);
+  const set = (field, value) => onUpdateDevice(setAppSetting(app.key, field, value), `${app.label} updated`);
+  return (
+    <div className="endpoint-app-body">
+      <div className="endpoint-form-panel">
+        <div className="endpoint-panel-title">{app.label}</div>
+        <div className="endpoint-form-grid">
+          {spec.fields.map((field) => (
+            <label key={field.key} className={field.type === "toggle" ? "endpoint-toggle-label" : ""}>
+              {field.type === "toggle" ? (
+                <><input type="checkbox" checked={!!settings[field.key]} onChange={(e) => set(field.key, e.target.checked)} /> {field.label}</>
+              ) : field.type === "select" ? (
+                <>{field.label}<select value={settings[field.key] || field.default || ""} onChange={(e) => set(field.key, e.target.value)}>{field.options.map((opt) => <option key={opt} value={opt}>{opt}</option>)}</select></>
+              ) : (
+                <>{field.label}<input value={settings[field.key] || ""} onChange={(e) => set(field.key, e.target.value)} placeholder={field.placeholder || ""} /></>
+              )}
+            </label>
+          ))}
+        </div>
+      </div>
+      <div className="endpoint-status-panel">
+        <AppLibraryIcon kind={app.key} />
+        <div>
+          <div className="endpoint-status-title">{spec.statusTitle}</div>
+          <p>{spec.statusText}</p>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function endpointUtilitySpec(key) {
+  const specs = {
+    dialup: { statusTitle: "Dial-up profile", statusText: "Stores modem dial details for lab workflows.", fields: [
+      { key: "number", label: "Dial Number", placeholder: "555-0100" },
+      { key: "username", label: "Username" },
+      { key: "password", label: "Password" },
+      { key: "enabled", label: "Connect automatically", type: "toggle" },
+    ] },
+    vpn: { statusTitle: "VPN profile", statusText: "Tracks tunnel parameters for remote access scenarios.", fields: [
+      { key: "server", label: "Server IP", placeholder: "203.0.113.10" },
+      { key: "group", label: "Group Name" },
+      { key: "username", label: "Username" },
+      { key: "connected", label: "Connected", type: "toggle" },
+    ] },
+    traffic: { statusTitle: "Traffic generator", statusText: "Use these values as the source profile for simulated traffic.", fields: [
+      { key: "destination", label: "Destination", placeholder: "192.168.20.20" },
+      { key: "protocol", label: "Protocol", type: "select", options: ["ICMP", "TCP", "UDP", "HTTP"], default: "ICMP" },
+      { key: "count", label: "Count", placeholder: "5" },
+      { key: "running", label: "Running", type: "toggle" },
+    ] },
+    mib: { statusTitle: "SNMP query", statusText: "Stores SNMP browser query settings.", fields: [
+      { key: "agent", label: "Agent IP", placeholder: "192.168.1.1" },
+      { key: "community", label: "Community", placeholder: "public" },
+      { key: "oid", label: "OID", placeholder: "1.3.6.1.2.1.1.1.0" },
+    ] },
+    communicator: { statusTitle: "IP communicator", statusText: "Tracks softphone registration details.", fields: [
+      { key: "extension", label: "Extension", placeholder: "1001" },
+      { key: "server", label: "Call Server", placeholder: "192.168.20.20" },
+      { key: "registered", label: "Registered", type: "toggle" },
+    ] },
+    pppoe: { statusTitle: "PPPoE session", statusText: "Stores broadband dialer credentials.", fields: [
+      { key: "service", label: "Service Name" },
+      { key: "username", label: "Username" },
+      { key: "password", label: "Password" },
+      { key: "connected", label: "Connected", type: "toggle" },
+    ] },
+    firewall: { statusTitle: "IPv4 firewall", statusText: "Endpoint firewall rules for IPv4 lab scenarios.", fields: [
+      { key: "enabled", label: "Firewall enabled", type: "toggle" },
+      { key: "defaultAction", label: "Default Action", type: "select", options: ["Allow", "Deny"], default: "Allow" },
+      { key: "rule", label: "Rule", placeholder: "deny tcp any any eq 80" },
+    ] },
+    ipv6firewall: { statusTitle: "IPv6 firewall", statusText: "Endpoint firewall rules for IPv6 lab scenarios.", fields: [
+      { key: "enabled", label: "Firewall enabled", type: "toggle" },
+      { key: "defaultAction", label: "Default Action", type: "select", options: ["Allow", "Deny"], default: "Allow" },
+      { key: "rule", label: "Rule", placeholder: "deny tcp any any eq 443" },
+    ] },
+    netflow: { statusTitle: "NetFlow collector", statusText: "Stores collector listener details.", fields: [
+      { key: "collector", label: "Collector IP", placeholder: "192.168.20.20" },
+      { key: "port", label: "UDP Port", placeholder: "2055" },
+      { key: "listening", label: "Listening", type: "toggle" },
+    ] },
+    iox: { statusTitle: "IoX workspace", statusText: "Tracks IoX project metadata for exercises.", fields: [
+      { key: "project", label: "Project Name" },
+      { key: "runtime", label: "Runtime", type: "select", options: ["Python", "Node.js", "Container"], default: "Python" },
+      { key: "deployed", label: "Deployed", type: "toggle" },
+    ] },
+    tftp: { statusTitle: "TFTP service", statusText: "Stores file sharing settings for endpoint labs.", fields: [
+      { key: "root", label: "Root Folder", placeholder: "desktop:/tftp" },
+      { key: "file", label: "File Name", placeholder: "config.txt" },
+      { key: "enabled", label: "Service enabled", type: "toggle" },
+    ] },
+    bluetooth: { statusTitle: "Bluetooth", statusText: "Stores local pairing state for wireless scenarios.", fields: [
+      { key: "enabled", label: "Bluetooth enabled", type: "toggle" },
+      { key: "device", label: "Paired Device" },
+      { key: "discoverable", label: "Discoverable", type: "toggle" },
+    ] },
+    iotmon: { statusTitle: "IoT monitor", statusText: "Tracks endpoint IoT monitoring settings.", fields: [
+      { key: "server", label: "Registration Server", placeholder: "192.168.20.20" },
+      { key: "zone", label: "Zone", placeholder: "Lab" },
+      { key: "monitoring", label: "Monitoring", type: "toggle" },
+    ] },
+    iotide: { statusTitle: "IoT IDE", statusText: "Stores the active IoT script profile.", fields: [
+      { key: "project", label: "Project Name" },
+      { key: "language", label: "Language", type: "select", options: ["JavaScript", "Python", "Blockly"], default: "JavaScript" },
+      { key: "deployed", label: "Deployed", type: "toggle" },
+    ] },
+  };
+  return specs[key] || { statusTitle: "Application settings", statusText: "Stores local application state for this endpoint.", fields: [
+    { key: "enabled", label: "Enabled", type: "toggle" },
+    { key: "server", label: "Server", placeholder: "192.168.20.20" },
+    { key: "notes", label: "Notes" },
+  ] };
+}
+
 function ServerDesktopPanel() {
   return (
     <div className="server-desktop-panel" aria-label="Server Desktop tools">
-      {SERVER_DESKTOP_APPS.map(([key, label, glyph]) => (
-        <div key={key} className="server-desktop-app" aria-disabled="true" title={`${label} (not implemented yet)`}>
-          <div className={`server-desktop-icon ${key}`}><span>{glyph}</span></div>
-          <span>{label}</span>
+      <div className="server-desktop-list" role="table" aria-label="Server desktop applications">
+        <div className="server-desktop-list-head" role="row">
+          <span>Name</span>
+          <span>Kind</span>
         </div>
-      ))}
+        {SERVER_DESKTOP_APPS.map((app) => (
+          <div key={app.key} className="server-desktop-row" role="row" aria-disabled="true" title={`${app.label} (not implemented yet)`}>
+            <span className="server-desktop-name" role="cell">
+              <AppLibraryIcon kind={app.key} className="server-desktop-icon" />
+              <span>{app.label}</span>
+            </span>
+            <span className="server-desktop-kind" role="cell">{app.kind}</span>
+          </div>
+        ))}
+      </div>
     </div>
+  );
+}
+
+function AppLibraryIcon({ kind, className = "app-library-icon" }) {
+  const iconKind = {
+    cmd: "terminal",
+    ssh: "terminal-lock",
+    browser: "globe",
+    mib: "globe",
+    dialup: "modem",
+    vpn: "shield-lock",
+    firewall: "shield",
+    ipv6firewall: "shield",
+    accounting: "list",
+    traffic: "send",
+    email: "mail",
+    communicator: "headset",
+    pppoe: "modem",
+    editor: "edit",
+    netflow: "chart",
+    iox: "cube",
+    tftp: "folder-network",
+    bluetooth: "bluetooth",
+    iotmon: "cloud-device",
+    iotide: "cloud-device",
+  }[kind] || kind;
+  return (
+    <span className={`${className} ${kind}`} aria-hidden="true">
+      <svg viewBox="0 0 32 32" focusable="false">
+        {iconKind === "ip" && (
+          <>
+            <rect x="5" y="7" width="22" height="18" rx="3" />
+            <path d="M9 12h6M9 17h14M9 21h10" />
+            <path d="M21 11l3 3-3 3" />
+          </>
+        )}
+        {iconKind === "terminal" && (
+          <>
+            <rect x="5" y="7" width="22" height="18" rx="3" />
+            <path d="M10 13l4 3-4 3M16 20h6" />
+          </>
+        )}
+        {iconKind === "terminal-lock" && (
+          <>
+            <rect x="5" y="7" width="22" height="18" rx="3" />
+            <path d="M9 13l4 3-4 3M15 20h4" />
+            <rect x="21" y="17" width="6" height="6" rx="1.2" />
+            <path d="M22.5 17v-2a1.5 1.5 0 013 0v2" />
+          </>
+        )}
+        {iconKind === "globe" && (
+          <>
+            <circle cx="16" cy="16" r="10" />
+            <path d="M6 16h20M16 6c3 3 4.5 6.3 4.5 10S19 23 16 26M16 6c-3 3-4.5 6.3-4.5 10S13 23 16 26" />
+          </>
+        )}
+        {iconKind === "wireless" && (
+          <>
+            <path d="M7 13a13 13 0 0118 0M11 17a7 7 0 0110 0M15 21a1.5 1.5 0 012 0" />
+            <path d="M16 22v4" />
+          </>
+        )}
+        {iconKind === "shield-lock" && (
+          <>
+            <path d="M16 4l10 4v7c0 6-4.2 10-10 13C10.2 25 6 21 6 15V8l10-4z" />
+            <rect x="12" y="15" width="8" height="7" rx="1.5" />
+            <path d="M13.5 15v-2a2.5 2.5 0 015 0v2" />
+          </>
+        )}
+        {iconKind === "shield" && (
+          <>
+            <path d="M16 4l10 4v7c0 6-4.2 10-10 13C10.2 25 6 21 6 15V8l10-4z" />
+            <path d="M11 16h10M16 10v12" />
+          </>
+        )}
+        {iconKind === "list" && (
+          <>
+            <rect x="6" y="6" width="20" height="20" rx="3" />
+            <path d="M11 12h10M11 17h10M11 22h7" />
+            <path d="M8.5 12h.1M8.5 17h.1M8.5 22h.1" />
+          </>
+        )}
+        {iconKind === "send" && (
+          <>
+            <path d="M5 16l21-9-6 19-4-8-8-2z" />
+            <path d="M16 18l5-6" />
+          </>
+        )}
+        {iconKind === "mail" && (
+          <>
+            <rect x="5" y="9" width="22" height="15" rx="3" />
+            <path d="M7 12l9 7 9-7" />
+          </>
+        )}
+        {iconKind === "headset" && (
+          <>
+            <path d="M8 17v-2a8 8 0 0116 0v2" />
+            <rect x="5" y="16" width="5" height="7" rx="2" />
+            <rect x="22" y="16" width="5" height="7" rx="2" />
+            <path d="M22 24c-1.5 2-3.8 3-7 3" />
+          </>
+        )}
+        {iconKind === "modem" && (
+          <>
+            <rect x="5" y="12" width="22" height="11" rx="3" />
+            <path d="M10 17h.1M14 17h.1M18 17h.1M22 17h.1M12 12l-2-5M20 12l2-5" />
+          </>
+        )}
+        {iconKind === "edit" && (
+          <>
+            <path d="M8 6h13l3 3v17H8z" />
+            <path d="M20 6v5h5M11 21l2.5-.5L23 11a2 2 0 00-3-3l-9.5 9.5L10 20z" />
+          </>
+        )}
+        {iconKind === "chart" && (
+          <>
+            <rect x="5" y="5" width="22" height="22" rx="3" />
+            <path d="M10 22v-5M16 22V11M22 22v-8" />
+          </>
+        )}
+        {iconKind === "cube" && (
+          <>
+            <path d="M16 4l10 6v12l-10 6-10-6V10l10-6z" />
+            <path d="M6 10l10 6 10-6M16 16v12" />
+          </>
+        )}
+        {iconKind === "cloud-device" && (
+          <>
+            <path d="M10 21H8a5 5 0 01.8-9.9A7 7 0 0122 12a4.5 4.5 0 01.5 9H20" />
+            <rect x="12" y="17" width="8" height="10" rx="2" />
+            <path d="M15 24h2" />
+          </>
+        )}
+        {iconKind === "folder-network" && (
+          <>
+            <path d="M5 10h8l2 3h12v12H5z" />
+            <path d="M9 21h14M16 17v8M11 25h10" />
+          </>
+        )}
+        {iconKind === "bluetooth" && (
+          <>
+            <path d="M14 5l7 6-7 6V5zM14 17l7 6-7 6V17z" />
+            <path d="M8 10l13 13M8 22l13-12" />
+          </>
+        )}
+      </svg>
+    </span>
   );
 }
 
@@ -4681,6 +5401,7 @@ function ContextMenu({ x, y, device, onClose, onAction }) {
   const px = Math.min(x, vw - W - 8);
   const py = Math.min(y, vh - H - 8);
   const showDeviceCommands = device.kind !== "pc";
+  const showApps = isEndpointAppsDevice(device);
   return (
     <div className="ctxmenu" ref={ref} style={{ left: px, top: py }}>
       <div className="ctxmenu-head">
@@ -4697,6 +5418,12 @@ function ContextMenu({ x, y, device, onClose, onAction }) {
         <div className="ctxmenu-item" onClick={() => onAction("server-module")}>
           <span className="icn">{Icon.settings()}</span>
           <span>Open Server Module</span>
+        </div>
+      )}
+      {showApps && (
+        <div className="ctxmenu-item" onClick={() => onAction("apps")}>
+          <span className="icn">{Icon.files()}</span>
+          <span>Open Apps</span>
         </div>
       )}
       <div className="ctxmenu-item" onClick={() => onAction("console")}>

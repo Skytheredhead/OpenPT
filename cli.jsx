@@ -4,6 +4,7 @@ const { OPT_Engine } = window;
 
 const COMMAND_HINTS = {
   user: ["enable", "show", "ping", "traceroute", "ipconfig", "services", "service", "exit"],
+  host: ["?", "help", "arp", "arp -a", "delete", "dir", "ftp", "ipconfig", "ipconfig /all", "ipconfig /release", "ipconfig /renew", "ipv6config", "netstat", "nslookup", "ping", "snmpget", "snmpgetbulk", "snmpset", "ssh", "telnet", "tracert", "services", "service", "exit"],
   priv: ["configure terminal", "show running-config", "show startup-config", "show version", "show ip interface brief", "show ip route", "show vlan brief", "show interfaces trunk", "show mac address-table", "show spanning-tree", "show etherchannel summary", "show port-security", "show ip dhcp snooping", "show ip arp inspection", "show ip ospf neighbor", "show ip protocols", "show access-lists", "show ip dhcp binding", "show ip nat translations", "show vrf", "show route-map", "show policy-map", "show ip sla summary", "show platform", "show inventory", "show license", "dir", "copy running-config startup-config", "write memory", "disable", "exit"],
   conf: ["hostname", "interface", "interface range", "vlan", "router ospf", "router eigrp", "router rip", "router bgp", "ip route", "ip routing", "ip dhcp pool", "ip dhcp excluded-address", "ip access-list", "access-list", "ip prefix-list", "route-map", "vrf definition", "ip nat pool", "ip nat inside source", "aaa new-model", "crypto key generate rsa", "ntp server", "snmp-server community", "logging host", "ip dhcp snooping", "ip arp inspection vlan", "monitor session", "class-map", "policy-map", "ip sla", "track", "username", "enable secret", "line console 0", "line vty 0 4", "service password-encryption", "end", "exit"],
   "conf-if": ["description", "ip address", "no ip address", "switchport mode access", "switchport mode trunk", "switchport access vlan", "switchport voice vlan", "switchport trunk allowed vlan", "switchport trunk native vlan", "switchport port-security", "channel-group", "ip dhcp snooping trust", "ip arp inspection trust", "ip access-group", "ip policy route-map", "ip nat inside", "ip nat outside", "service-policy input", "service-policy output", "encapsulation ppp", "encapsulation hdlc", "tunnel source", "tunnel destination", "storm-control", "spanning-tree portfast", "spanning-tree guard root", "shutdown", "no shutdown", "exit"],
@@ -37,6 +38,12 @@ const IOS_ABBREVIATION_SPECS = [
   ...[
     "ip address <word> <word> <word>", "ip dhcp", "dhcp", "ipconfig", "ipconfig /all", "show ip", "arp -a", "services", "service <word> <word>",
   ].map((pattern) => ({ modes: ["user"], pattern })),
+  ...[
+    "help", "?", "arp", "arp -a", "arp -d", "arp -d <word>", "delete <rest>", "dir", "ftp <word>", "ipconfig",
+    "ipconfig /all", "ipconfig /release", "ipconfig /renew", "ipconfig /?", "ipv6config", "ipv6config /all",
+    "netstat", "netstat -a", "netstat -r", "nslookup <word>", "ping <word>", "snmpget <rest>",
+    "snmpgetbulk <rest>", "snmpset <rest>", "ssh <rest>", "telnet <word>", "tracert <word>",
+  ].map((pattern) => ({ modes: ["host"], pattern })),
   ...[
     "configure terminal", "write memory", "write", "copy running-config startup-config", "copy run start", "erase startup-config",
     "write erase", "terminal length <word>",
@@ -218,7 +225,7 @@ function CLI({ device, devices = {}, links = [], onApply, onPing, pendingCmd, ac
   }
 
   function closestCommand(cmd) {
-    const key = mode.name === "conf-if-range" ? "conf-if" : mode.name;
+    const key = commandHintKey(mode, device);
     const pool = COMMAND_HINTS[key] || [];
     const first = String(cmd || "").split(/\s+/)[0].toLowerCase();
     if (!first) return "";
@@ -246,13 +253,13 @@ function CLI({ device, devices = {}, links = [], onApply, onPing, pendingCmd, ac
   }
 
   function showHelp() {
-    const key = mode.name === "conf-if-range" ? "conf-if" : mode.name;
+    const key = commandHintKey(mode, device);
     pushMany((COMMAND_HINTS[key] || []).map((h) => `  ${h}`), "dim");
   }
 
   function handle(raw, opts = {}) {
     const typed = raw.trim().replace(/\s+/g, " ");
-    const cmd = expandIosAbbreviations(typed, mode);
+    const cmd = expandIosAbbreviations(typed, mode, device);
     if (!opts.silent) setLines((l) => [...l, { cls: "input", text: `${promptFor()} ${typed}` }]);
     if (!cmd) return;
     if (cmd === "?" || cmd.endsWith(" ?")) return showHelp();
@@ -266,6 +273,7 @@ function CLI({ device, devices = {}, links = [], onApply, onPing, pendingCmd, ac
       return runPriv(inner);
     }
 
+    if (mode.name === "user" && isHostConsoleDevice(device)) return runHost(cmd);
     if (mode.name === "user" && (OPT_Engine.isHostLike?.(device) || device.kind === "server") && (cmd === "show ip" || cmd === "ipconfig" || cmd === "ipconfig /all" || cmd === "arp -a" || cmd === "ip dhcp" || cmd === "dhcp" || /^ip(?: address)? \S+ \S+ \S+$/.test(cmd))) return runHost(cmd);
     if (cmd.startsWith("show ") || cmd === "show") return runShow(cmd);
     if (cmd.startsWith("ping ")) return doPing(cmd.split(/\s+/)[1]);
@@ -327,6 +335,7 @@ function CLI({ device, devices = {}, links = [], onApply, onPing, pendingCmd, ac
 
   function runHost(cmd) {
     let m;
+    if (cmd === "?" || cmd === "help") return showHelp();
     if ((m = cmd.match(/^ip(?: address)? (\S+) (\S+) (\S+)$/))) {
       apply({ kind: "host-ip", ip: m[1], mask: m[2], gw: m[3] });
       return;
@@ -336,30 +345,226 @@ function CLI({ device, devices = {}, links = [], onApply, onPing, pendingCmd, ac
       return push("dim", "DHCP discovery sent on eth0.");
     }
     if (cmd === "ipconfig" || cmd === "ipconfig /all" || cmd === "show ip") {
-      const e = device.interfaces.eth0 || {};
-      push("", `IPv4 Address . . . . . . . . . . : ${e.ip || "unassigned"}`);
-      push("", `Subnet Mask . . . . . . . . . . . : ${e.mask || "unassigned"}`);
-      push("", `Default Gateway . . . . . . . . . : ${e.gw || "unassigned"}`);
-      push("", `Physical Address. . . . . . . . . : ${e.mac || "unknown"}`);
+      return showHostIpConfig(cmd === "ipconfig /all");
+    }
+    if (cmd === "ipconfig /release") {
+      apply({ kind: "host-ip", ip: null, mask: null, gw: null });
+      return push("dim", "Windows IP Configuration\n\nEthernet adapter eth0: IP address released.");
+    }
+    if (cmd === "ipconfig /renew") {
+      apply({ kind: "host-dhcp" });
+      return push("dim", "Windows IP Configuration\n\nEthernet adapter eth0: DHCP request sent.");
+    }
+    if (cmd === "ipconfig /?") {
+      return pushMany([
+        "USAGE: ipconfig [/all] [/release] [/renew]",
+        "  /all       Display full configuration information.",
+        "  /release   Release the IPv4 address for eth0.",
+        "  /renew     Renew the IPv4 address for eth0.",
+      ], "dim");
+    }
+    if (cmd === "ipv6config" || cmd === "ipv6config /all") {
+      return showHostIpv6Config(cmd === "ipv6config /all");
+    }
+    if (cmd === "arp" || cmd === "arp -a") {
+      return showHostArp();
+    }
+    if (cmd === "arp -d" || /^arp -d \S+$/.test(cmd)) {
+      push("dim", cmd === "arp -d" ? "ARP cache cleared." : `ARP entry ${cmd.split(/\s+/)[2]} deleted.`);
       return;
     }
-    if (cmd === "arp -a") {
-      const entries = Object.entries(device.arp || {});
-      if (!entries.length) return push("dim", "No ARP entries.");
-      entries.forEach(([ip, mac]) => push("", `${ip.padEnd(16)} ${mac}`));
-      return;
+    if (cmd === "dir") {
+      return showHostDir();
+    }
+    if ((m = cmd.match(/^delete (.+)$/))) {
+      const path = hostFileKey(m[1]);
+      apply({ kind: "file-delete", path });
+      return push("warn", `Deleted ${hostDisplayPath(path)}`);
+    }
+    if (cmd === "netstat" || cmd === "netstat -a" || cmd === "netstat -r") {
+      return showHostNetstat(cmd);
+    }
+    if ((m = cmd.match(/^nslookup (.+)$/))) {
+      return showHostNslookup(m[1]);
+    }
+    if ((m = cmd.match(/^ping (.+)$/))) {
+      return doPing(resolveHostTarget(m[1]) || m[1]);
+    }
+    if ((m = cmd.match(/^tracert (.+)$/))) {
+      return doPing(resolveHostTarget(m[1]) || m[1], true);
+    }
+    if ((m = cmd.match(/^ftp (.+)$/))) {
+      return runHostSession("ftp", m[1]);
+    }
+    if ((m = cmd.match(/^telnet (.+)$/))) {
+      return runHostSession("telnet", m[1]);
+    }
+    if ((m = cmd.match(/^ssh (.+)$/))) {
+      return runHostSession("ssh", m[1]);
+    }
+    if ((m = cmd.match(/^(snmpget|snmpgetbulk|snmpset) (.+)$/))) {
+      return runHostSnmp(m[1], m[2]);
+    }
+    if (cmd === "ftp" || cmd === "telnet" || cmd === "ssh" || cmd === "nslookup" || cmd === "snmpget" || cmd === "snmpgetbulk" || cmd === "snmpset") {
+      return push("err", usageForHostCommand(cmd));
     }
     if (cmd === "services" && device.kind === "server") {
-      for (const name of ["dhcp", "dns", "http", "tftp", "aaa", "radius", "syslog", "ntp"]) {
-        push("", `${name.padEnd(8)} ${device.services?.[name] ? "on" : "off"}`);
+      for (const name of hostServerServiceNames()) {
+        push("", `${name.padEnd(8)} ${hostServiceEnabled(device, name) ? "on" : "off"}`);
       }
       return;
     }
-    if ((m = cmd.match(/^service (dhcp|dns|http|tftp|aaa|radius|syslog|ntp) (on|off)$/)) && device.kind === "server") {
+    if ((m = cmd.match(/^service (dhcp|dns|http|https|ftp|tftp|aaa|radius|syslog|ntp|ssh|telnet|smtp|pop3) (on|off)$/)) && device.kind === "server") {
       apply({ kind: "service", name: m[1], value: m[2] === "on" });
       return push("ok", `${m[1]} ${m[2]}`);
     }
     invalid(cmd);
+  }
+
+  function primaryHostIface() {
+    return device.interfaces?.eth0 ? ["eth0", device.interfaces.eth0] : (Object.entries(device.interfaces || {}).find(([, i]) => i.ip) || Object.entries(device.interfaces || {})[0] || ["eth0", {}]);
+  }
+
+  function hostDnsServer() {
+    const [, e] = primaryHostIface();
+    if (e.dns) return e.dns;
+    const byGateway = Object.values(devices || {}).find((d) => d.kind === "server" && hostServiceEnabled(d, "dns") && Object.values(d.interfaces || {}).some((i) => i.ip === e.gw));
+    const dnsServer = byGateway || Object.values(devices || {}).find((d) => d.kind === "server" && hostServiceEnabled(d, "dns") && Object.values(d.interfaces || {}).some((i) => i.ip));
+    return Object.values(dnsServer?.interfaces || {}).find((i) => i.ip)?.ip || "";
+  }
+
+  function resolveHostTarget(target) {
+    const clean = String(target || "").trim().replace(/\.$/, "");
+    if (!clean) return "";
+    if (isIpv4(clean)) return clean;
+    const byDevice = deviceByIpOrName(clean);
+    if (byDevice) return Object.values(byDevice.interfaces || {}).find((i) => i.ip)?.ip || "";
+    for (const server of Object.values(devices || {})) {
+      if (!hostServiceEnabled(server, "dns")) continue;
+      for (const record of server.serverConfig?.dns?.records || []) {
+        const recordName = String(record.name || "").replace(/\.$/, "").toLowerCase();
+        const recordType = String(record.type || "").toLowerCase();
+        if (recordName === clean.toLowerCase() && (!recordType || recordType.includes("a record") || recordType === "a")) return record.detail || "";
+      }
+    }
+    return "";
+  }
+
+  function deviceByIpOrName(target) {
+    const clean = String(target || "").trim().replace(/\.$/, "").toLowerCase();
+    if (!clean) return null;
+    return Object.values(devices || {}).find((d) => {
+      if ([d.hostname, d.name, d.model].some((v) => String(v || "").toLowerCase() === clean)) return true;
+      return Object.values(d.interfaces || {}).some((i) => String(i.ip || "").toLowerCase() === clean);
+    }) || null;
+  }
+
+  function showHostIpConfig(all = false) {
+    push("", "Windows IP Configuration");
+    for (const [name, e] of Object.entries(device.interfaces || {})) {
+      push("", "");
+      push("", `Ethernet adapter ${shortIface(name)}:`);
+      if (all) {
+        push("", `   Connection-specific DNS Suffix  . : ${e.dnsSuffix || ""}`);
+        push("", `   Description . . . . . . . . . . . : ${device.model || "Packet Tracer PC"}`);
+        push("", `   Physical Address. . . . . . . . . : ${formatWindowsMac(e.mac)}`);
+        push("", `   DHCP Enabled. . . . . . . . . . . : ${e.dhcp ? "Yes" : "No"}`);
+      }
+      push("", `   IPv4 Address. . . . . . . . . . . : ${e.ip || "0.0.0.0"}`);
+      push("", `   Subnet Mask . . . . . . . . . . . : ${e.mask || "0.0.0.0"}`);
+      push("", `   Default Gateway . . . . . . . . . : ${e.gw || "0.0.0.0"}`);
+      if (all) push("", `   DNS Servers . . . . . . . . . . . : ${e.dns || hostDnsServer() || "0.0.0.0"}`);
+    }
+  }
+
+  function showHostIpv6Config(all = false) {
+    push("", "Windows IPv6 Configuration");
+    for (const [name, e] of Object.entries(device.interfaces || {})) {
+      const macPart = String(e.mac || "00:00:00:00:00:00").split(":").slice(-2).join("").toLowerCase();
+      const fallbackLinkLocal = `fe80::${macPart || "1"}`;
+      push("", "");
+      push("", `Ethernet adapter ${shortIface(name)}:`);
+      if (all) push("", `   Physical Address. . . . . . . . . : ${formatWindowsMac(e.mac)}`);
+      push("", `   Link-local IPv6 Address . . . . . : ${e.linkLocal || fallbackLinkLocal}`);
+      push("", `   IPv6 Address. . . . . . . . . . . : ${e.ipv6 || "unassigned"}`);
+      push("", `   Default Gateway . . . . . . . . . : ${e.ipv6Gw || "unassigned"}`);
+    }
+  }
+
+  function showHostArp() {
+    const entries = Object.entries(device.arp || {});
+    if (!entries.length) return push("dim", "No ARP entries.");
+    const [, e] = primaryHostIface();
+    push("", `Interface: ${e.ip || "0.0.0.0"} --- 0x1`);
+    push("dim", "  Internet Address      Physical Address      Type");
+    entries.forEach(([ip, mac]) => push("", `  ${ip.padEnd(20)}${formatWindowsMac(mac).padEnd(22)}dynamic`));
+  }
+
+  function showHostDir() {
+    const files = Object.entries(device.files || {});
+    push("", " Volume in drive C has no label.");
+    push("", " Directory of C:\\");
+    push("", "");
+    if (!files.length) return push("", "No files.");
+    files.forEach(([path, body]) => push("", `${hostDisplayPath(path).padEnd(28)}${String((body || "").length).padStart(10)} bytes`));
+  }
+
+  function showHostNetstat(cmd) {
+    if (cmd === "netstat -r") {
+      const [, e] = primaryHostIface();
+      push("", "IPv4 Route Table");
+      push("dim", "Network Destination        Netmask          Gateway       Interface");
+      if (e.ip && e.mask) push("", `${OPT_Engine.networkAddress(e.ip, e.mask).padEnd(27)}${e.mask.padEnd(17)}On-link       ${e.ip}`);
+      push("", `${"0.0.0.0".padEnd(27)}${"0.0.0.0".padEnd(17)}${(e.gw || "0.0.0.0").padEnd(14)}${e.ip || "0.0.0.0"}`);
+      return;
+    }
+    push("", "Active Connections");
+    push("dim", "  Proto  Local Address          Foreign Address        State");
+    const [, e] = primaryHostIface();
+    const ip = e.ip || "0.0.0.0";
+    const services = device.kind === "server" ? hostServerServiceNames().filter((name) => hostServiceEnabled(device, name)) : [];
+    if (!services.length) return push("", `  TCP    ${ip}:0`.padEnd(31) + "0.0.0.0:0              LISTENING");
+    services.forEach((name) => push("", `  TCP    ${`${ip}:${hostServicePort(name)}`.padEnd(23)}0.0.0.0:0              LISTENING`));
+  }
+
+  function showHostNslookup(name) {
+    const dns = hostDnsServer() || "0.0.0.0";
+    const resolved = resolveHostTarget(name);
+    push("", `Server:  ${dns === "0.0.0.0" ? "UnKnown" : dns}`);
+    push("", `Address: ${dns}`);
+    push("", "");
+    if (!resolved) return push("err", `*** ${dns} can't find ${name}: Non-existent domain`);
+    push("", `Name:    ${name}`);
+    push("", `Address: ${resolved}`);
+  }
+
+  function runHostSession(protocol, rest) {
+    const targetText = sessionTarget(protocol, rest);
+    if (!targetText) return push("err", usageForHostCommand(protocol));
+    const resolved = resolveHostTarget(targetText) || targetText;
+    const target = deviceByIpOrName(resolved);
+    const port = hostServicePort(protocol);
+    if (!target || !hostServiceEnabled(target, protocol)) {
+      push("", `Connecting To ${targetText}...`);
+      return push("err", `Could not open connection to the host, on port ${port}: Connect failed`);
+    }
+    push("ok", `Connected to ${target.hostname || targetText}.`);
+    if (protocol === "ftp") push("", "220 OpenPT FTP service ready\nUser (press Enter in this simulator):");
+    if (protocol === "telnet") push("", "OpenPT Telnet session established.\nConnection closed by foreign host.");
+    if (protocol === "ssh") push("", "OpenPT SSH session established.\nConnection closed.");
+  }
+
+  function runHostSnmp(command, rest) {
+    const parts = rest.trim().split(/\s+/);
+    const targetText = parts.find((p) => isIpv4(p) || deviceByIpOrName(p) || resolveHostTarget(p)) || parts[0];
+    if (!targetText) return push("err", usageForHostCommand(command));
+    const resolved = resolveHostTarget(targetText) || targetText;
+    const target = deviceByIpOrName(resolved);
+    if (!target || !hostServiceEnabled(target, "snmp")) return push("err", `Request timed out for ${targetText}.`);
+    const oid = parts.find((p) => /^\d+(?:\.\d+)+$/.test(p) || /^iso\./i.test(p)) || "1.3.6.1.2.1.1.1.0";
+    if (command === "snmpset") return push("ok", `${oid} = value set`);
+    if (command === "snmpgetbulk") return push("", `${oid}.1 = ${target.hostname || targetText}\n${oid}.2 = ${target.model || target.kind}`);
+    push("", `${oid} = ${target.hostname || targetText} ${target.model || target.kind}`);
   }
 
   function runGlobal(cmd) {
@@ -901,11 +1106,9 @@ function CLI({ device, devices = {}, links = [], onApply, onPing, pendingCmd, ac
     const v = input;
     if (v.trim()) {
       const key = mode.name;
-      setHistory((h) => {
-        const next = { ...h, [key]: [...(h[key] || []), v].slice(-100) };
-        onHistoryChange && onHistoryChange(next);
-        return next;
-      });
+      const next = { ...history, [key]: [...(history[key] || []), v].slice(-100) };
+      setHistory(next);
+      onHistoryChange && onHistoryChange(next);
     }
     handle(v);
     setInput("");
@@ -920,7 +1123,9 @@ function CLI({ device, devices = {}, links = [], onApply, onPing, pendingCmd, ac
 
   function onKeyDown(e) {
     const modeHist = history[mode.name] || [];
-    if (e.key === "ArrowUp") {
+    if (e.key === "Enter") {
+      submit(e);
+    } else if (e.key === "ArrowUp") {
       e.preventDefault();
       const idx = histIdx < 0 ? modeHist.length - 1 : Math.max(0, histIdx - 1);
       setHistIdx(idx);
@@ -974,10 +1179,10 @@ function normalizeIface(s, device) {
   return null;
 }
 
-function expandIosAbbreviations(input, mode) {
+function expandIosAbbreviations(input, mode, device) {
   const cmd = String(input || "").trim().replace(/\s+/g, " ");
   if (!cmd || cmd === "?" || cmd.endsWith(" ?")) return cmd;
-  const modeName = mode?.name === "conf-if-range" ? "conf-if-range" : mode?.name;
+  const modeName = commandHintKey(mode, device) === "host" ? "host" : (mode?.name === "conf-if-range" ? "conf-if-range" : mode?.name);
   const expanded = matchIosSpec(cmd, modeName);
   if (expanded) {
     if (expanded.startsWith("do ")) {
@@ -1057,6 +1262,88 @@ function shortIfaceText(text) {
   return OPT_Engine.shortIfaceNamesInText ? OPT_Engine.shortIfaceNamesInText(text) : text;
 }
 
+function isHostConsoleDevice(device) {
+  return !!(OPT_Engine.isHostLike?.(device) || device?.kind === "server");
+}
+
+function commandHintKey(mode, device) {
+  if (mode?.name === "user" && isHostConsoleDevice(device)) return "host";
+  return mode?.name === "conf-if-range" ? "conf-if" : mode?.name;
+}
+
+function isIpv4(value) {
+  return /^(?:\d{1,3}\.){3}\d{1,3}$/.test(String(value || ""));
+}
+
+function formatWindowsMac(mac) {
+  return String(mac || "00:00:00:00:00:00").replace(/:/g, "-").toUpperCase();
+}
+
+function hostFileKey(path) {
+  return String(path || "")
+    .replace(/^C:\\?/i, "")
+    .replace(/^\\+/, "")
+    .replace(/\//g, "\\");
+}
+
+function hostDisplayPath(path) {
+  return String(path || "").replace(/^flash:/, "").replace(/^C:\\?/i, "").replace(/\//g, "\\");
+}
+
+function hostServerServiceNames() {
+  return ["dhcp", "dns", "http", "https", "ftp", "tftp", "aaa", "radius", "syslog", "ntp", "ssh", "telnet", "smtp", "pop3"];
+}
+
+function hostServicePort(name) {
+  return ({ ftp: 21, ssh: 22, telnet: 23, smtp: 25, dns: 53, dhcp: 67, tftp: 69, http: 80, pop3: 110, ntp: 123, snmp: 161, radius: 1645, https: 443, syslog: 514, aaa: 1645 })[name] || 0;
+}
+
+function hostServiceEnabled(device, name) {
+  if (!device) return false;
+  const hasService = Object.prototype.hasOwnProperty.call(device.services || {}, name);
+  if (hasService) return !!device.services[name];
+  if (name === "ftp") return device.serverConfig?.ftp?.service ?? device.kind === "server";
+  if (name === "https") return device.serverConfig?.http?.https ?? false;
+  if (name === "smtp") return device.serverConfig?.email?.smtp ?? false;
+  if (name === "pop3") return device.serverConfig?.email?.pop3 ?? false;
+  if (name === "dns") return device.serverConfig?.dns?.service ?? false;
+  if (name === "dhcp") return device.serverConfig?.dhcp?.service ?? false;
+  if (name === "tftp") return device.serverConfig?.tftp?.service ?? false;
+  if (name === "ntp") return device.serverConfig?.ntp?.service ?? false;
+  if (name === "aaa" || name === "radius") return device.serverConfig?.aaa?.service ?? false;
+  if (name === "syslog") return device.serverConfig?.syslog?.service ?? false;
+  if (name === "snmp") return !!(device.snmp?.communities?.length || device.services?.snmp);
+  if (name === "ssh") return !!(device.services?.ssh || device.crypto?.rsaKeys?.generated || device.lines?.vty?.transport?.includes?.("ssh"));
+  if (name === "telnet") return !!(device.services?.telnet || device.lines?.vty?.transport?.includes?.("telnet"));
+  if (name === "http") return device.serverConfig?.http?.http ?? device.services?.http ?? false;
+  return !!device.services?.[name];
+}
+
+function sessionTarget(protocol, rest) {
+  const parts = String(rest || "").trim().split(/\s+/).filter(Boolean);
+  if (!parts.length) return "";
+  if (protocol === "ssh") {
+    const at = parts.find((p) => p.includes("@"));
+    if (at) return at.split("@").pop();
+    const loginIdx = parts.findIndex((p) => p === "-l" || p === "-login");
+    if (loginIdx >= 0 && parts[loginIdx + 2]) return parts[loginIdx + 2];
+  }
+  return parts[0];
+}
+
+function usageForHostCommand(cmd) {
+  const name = String(cmd || "").split(/\s+/)[0];
+  return ({
+    ftp: "Usage: ftp <host>",
+    telnet: "Usage: telnet <host>",
+    ssh: "Usage: ssh [-l user] <host> or ssh user@host",
+    nslookup: "Usage: nslookup <name>",
+    snmpget: "Usage: snmpget <host> <community> <oid>",
+    snmpgetbulk: "Usage: snmpgetbulk <host> <community> <oid>",
+    snmpset: "Usage: snmpset <host> <community> <oid> <type> <value>",
+  })[name] || `Usage: ${name} <host>`;
+}
+
 function parseVlanList(text) {
   const out = [];
   for (const part of String(text).split(",")) {
@@ -1069,7 +1356,7 @@ function parseVlanList(text) {
 }
 
 function completeCommand(input, mode, device) {
-  const pool = [...(COMMAND_HINTS[mode.name === "conf-if-range" ? "conf-if" : mode.name] || []), ...Object.keys(device.interfaces || {}).map(shortIface)];
+  const pool = [...(COMMAND_HINTS[commandHintKey(mode, device)] || []), ...Object.keys(device.interfaces || {}).map(shortIface)];
   const words = input.split(/\s+/);
   const last = words[words.length - 1]?.toLowerCase();
   if (!last) return input;
