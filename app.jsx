@@ -1,7 +1,6 @@
 // app.jsx — OpenPT main application
 
 const { useState, useEffect, useRef, useMemo } = React;
-const Palette = window.Palette;
 const Topology = window.Topology;
 const CLI = window.CLI;
 const Inspector = window.Inspector;
@@ -537,9 +536,6 @@ function App() {
   const [ptActivity, setPtActivity] = useState(initial.ptActivity);
   const [ptSidebarOpen, setPtSidebarOpen] = useState(initial.ptSidebarOpen ?? !!initial.ptActivity);
   const [starterScreenVisible, setStarterScreenVisible] = useState(initial.starterScreenVisible || false);
-  const [paletteOpen, setPaletteOpen] = useState(() => {
-    try { return localStorage.getItem("openpt:palette-open") !== "0"; } catch (e) { return true; }
-  });
   const [bottomCollapsed, setBottomCollapsed] = useState(() => {
     try { return localStorage.getItem("openpt:bottom-collapsed") === "1"; } catch (e) { return false; }
   });
@@ -582,9 +578,6 @@ function App() {
     latestTopologyRef.current = { devices, links };
   }, [devices, links]);
 
-  useEffect(() => {
-    try { localStorage.setItem("openpt:palette-open", paletteOpen ? "1" : "0"); } catch (e) {}
-  }, [paletteOpen]);
   useEffect(() => {
     try { localStorage.setItem("openpt:bottom-collapsed", bottomCollapsed ? "1" : "0"); } catch (e) {}
   }, [bottomCollapsed]);
@@ -2492,7 +2485,6 @@ function App() {
         <div className="tb-actions">
           <button className="tb-btn icon-only" title="Undo" disabled={!canUndo} onClick={undo}>↶</button>
           <button className="tb-btn icon-only" title="Redo" disabled={!canRedo} onClick={redo}>↷</button>
-          <button className="tb-btn" onClick={() => setPaletteOpen((v) => !v)}>{paletteOpen ? "Hide palette" : "Palette"}</button>
           {(cloudProjectId || shareToken) && meaningfulChanges > 0 && cloudLease && (
             <button className="tb-btn primary" onClick={() => saveCloudNow({ force: true }).catch((err) => setToast({ kind: "err", msg: err.message || "Save failed" }))}>Save Now</button>
           )}
@@ -2531,12 +2523,6 @@ function App() {
         }}
       >
         {/* (Labs/Diagnostics moved to top menus) */}
-        <div className={`palette-wrap ${paletteOpen ? "" : "collapsed"}`}>
-          <Palette
-            activeLink={forceLinkType || (linkMode ? "auto" : null)}
-            onLinkPick={(type) => { setLinkMode(true); setForceLinkType(type); }}
-          />
-        </div>
         {ptActivity && ptSidebarOpen && (
           <>
             <PacketTracerSidebar

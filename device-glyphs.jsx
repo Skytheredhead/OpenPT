@@ -59,30 +59,94 @@ const Glyph = {
       <path d="M14 8h7M14 15.5h7M14 23h7" stroke="currentColor" strokeWidth="0.8" opacity="0.55"/>
     </svg>
   ),
+  laptop: ({ size = 30 }) => (
+    <svg width={size} height={size} viewBox="0 0 30 30" fill="none">
+      <path d="M7 7.5h16v11H7z" stroke="currentColor" strokeWidth="1.3" fill="rgba(255,255,255,0.04)" strokeLinejoin="round"/>
+      <rect x="9.5" y="10" width="11" height="6" fill="currentColor" opacity="0.08"/>
+      <path d="M5 22l2-3.5h16l2 3.5H5z" stroke="currentColor" strokeWidth="1.3" fill="rgba(255,255,255,0.04)" strokeLinejoin="round"/>
+      <path d="M12 20.5h6" stroke="currentColor" strokeWidth="1.1" strokeLinecap="round" opacity="0.7"/>
+    </svg>
+  ),
+  printer: ({ size = 30 }) => (
+    <svg width={size} height={size} viewBox="0 0 30 30" fill="none">
+      <path d="M9 5.5h12v6H9z" stroke="currentColor" strokeWidth="1.3" fill="rgba(255,255,255,0.04)" strokeLinejoin="round"/>
+      <rect x="6" y="11" width="18" height="10" rx="1.5" stroke="currentColor" strokeWidth="1.3" fill="rgba(255,255,255,0.04)"/>
+      <path d="M9 18.5h12v6H9z" stroke="currentColor" strokeWidth="1.3" fill="rgba(255,255,255,0.04)" strokeLinejoin="round"/>
+      <circle cx="21" cy="14" r="0.9" fill="currentColor"/>
+      <path d="M11 21h8M11 23h6" stroke="currentColor" strokeWidth="0.9" strokeLinecap="round" opacity="0.65"/>
+    </svg>
+  ),
+  phone: ({ size = 30 }) => (
+    <svg width={size} height={size} viewBox="0 0 30 30" fill="none">
+      <rect x="8" y="5" width="14" height="20" rx="2" stroke="currentColor" strokeWidth="1.3" fill="rgba(255,255,255,0.04)"/>
+      <path d="M11 8h8v5h-8z" stroke="currentColor" strokeWidth="1.1" fill="rgba(255,255,255,0.04)" strokeLinejoin="round"/>
+      <path d="M11 17h2M15 17h2M19 17h.1M11 20h2M15 20h2M19 20h.1" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round"/>
+      <path d="M9 7c3.5-1.8 8.5-1.8 12 0M10 24c3.2 1.2 6.8 1.2 10 0" stroke="currentColor" strokeWidth="1.1" strokeLinecap="round" opacity="0.65"/>
+    </svg>
+  ),
   ap: ({ size = 30 }) => (
     <svg width={size} height={size} viewBox="0 0 30 30" fill="none">
-      <rect x="6" y="16" width="18" height="6" rx="1" stroke="currentColor" strokeWidth="1.3" fill="rgba(255,255,255,0.04)"/>
-      <circle cx="15" cy="19" r="0.9" fill="currentColor"/>
-      <path d="M9 11a8 8 0 0 1 12 0" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round"/>
-      <path d="M11.5 13a5 5 0 0 1 7 0" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round"/>
-      <circle cx="15" cy="6" r="1.2" fill="currentColor"/>
+      <circle cx="15" cy="15" r="6.5" stroke="currentColor" strokeWidth="1.3" fill="rgba(255,255,255,0.04)"/>
+      <circle cx="15" cy="15" r="1.4" fill="currentColor"/>
+      <path d="M7.5 8.5a11 11 0 0 1 15 0M10.2 11a7.2 7.2 0 0 1 9.6 0M7.5 21.5a11 11 0 0 0 15 0M10.2 19a7.2 7.2 0 0 0 9.6 0" stroke="currentColor" strokeWidth="1.1" strokeLinecap="round" opacity="0.75"/>
+      <path d="M15 3.5v3M15 23.5v3" stroke="currentColor" strokeWidth="1.1" strokeLinecap="round" opacity="0.55"/>
+    </svg>
+  ),
+  wrt: ({ size = 30 }) => (
+    <svg width={size} height={size} viewBox="0 0 30 30" fill="none">
+      <rect x="6" y="15" width="18" height="7" rx="1.4" stroke="currentColor" strokeWidth="1.3" fill="rgba(255,255,255,0.04)"/>
+      <path d="M8 15l-2-8M22 15l2-8" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round"/>
+      <circle cx="10" cy="18.5" r="0.8" fill="currentColor"/>
+      <circle cx="13" cy="18.5" r="0.8" fill="currentColor"/>
+      <path d="M17 18.5h4" stroke="currentColor" strokeWidth="1.1" strokeLinecap="round" opacity="0.65"/>
+      <path d="M11.5 10.5a5 5 0 0 1 7 0M13 12.8a3 3 0 0 1 4 0" stroke="currentColor" strokeWidth="1.05" strokeLinecap="round" opacity="0.7"/>
+    </svg>
+  ),
+  asa: ({ size = 30 }) => (
+    <svg width={size} height={size} viewBox="0 0 30 30" fill="none">
+      <rect x="5" y="9" width="20" height="12" rx="1.6" stroke="currentColor" strokeWidth="1.3" fill="rgba(255,255,255,0.04)"/>
+      <path d="M15 6.5l6 2.4v4.7c0 4-2.2 7.1-6 9.9-3.8-2.8-6-5.9-6-9.9V8.9z" stroke="currentColor" strokeWidth="1.15" fill="rgba(255,255,255,0.04)" strokeLinejoin="round"/>
+      <path d="M12 15h6M15 12v6" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" opacity="0.7"/>
+      <path d="M7 12h2M21 12h2M7 18h2M21 18h2" stroke="currentColor" strokeWidth="1.1" strokeLinecap="round"/>
     </svg>
   ),
   cloud: ({ size = 30 }) => (
     <svg width={size} height={size} viewBox="0 0 30 30" fill="none">
       <path d="M9 21h13a4.5 4.5 0 0 0 0.4-8.97A7 7 0 0 0 8.4 11.2 5 5 0 0 0 9 21z"
         stroke="currentColor" strokeWidth="1.3" fill="rgba(255,255,255,0.04)" strokeLinejoin="round"/>
+      <circle cx="12" cy="16.5" r="1" fill="currentColor" opacity="0.75"/>
+      <circle cx="16" cy="14" r="1" fill="currentColor" opacity="0.75"/>
+      <circle cx="20" cy="17" r="1" fill="currentColor" opacity="0.75"/>
+      <path d="M13 16l2.2-1.4M16.9 14.7l2.2 1.5" stroke="currentColor" strokeWidth="0.8" opacity="0.7"/>
+    </svg>
+  ),
+  internet: ({ size = 30 }) => (
+    <svg width={size} height={size} viewBox="0 0 30 30" fill="none">
+      <circle cx="15" cy="15" r="9" stroke="currentColor" strokeWidth="1.3" fill="rgba(255,255,255,0.04)"/>
+      <path d="M6.5 15h17M15 6c2.5 2.5 3.7 5.5 3.7 9S17.5 21.5 15 24M15 6c-2.5 2.5-3.7 5.5-3.7 9S12.5 21.5 15 24M8.8 9.2c3.8 1.4 8.6 1.4 12.4 0M8.8 20.8c3.8-1.4 8.6-1.4 12.4 0" stroke="currentColor" strokeWidth="1.05" strokeLinecap="round"/>
+    </svg>
+  ),
+  dslmodem: ({ size = 30 }) => (
+    <svg width={size} height={size} viewBox="0 0 30 30" fill="none">
+      <rect x="6" y="13" width="18" height="8" rx="1.4" stroke="currentColor" strokeWidth="1.3" fill="rgba(255,255,255,0.04)"/>
+      <path d="M9 13V9.5h4.5L16 7h5" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round"/>
+      <circle cx="10" cy="17" r="0.8" fill="currentColor"/>
+      <circle cx="13" cy="17" r="0.8" fill="currentColor"/>
+      <path d="M17 17h4" stroke="currentColor" strokeWidth="1.1" strokeLinecap="round" opacity="0.65"/>
+      <path d="M8 23h14" stroke="currentColor" strokeWidth="1.1" strokeLinecap="round" opacity="0.45"/>
+    </svg>
+  ),
+  cablemodem: ({ size = 30 }) => (
+    <svg width={size} height={size} viewBox="0 0 30 30" fill="none">
+      <rect x="6" y="12" width="18" height="9" rx="1.4" stroke="currentColor" strokeWidth="1.3" fill="rgba(255,255,255,0.04)"/>
+      <path d="M15 12V8.5" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round"/>
+      <circle cx="15" cy="7" r="2.2" stroke="currentColor" strokeWidth="1.2" fill="rgba(255,255,255,0.04)"/>
+      <circle cx="10" cy="16.5" r="0.8" fill="currentColor"/>
+      <circle cx="13" cy="16.5" r="0.8" fill="currentColor"/>
+      <path d="M17 16.5h4M9 23.5h12" stroke="currentColor" strokeWidth="1.1" strokeLinecap="round" opacity="0.65"/>
     </svg>
   ),
 };
-Glyph.laptop = Glyph.pc;
-Glyph.printer = Glyph.pc;
-Glyph.phone = Glyph.pc;
-Glyph.wrt = Glyph.ap;
-Glyph.asa = Glyph.router;
-Glyph.internet = Glyph.cloud;
-Glyph.dslmodem = Glyph.cloud;
-Glyph.cablemodem = Glyph.cloud;
 window.Glyph = Glyph;
 
 window.DeviceCatalog = [
@@ -98,12 +162,12 @@ window.DeviceCatalog = [
   { id: "laptop", kind: "laptop", platform: "laptop", label: "Laptop", short: "Laptop", ifaces: ["eth0", "wlan0"], pwr: true, color: "var(--ok)" },
   { id: "server-pt", kind: "server", platform: "genericServer", label: "Server-PT", short: "Server-PT", ifaces: ["eth0"], pwr: true, color: "var(--magenta)" },
   { id: "wrt300n", kind: "wrt", platform: "wrt300n", label: "WRT300N", short: "WRT300N", ifaces: ["Internet", "Ethernet1", "Ethernet2", "Ethernet3", "Ethernet4", "wlan0"], pwr: true, color: "var(--accent)" },
-  { id: "asa5506x", kind: "asa", platform: "asa5506x", label: "ASA 5506-X", short: "5506-X", ifaces: ["GigabitEthernet1/1","GigabitEthernet1/2","GigabitEthernet1/3","GigabitEthernet1/4","GigabitEthernet1/5","GigabitEthernet1/6","GigabitEthernet1/7","GigabitEthernet1/8"], pwr: true, color: "var(--warn)" },
+  { id: "asa5506x", kind: "asa", platform: "asa5506x", label: "ASA 5506-X Firewall", short: "ASA FW", ifaces: ["GigabitEthernet1/1","GigabitEthernet1/2","GigabitEthernet1/3","GigabitEthernet1/4","GigabitEthernet1/5","GigabitEthernet1/6","GigabitEthernet1/7","GigabitEthernet1/8"], pwr: true, color: "var(--warn)" },
   { id: "printer", kind: "printer", platform: "printer", label: "Printer", short: "Printer", ifaces: ["eth0"], pwr: true, color: "var(--ok)" },
   { id: "ipphone", kind: "phone", platform: "ipphone", label: "IP Phone", short: "IP Phone", ifaces: ["eth0", "pc"], pwr: true, color: "var(--accent)" },
   { id: "ap", kind: "ap", label: "Wireless AP", short: "AP",  ifaces: ["eth0","wlan0"], pwr: true, color: "var(--accent)" },
   { id: "cloudpt", kind: "cloud", platform: "cloudpt", label: "Cloud-PT", short: "Cloud-PT", ifaces: ["eth0", "serial0", "dsl", "coax"], pwr: false, color: "var(--fg-2)" },
-  { id: "internet", kind: "internet", platform: "internet", short: "Internet", label: "Internet", ifaces: ["wan"], pwr: true, color: "var(--fg-2)" },
-  { id: "dslmodem", kind: "dslmodem", platform: "dslmodem", label: "DSL Modem", short: "DSL", ifaces: ["Ethernet0", "DSL0"], pwr: true, color: "var(--fg-2)" },
-  { id: "cablemodem", kind: "cablemodem", platform: "cablemodem", label: "Cable Modem", short: "Cable", ifaces: ["Ethernet0", "Coax0"], pwr: true, color: "var(--fg-2)" },
+  { id: "internet", kind: "internet", platform: "internet", short: "Internet", label: "Internet", ifaces: ["wan"], pwr: true, color: "var(--accent)" },
+  { id: "dslmodem", kind: "dslmodem", platform: "dslmodem", label: "DSL Modem", short: "DSL", ifaces: ["Ethernet0", "DSL0"], pwr: true, color: "var(--violet)" },
+  { id: "cablemodem", kind: "cablemodem", platform: "cablemodem", label: "Cable Modem", short: "Cable", ifaces: ["Ethernet0", "Coax0"], pwr: true, color: "var(--magenta)" },
 ];

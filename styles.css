@@ -567,20 +567,6 @@
   background: color-mix(in oklab, var(--accent) 16%, var(--bg-1));
 }
 
-.palette-wrap {
-  width: 184px;
-  flex: 0 0 184px;
-  min-height: 0;
-  overflow: hidden;
-  background: var(--bg-1);
-  border-right: 1px solid var(--line);
-  display: flex;
-}
-.palette-wrap.collapsed {
-  width: 0;
-  flex-basis: 0;
-  border-right: 0;
-}
 .tb-btn:disabled {
   opacity: 0.42;
   cursor: not-allowed;
