@@ -48,6 +48,14 @@ const Glyph = {
       <rect x="7" y="9" width="16" height="8" fill="currentColor" opacity="0.08"/>
     </svg>
   ),
+  mac: ({ size = 30 }) => (
+    <svg width={size} height={size} viewBox="0 0 30 30" fill="none">
+      <rect x="5" y="5.5" width="20" height="15" rx="2.3" stroke="currentColor" strokeWidth="1.3" fill="rgba(255,255,255,0.04)"/>
+      <path d="M10.5 23.5h9M13 20.5l-.8 3M17 20.5l.8 3" stroke="currentColor" strokeWidth="1.25" strokeLinecap="round"/>
+      <path d="M13 10.2c.7-1.1 1.5-1.6 2.4-1.5-.1 1-.7 1.7-1.7 2.1" stroke="currentColor" strokeWidth="1" strokeLinecap="round" opacity="0.75"/>
+      <path d="M12.6 11.4c-1.7.1-2.4 1.2-2.2 2.8.2 1.7 1.3 3.2 2.4 3 .7-.1 1.1-.5 1.8-.5.7 0 1.1.5 1.8.5 1.2.1 2.3-1.6 2.5-3.1.1-1.2-.5-2.2-1.7-2.6-.7-.3-1.3 0-1.8.1-.6.2-1.1.1-1.7-.1-.3-.1-.7-.2-1.1-.1z" stroke="currentColor" strokeWidth="1.05" strokeLinejoin="round" fill="rgba(255,255,255,0.03)"/>
+    </svg>
+  ),
   server: ({ size = 30 }) => (
     <svg width={size} height={size} viewBox="0 0 30 30" fill="none">
       <rect x="6" y="5" width="18" height="6" rx="1" stroke="currentColor" strokeWidth="1.3" fill="rgba(255,255,255,0.04)"/>
@@ -159,6 +167,7 @@ window.DeviceCatalog = [
   { id: "c9200l", kind: "l2switch", platform: "c9200l", label: "Catalyst 9200L", short: "C9200L", ifaces: [...Array.from({ length: 24 }, (_, i) => `GigabitEthernet1/0/${i + 1}`), ...Array.from({ length: 4 }, (_, i) => `GigabitEthernet1/1/${i + 1}`)], pwr: true, color: "var(--fg-1)" },
   { id: "c9200l-l3", kind: "l3switch", platform: "c9200l", label: "Catalyst 9200L L3", short: "C9200L L3", ifaces: [...Array.from({ length: 24 }, (_, i) => `GigabitEthernet1/0/${i + 1}`), ...Array.from({ length: 4 }, (_, i) => `GigabitEthernet1/1/${i + 1}`)], pwr: true, color: "var(--violet)" },
   { id: "pc", kind: "pc", platform: "genericPc", label: "PC", short: "PC",  ifaces: ["eth0"], pwr: true, color: "var(--ok)" },
+  { id: "mac", kind: "mac", platform: "mac", label: "Mac", short: "Mac", ifaces: ["en0", "en1"], pwr: true, color: "var(--azure)" },
   { id: "laptop", kind: "laptop", platform: "laptop", label: "Laptop", short: "Laptop", ifaces: ["eth0", "wlan0"], pwr: true, color: "var(--ok)" },
   { id: "server-pt", kind: "server", platform: "genericServer", label: "Server-PT", short: "Server-PT", ifaces: ["eth0"], pwr: true, color: "var(--magenta)" },
   { id: "wrt300n", kind: "wrt", platform: "wrt300n", label: "WRT300N", short: "WRT300N", ifaces: ["Internet", "Ethernet1", "Ethernet2", "Ethernet3", "Ethernet4", "wlan0"], pwr: true, color: "var(--accent)" },

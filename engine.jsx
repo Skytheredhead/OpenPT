@@ -63,6 +63,7 @@ const PLATFORM_PROFILES = {
     ],
   },
   genericPc: { id: "genericPc", label: "PC", os: "OpenPT host shell", image: "host", ifaces: ["eth0"] },
+  mac: { id: "mac", label: "Mac", os: "macOS 15 simulated", image: "mac", ifaces: ["en0", "en1"] },
   laptop: { id: "laptop", label: "Laptop", os: "OpenPT host shell", image: "laptop", ifaces: ["eth0", "wlan0"] },
   printer: { id: "printer", label: "Printer", os: "OpenPT host shell", image: "printer", ifaces: ["eth0"] },
   ipphone: { id: "ipphone", label: "IP Phone", os: "OpenPT voice endpoint shell", image: "ip-phone", ifaces: ["eth0", "pc"] },
@@ -84,6 +85,7 @@ function platformForKind(kind, platform) {
   if (kind === "wrt") return PLATFORM_PROFILES.wrt300n;
   if (kind === "asa") return PLATFORM_PROFILES.asa5506x;
   if (kind === "laptop") return PLATFORM_PROFILES.laptop;
+  if (kind === "mac") return PLATFORM_PROFILES.mac;
   if (kind === "printer") return PLATFORM_PROFILES.printer;
   if (kind === "phone") return PLATFORM_PROFILES.ipphone;
   if (kind === "ap") return PLATFORM_PROFILES.ap;
@@ -274,7 +276,7 @@ function inNet(ip, dst, mask) {
 }
 function isSwitchLike(d) { return d?.kind === "l2switch" || d?.kind === "l3switch" || d?.kind === "wrt"; }
 function isRouterLike(d) { return d?.kind === "router" || d?.kind === "l3switch" || d?.kind === "wrt" || d?.kind === "asa"; }
-function isHostLike(d) { return ["pc", "server", "laptop", "printer", "phone"].includes(d?.kind); }
+function isHostLike(d) { return ["pc", "server", "laptop", "mac", "printer", "phone"].includes(d?.kind); }
 function clone(obj) { return JSON.parse(JSON.stringify(obj)); }
 function shortIfaceName(n) {
   return String(n || "")
@@ -493,6 +495,48 @@ function findPeer(devices, links, devId, ifaceId) {
   return null;
 }
 
+function dot1qVlanForIface(ifaceName, ifc) {
+  const enc = String(ifc?.encapsulation || "");
+  const tagged = enc.match(/^dot1q\s+(\d+)$/i);
+  if (tagged) return Number(tagged[1]);
+  const sub = String(ifaceName || "").match(/\.(\d+)$/);
+  if (sub) return Number(sub[1]);
+  return null;
+}
+
+function parentIfaceForTaggedEgress(devices, links, devId, ifaceName) {
+  const dev = devices?.[devId];
+  const ifc = dev?.interfaces?.[ifaceName];
+  if (!dev || !ifc) return ifaceName;
+  if (ifc.parentIface && dev.interfaces?.[ifc.parentIface]) return ifc.parentIface;
+  const sub = String(ifaceName || "").match(/^(.+)\.\d+$/);
+  if (sub && dev.interfaces?.[sub[1]]) return sub[1];
+  if (dot1qVlanForIface(ifaceName, ifc) == null) return ifaceName;
+  const linked = Object.entries(dev.interfaces || {}).find(([name, candidate]) =>
+    name !== ifaceName &&
+    ifacePortInfo(dev, name).media !== "virtual" &&
+    candidate.admUp !== false &&
+    candidate.up &&
+    findPeer(devices, links, devId, name)
+  );
+  if (linked) return linked[0];
+  const physical = Object.keys(dev.interfaces || {}).find((name) =>
+    name !== ifaceName &&
+    ifacePortInfo(dev, name).media !== "virtual"
+  );
+  return physical || ifaceName;
+}
+
+function taggedEgress(devices, links, devId, ifaceName) {
+  const dev = devices?.[devId];
+  const ifc = dev?.interfaces?.[ifaceName];
+  const vlan = dot1qVlanForIface(ifaceName, ifc);
+  return {
+    iface: vlan == null ? ifaceName : parentIfaceForTaggedEgress(devices, links, devId, ifaceName),
+    vlan,
+  };
+}
+
 function ifaceForDest(dev, dstIp) {
   for (const [name, ifc] of Object.entries(dev.interfaces || {})) {
     if (ifc.ip && ifc.mask && inNet(dstIp, ifc.ip, ifc.mask)) return { name, ifc };
@@ -509,6 +553,14 @@ function lookupRoute(dev, dstIp) {
     }
   }
   return best;
+}
+
+function routeForwarding(dev, route, dstIp) {
+  const viaIface = dev.interfaces?.[route?.via];
+  return {
+    nextHopIp: route?.via === "directly" || viaIface ? dstIp : route?.via,
+    iface: viaIface ? route.via : route?.iface,
+  };
 }
 
 function recalcConnectedRoutes(dev) {
@@ -617,8 +669,12 @@ function ownsIp(dev, ip) {
 function hostIp(dev) {
   const eth = dev.interfaces?.eth0;
   if (eth?.ip) return { ip: eth.ip, iface: "eth0", mask: eth.mask };
+  const en = dev.interfaces?.en0;
+  if (en?.ip) return { ip: en.ip, iface: "en0", mask: en.mask };
   for (const [n, ifc] of Object.entries(dev.interfaces || {})) {
-    if (ifc.ip && ifc.up) return { ip: ifc.ip, iface: n, mask: ifc.mask };
+    if (ifc.ip && (ifc.up || (ifc.admUp !== false && dot1qVlanForIface(n, ifc) != null))) {
+      return { ip: ifc.ip, iface: n, mask: ifc.mask };
+    }
   }
   return null;
 }
@@ -642,12 +698,13 @@ function planPath(devices, links, srcId, dstIp) {
   } else if (isRouterLike(src)) {
     const route = lookupRoute(src, dstIp);
     if (!route) return { ok: false, error: `${src.hostname}: no route to ${dstIp}`, hops };
-    nextHopIp = route.via === "directly" ? dstIp : route.via; egressIface = route.iface;
+    const fwd = routeForwarding(src, route, dstIp);
+    nextHopIp = fwd.nextHopIp; egressIface = fwd.iface;
     hops.push({ devId: srcId, action: "route", iface: egressIface, note: `route ${route.dst}/${maskBits(route.mask)} ${route.type} via ${route.via}` });
   } else {
-    const e = src.interfaces.eth0;
+    const e = src.interfaces?.[origin.iface];
     if (!e.gw) return { ok: false, error: `${src.hostname}: destination off-net and no default gateway configured`, hops };
-    nextHopIp = e.gw; egressIface = "eth0";
+    nextHopIp = e.gw; egressIface = origin.iface;
     hops.push({ devId: srcId, action: "arp-gw", iface: egressIface, note: `${dstIp} off-net; gateway ${nextHopIp}` });
   }
 
@@ -656,7 +713,15 @@ function planPath(devices, links, srcId, dstIp) {
   while (guard++ < 48) {
     const outCheck = interfaceAclCheck(curDev, curIface, "out", srcIp, dstIp);
     if (!outCheck.ok) return { ok: false, error: `${curDev.hostname} ${curIface}: ${outCheck.note}`, hops: [...hops, { devId: curDev.id, action: "drop", note: outCheck.note, ok: false }] };
-    const peer = findPeer(devices, links, curDev.id, curIface);
+    const egress = taggedEgress(devices, links, curDev.id, curIface);
+    const outIface = egress.iface || curIface;
+    const outVlan = egress.vlan ?? vlan;
+    const logicalIf = curDev.interfaces?.[curIface];
+    const physicalIf = curDev.interfaces?.[outIface];
+    if (!physicalIf || physicalIf.admUp === false || !physicalIf.up || logicalIf?.admUp === false) {
+      return { ok: false, error: `${curDev.hostname} ${curIface} is down`, hops };
+    }
+    const peer = findPeer(devices, links, curDev.id, outIface);
     if (!peer) return { ok: false, error: `No link connected to ${curDev.hostname} ${curIface}`, hops };
     if (!peer.link.up) return { ok: false, error: `Link ${curDev.hostname} ${curIface} is down`, hops };
     const nb = devices[peer.peerId], nbIf = nb?.interfaces?.[peer.peerIface];
@@ -676,7 +741,7 @@ function planPath(devices, links, srcId, dstIp) {
 
     if (isSwitchLike(nb) && !nb.interfaces[ingressIface]?.routed) {
       const inIf = nb.interfaces[ingressIface];
-      vlan = vlan ?? vlanOnIngress(inIf);
+      vlan = outVlan ?? vlan ?? vlanOnIngress(inIf);
       if (!nb.vlans?.[vlan]) return { ok: false, error: `${nb.hostname}: VLAN ${vlan} does not exist`, hops };
       if (!vlanAllows(inIf, vlan)) return { ok: false, error: `${nb.hostname} ${ingressIface}: VLAN ${vlan} not allowed`, hops };
       if (inIf.stp?.state === "blocking") return { ok: false, error: `${nb.hostname} ${ingressIface}: STP blocking`, hops };
@@ -697,7 +762,7 @@ function planPath(devices, links, srcId, dstIp) {
         if (!nd || !nif) continue;
         candidates.push({ pname, next, nd, nif });
       }
-      chosen = candidates.find((c) => c.nif.ip === nextHopIp || c.nif.ip === dstIp);
+      chosen = candidates.find((c) => c.nif.ip === nextHopIp || c.nif.ip === dstIp || ownsIp(c.nd, nextHopIp) || ownsIp(c.nd, dstIp));
       if (!chosen) chosen = candidates.find((c) => isRouterLike(c.nd));
       if (!chosen) chosen = candidates.find((c) => isHostLike(c.nd) && c.nif.ip && sameSubnet(c.nif.ip, dstIp, c.nif.mask || "255.255.255.0"));
       if (!chosen) return { ok: false, error: `${nb.hostname}: no forwarding path in VLAN ${vlan} toward ${dstIp}`, hops };
@@ -709,12 +774,13 @@ function planPath(devices, links, srcId, dstIp) {
     if (isRouterLike(nb)) {
       const route = lookupRoute(nb, dstIp);
       if (!route) return { ok: false, error: `${nb.hostname}: no route to host ${dstIp}`, hops: [...hops, { devId: nb.id, action: "drop", note: "no route", ok: false }] };
-      nextHopIp = route.via === "directly" ? dstIp : route.via;
+      const fwd = routeForwarding(nb, route, dstIp);
+      nextHopIp = fwd.nextHopIp;
       if (nb.interfaces[ingressIface]?.natRole === "inside" && nb.interfaces[route.iface]?.natRole === "outside") {
         hops.push({ devId: nb.id, action: "nat", iface: route.iface, note: `PAT source ${srcIp} to ${nb.interfaces[route.iface].ip || "outside interface"}` });
       }
-      hops.push({ devId: nb.id, action: "route", iface: route.iface, note: `route ${route.dst}/${maskBits(route.mask)} ${route.type} via ${route.via}` });
-      curDev = nb; curIface = route.iface; vlan = null;
+      hops.push({ devId: nb.id, action: "route", iface: fwd.iface, note: `route ${route.dst}/${maskBits(route.mask)} ${route.type} via ${route.via}` });
+      curDev = nb; curIface = fwd.iface; vlan = dot1qVlanForIface(fwd.iface, nb.interfaces?.[fwd.iface]);
       continue;
     }
     return { ok: false, error: `Unsupported hop at ${nb.hostname}`, hops };
@@ -724,10 +790,13 @@ function planPath(devices, links, srcId, dstIp) {
 
 function allocateDhcp(devices, links, clientId) {
   const client = devices[clientId];
-  if (!client?.interfaces?.eth0) return { devices, message: "No eth0 interface" };
-  const peer = findPeer(devices, links, clientId, "eth0");
+  const clientIfaceName = client?.interfaces?.eth0 ? "eth0" : (client?.interfaces?.en0 ? "en0" : Object.keys(client?.interfaces || {})[0]);
+  if (!clientIfaceName) return { devices, message: "No host interface" };
+  const peer = findPeer(devices, links, clientId, clientIfaceName);
   if (!peer) return { devices, message: "No DHCP server reachable" };
   let vlan = 1, gatewayIp = null, server = null, poolName = null;
+  const firstHop = devices[peer.peerId];
+  if (isSwitchLike(firstHop)) vlan = vlanOnIngress(firstHop.interfaces?.[peer.peerIface]);
   const walk = [peer.peerId];
   const seen = new Set();
   while (walk.length && !server) {
@@ -737,12 +806,17 @@ function allocateDhcp(devices, links, clientId) {
     const d = devices[id];
     if (!d) continue;
     if (isSwitchLike(d)) {
-      const ingress = Object.values(d.interfaces).find((i) => i.up && i.vlan);
-      vlan = ingress?.vlan || vlan;
-      for (const l of links) if (l.a === id) walk.push(l.b); else if (l.b === id) walk.push(l.a);
+      for (const l of links) {
+        const ifaceName = l.a === id ? l.ai : l.b === id ? l.bi : null;
+        if (!ifaceName) continue;
+        const ifc = d.interfaces?.[ifaceName];
+        if (ifc?.up && ifc.admUp !== false && vlanAllows(ifc, vlan)) walk.push(l.a === id ? l.b : l.a);
+      }
     }
     for (const [name, ifc] of Object.entries(d.interfaces || {})) {
-      if (ifc.ip && ifc.up) {
+      const taggedVlan = dot1qVlanForIface(name, ifc);
+      const ifaceUsable = ifc.ip && (ifc.up || (ifc.admUp !== false && taggedVlan != null));
+      if (ifaceUsable && (taggedVlan == null || String(taggedVlan) === String(vlan))) {
         for (const [pn, p] of Object.entries(d.dhcp?.pools || {})) {
           if (p.network && p.mask && sameSubnet(ifc.ip, p.network, p.mask)) {
             server = d; poolName = pn; gatewayIp = p.defaultRouter || ifc.ip;
@@ -759,15 +833,15 @@ function allocateDhcp(devices, links, clientId) {
   const isExcluded = (ip) => excluded.some((e) => ipToInt(ip) >= ipToInt(e.start) && ipToInt(ip) <= ipToInt(e.end || e.start));
   let offered = null;
   const base = ipToInt(networkAddress(pool.network, pool.mask));
-  const broadcast = base | (~ipToInt(pool.mask) >>> 0);
+  const broadcast = (base | (~ipToInt(pool.mask) >>> 0)) >>> 0;
   for (let n = base + 10; n < broadcast; n++) {
     const ip = intToIp(n);
     if (!used.has(ip) && !isExcluded(ip) && ip !== gatewayIp) { offered = ip; break; }
   }
   if (!offered) return { devices, message: `DHCP pool ${poolName} has no free addresses` };
   const next = clone(devices);
-  next[clientId].interfaces.eth0 = { ...next[clientId].interfaces.eth0, ip: offered, mask: pool.mask, gw: gatewayIp, dhcp: true };
-  next[server.id].dhcp.bindings.push({ ip: offered, client: client.hostname, mac: client.interfaces.eth0.mac, pool: poolName });
+  next[clientId].interfaces[clientIfaceName] = { ...next[clientId].interfaces[clientIfaceName], ip: offered, mask: pool.mask, gw: gatewayIp, dhcp: true };
+  next[server.id].dhcp.bindings.push({ ip: offered, client: client.hostname, mac: client.interfaces[clientIfaceName].mac, pool: poolName });
   return { devices: next, message: `${client.hostname} leased ${offered} from ${server.hostname}` };
 }
 
@@ -914,6 +988,7 @@ window.OPT_Engine = {
   planPath, allocateDhcp, recomputeDynamicRoutes, recalcConnectedRoutes,
   ipToInt, intToIp, maskBits, wildcardToMask, networkAddress, sameSubnet, inNet,
   findPeer, lookupRoute, ifaceForDest, ifaceForVia, shortIfaceName, shortIfaceNamesInText,
+  dot1qVlanForIface, parentIfaceForTaggedEgress,
   normalizeCableType, cableTypeLabel, ifacePortInfo, cableFitsPort, recommendedCableTypeForPorts, cableCompatibility,
   isRouterLike, isSwitchLike, isHostLike,
 };

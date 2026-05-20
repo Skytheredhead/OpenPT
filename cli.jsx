@@ -5,6 +5,7 @@ const { OPT_Engine } = window;
 const COMMAND_HINTS = {
   user: ["enable", "show", "ping", "traceroute", "ipconfig", "services", "service", "exit"],
   host: ["?", "help", "arp", "arp -a", "delete", "dir", "ftp", "ipconfig", "ipconfig /all", "ipconfig /release", "ipconfig /renew", "ipv6config", "netstat", "nslookup", "ping", "snmpget", "snmpgetbulk", "snmpset", "ssh", "telnet", "tracert", "services", "service", "exit"],
+  mac: ["help", "man", "pwd", "cd", "ls", "find", "grep", "cat", "head", "tail", "wc", "sort", "uniq", "touch", "mkdir", "rm", "cp", "mv", "chmod", "chown", "xattr", "mdls", "mdfind", "plutil", "defaults", "open", "say", "whoami", "id", "groups", "hostname", "uname", "sw_vers", "date", "uptime", "env", "printenv", "ifconfig", "ipconfig", "networksetup", "scutil", "route", "netstat", "arp", "ping", "traceroute", "nslookup", "dig", "host", "ssh", "telnet", "ftp", "sftp", "scp", "curl", "nc", "lsof", "ps", "top", "kill", "df", "du", "mount", "diskutil", "system_profiler", "pmset", "launchctl", "sysctl", "dscacheutil", "dscl", "sudo", "clear", "exit"],
   priv: ["configure terminal", "show running-config", "show startup-config", "show version", "show ip interface brief", "show ip route", "show vlan brief", "show interfaces trunk", "show mac address-table", "show spanning-tree", "show etherchannel summary", "show port-security", "show ip dhcp snooping", "show ip arp inspection", "show ip ospf neighbor", "show ip protocols", "show access-lists", "show ip dhcp binding", "show ip nat translations", "show vrf", "show route-map", "show policy-map", "show ip sla summary", "show platform", "show inventory", "show license", "dir", "copy running-config startup-config", "write memory", "disable", "exit"],
   conf: ["hostname", "interface", "interface range", "vlan", "router ospf", "router eigrp", "router rip", "router bgp", "ip route", "ip routing", "ip dhcp pool", "ip dhcp excluded-address", "ip access-list", "access-list", "ip prefix-list", "route-map", "vrf definition", "ip nat pool", "ip nat inside source", "aaa new-model", "crypto key generate rsa", "ntp server", "snmp-server community", "logging host", "ip dhcp snooping", "ip arp inspection vlan", "monitor session", "class-map", "policy-map", "ip sla", "track", "username", "enable secret", "line console 0", "line vty 0 4", "service password-encryption", "end", "exit"],
   "conf-if": ["description", "ip address", "no ip address", "switchport mode access", "switchport mode trunk", "switchport access vlan", "switchport voice vlan", "switchport trunk allowed vlan", "switchport trunk native vlan", "switchport port-security", "channel-group", "ip dhcp snooping trust", "ip arp inspection trust", "ip access-group", "ip policy route-map", "ip nat inside", "ip nat outside", "service-policy input", "service-policy output", "encapsulation ppp", "encapsulation hdlc", "tunnel source", "tunnel destination", "storm-control", "spanning-tree portfast", "spanning-tree guard root", "shutdown", "no shutdown", "exit"],
@@ -44,6 +45,20 @@ const IOS_ABBREVIATION_SPECS = [
     "netstat", "netstat -a", "netstat -r", "nslookup <word>", "ping <word>", "snmpget <rest>",
     "snmpgetbulk <rest>", "snmpset <rest>", "ssh <rest>", "telnet <word>", "tracert <word>",
   ].map((pattern) => ({ modes: ["host"], pattern })),
+  ...[
+    "help", "man <word>", "pwd", "cd", "cd <rest>", "ls", "ls <rest>", "find <rest>", "grep <rest>", "cat <rest>",
+    "head <rest>", "tail <rest>", "wc <rest>", "sort <rest>", "uniq <rest>", "touch <rest>", "mkdir <rest>",
+    "rm <rest>", "cp <rest>", "mv <rest>", "chmod <rest>", "chown <rest>", "xattr <rest>", "mdls <rest>",
+    "mdfind <rest>", "plutil <rest>", "defaults <rest>", "open <rest>", "say <rest>", "whoami", "id", "groups",
+    "hostname", "uname", "uname <rest>", "sw_vers", "sw_vers <rest>", "date", "date <rest>", "uptime", "env",
+    "printenv", "printenv <word>", "ifconfig", "ifconfig <rest>", "ipconfig <rest>", "networksetup <rest>",
+    "scutil <rest>", "route <rest>", "netstat", "netstat <rest>", "arp", "arp <rest>", "ping <rest>",
+    "traceroute <rest>", "nslookup <word>", "dig <rest>", "host <word>", "ssh <rest>", "telnet <rest>",
+    "ftp <rest>", "sftp <rest>", "scp <rest>", "curl <rest>", "nc <rest>", "lsof <rest>", "ps", "ps <rest>",
+    "top", "top <rest>", "kill <rest>", "df", "df <rest>", "du <rest>", "mount", "diskutil <rest>",
+    "system_profiler <rest>", "pmset <rest>", "launchctl <rest>", "sysctl <rest>", "dscacheutil <rest>",
+    "dscl <rest>", "sudo <rest>", "clear",
+  ].map((pattern) => ({ modes: ["mac"], pattern })),
   ...[
     "configure terminal", "write memory", "write", "copy running-config startup-config", "copy run start", "erase startup-config",
     "write erase", "terminal length <word>",
@@ -130,12 +145,13 @@ function isParentConfigCommand(cmd) {
   return CONFIG_PARENT_COMMAND_PATTERNS.some((pattern) => pattern.test(cmd));
 }
 
-function CLI({ device, devices = {}, links = [], onApply, onPing, pendingCmd, active, scrollState, onScrollStateChange, historyState, onHistoryChange, ghostSuggestions = true }) {
+function CLI({ device, devices = {}, links = [], onApply, onPing, pendingCmd, active, focusNonce = 0, scrollState, onScrollStateChange, historyState, onHistoryChange, ghostSuggestions = true }) {
   const ref = React.useRef(null);
   const inputRef = React.useRef(null);
   const [lines, setLines] = React.useState([]);
   const [mode, setMode] = React.useState({ name: "user" });
   const [input, setInput] = React.useState("");
+  const [macCwd, setMacCwd] = React.useState("/Users/admin");
   const [history, setHistory] = React.useState(historyState || {});
   const [histIdx, setHistIdx] = React.useState(-1);
   const lastPendingNonce = React.useRef(0);
@@ -145,6 +161,7 @@ function CLI({ device, devices = {}, links = [], onApply, onPing, pendingCmd, ac
     setLines([]);
     setMode({ name: "user" });
     setInput("");
+    setMacCwd("/Users/admin");
     setHistIdx(-1);
   }, [device?.id]);
 
@@ -176,10 +193,23 @@ function CLI({ device, devices = {}, links = [], onApply, onPing, pendingCmd, ac
 
   React.useEffect(() => {
     if (active && inputRef.current) {
-      const t = setTimeout(() => inputRef.current && inputRef.current.focus(), 30);
-      return () => clearTimeout(t);
+      const focusInput = () => {
+        try {
+          inputRef.current && inputRef.current.focus({ preventScroll: true });
+        } catch (e) {
+          inputRef.current && inputRef.current.focus();
+        }
+      };
+      const raf = requestAnimationFrame(focusInput);
+      const t1 = setTimeout(focusInput, 40);
+      const t2 = setTimeout(focusInput, 220);
+      return () => {
+        cancelAnimationFrame(raf);
+        clearTimeout(t1);
+        clearTimeout(t2);
+      };
     }
-  }, [active, device?.id]);
+  }, [active, device?.id, focusNonce]);
 
   if (!device) {
     return (
@@ -197,6 +227,7 @@ function CLI({ device, devices = {}, links = [], onApply, onPing, pendingCmd, ac
 
   const promptFor = () => {
     const h = device.hostname;
+    if (mode.name === "user" && isMacConsoleDevice(device)) return `${h}:${macPromptPath(macCwd)} ${macUser()}$`;
     if (mode.name === "user") return `${h}>`;
     if (mode.name === "priv") return `${h}#`;
     if (mode.name === "conf") return `${h}(config)#`;
@@ -273,6 +304,7 @@ function CLI({ device, devices = {}, links = [], onApply, onPing, pendingCmd, ac
       return runPriv(inner);
     }
 
+    if (mode.name === "user" && isMacConsoleDevice(device)) return runMac(cmd);
     if (mode.name === "user" && isHostConsoleDevice(device)) return runHost(cmd);
     if (mode.name === "user" && (OPT_Engine.isHostLike?.(device) || device.kind === "server") && (cmd === "show ip" || cmd === "ipconfig" || cmd === "ipconfig /all" || cmd === "arp -a" || cmd === "ip dhcp" || cmd === "dhcp" || /^ip(?: address)? \S+ \S+ \S+$/.test(cmd))) return runHost(cmd);
     if (cmd.startsWith("show ") || cmd === "show") return runShow(cmd);
@@ -308,6 +340,7 @@ function CLI({ device, devices = {}, links = [], onApply, onPing, pendingCmd, ac
 
   function runUser(cmd) {
     if (cmd === "enable" || cmd === "en") return setMode({ name: "priv" });
+    if (isMacConsoleDevice(device)) return runMac(cmd);
     if (OPT_Engine.isHostLike?.(device) || device.kind === "server") return runHost(cmd);
     invalid(cmd, "(try 'enable')");
   }
@@ -333,6 +366,370 @@ function CLI({ device, devices = {}, links = [], onApply, onPing, pendingCmd, ac
     invalid(cmd);
   }
 
+  function runMac(cmd) {
+    let m;
+    const parts = shellWords(cmd);
+    const base = parts[0] || "";
+    const flags = parts.filter((p) => /^-{1,2}/.test(p));
+    const args = parts.slice(1).filter((p) => !/^-/.test(p));
+
+    if (cmd === "help" || cmd === "?") return showHelp();
+    if ((m = cmd.match(/^man (\S+)$/))) return showMacMan(m[1]);
+    if (cmd === "clear") return setLines([]);
+    if (cmd === "pwd") return push("", macCwd);
+    if (base === "cd") {
+      const next = macResolvePath(args.join(" ") || "/Users/admin", macCwd);
+      setMacCwd(next);
+      return;
+    }
+    if (base === "ls") return showMacLs(flags, args, macCwd);
+    if (base === "find") return showMacFind(parts.slice(1), macCwd);
+    if (base === "grep") return showMacGrep(parts.slice(1));
+    if (["cat", "head", "tail", "wc", "sort", "uniq"].includes(base)) return showMacTextCommand(base, parts.slice(1));
+    if (["touch", "mkdir", "cp", "mv", "chmod", "chown", "xattr", "plutil", "defaults", "open", "say"].includes(base)) return showMacUtilityCommand(base, parts.slice(1));
+    if (base === "rm") {
+      const target = args[0];
+      if (!target) return push("err", "usage: rm [-rfi] file ...");
+      if (!flags.some((f) => f.includes("f"))) push("warn", `${target}: removed (simulated)`);
+      apply({ kind: "file-delete", path: macResolvePath(target, macCwd) });
+      return;
+    }
+    if (base === "mdls") return pushMany(["kMDItemDisplayName = \"OpenPT Lab\"", "kMDItemKind = \"Document\"", "kMDItemContentType = \"public.data\""]);
+    if (base === "mdfind") return pushMany(["/Users/admin/Documents/openpt-notes.txt", "/Applications/Packet Tracer.app"]);
+    if (cmd === "whoami") return push("", macUser());
+    if (cmd === "id") return push("", `uid=501(${macUser()}) gid=20(staff) groups=20(staff),12(everyone),61(localaccounts),80(admin)`);
+    if (cmd === "groups") return push("", "staff everyone localaccounts admin");
+    if (cmd === "hostname") return push("", `${device.hostname}.local`);
+    if (base === "uname") return showMacUname(flags);
+    if (base === "sw_vers") return showMacSwVers(flags);
+    if (base === "date") return push("", new Date().toString());
+    if (cmd === "uptime") return push("", "10:15  up 42 mins, 2 users, load averages: 0.38 0.31 0.28");
+    if (cmd === "env") return showMacEnv();
+    if (base === "printenv") return showMacPrintenv(args[0]);
+    if (base === "ifconfig") return showMacIfconfig(parts.slice(1));
+    if (base === "ipconfig") return runMacIpconfig(parts.slice(1));
+    if (base === "networksetup") return runMacNetworksetup(parts.slice(1));
+    if (base === "scutil") return runMacScutil(parts.slice(1));
+    if (base === "route") return showMacRoute(parts.slice(1));
+    if (base === "netstat") return showMacNetstat(parts.slice(1));
+    if (base === "arp") return showMacArp(parts.slice(1));
+    if (base === "ping") return doPing(macNetworkTarget(parts.slice(1)) || "127.0.0.1");
+    if (base === "traceroute") return doPing(macNetworkTarget(parts.slice(1)) || "127.0.0.1", true);
+    if (base === "nslookup") return showHostNslookup(args[0] || "");
+    if (base === "dig") return showMacDig(parts.slice(1));
+    if (base === "host") return showMacHost(args[0] || "");
+    if (["ssh", "telnet", "ftp", "sftp"].includes(base)) return runHostSession(base === "sftp" ? "ssh" : base, parts.slice(1).join(" "));
+    if (base === "scp") return showMacScp(parts.slice(1));
+    if (base === "curl") return showMacCurl(parts.slice(1));
+    if (base === "nc") return showMacNc(parts.slice(1));
+    if (base === "lsof") return showMacLsof(parts.slice(1));
+    if (base === "ps") return showMacPs(parts.slice(1));
+    if (base === "top") return showMacTop(parts.slice(1));
+    if (base === "kill") return push("dim", `${args[0] || "process"}: signal sent (simulated)`);
+    if (base === "df") return showMacDf(parts.slice(1));
+    if (base === "du") return showMacDu(parts.slice(1));
+    if (cmd === "mount") return pushMany(["/dev/disk3s5s1 on / (apfs, sealed, local, read-only)", "/dev/disk3s1 on /System/Volumes/Data (apfs, local, journaled)"]);
+    if (base === "diskutil") return showMacDiskutil(parts.slice(1));
+    if (base === "system_profiler") return showMacSystemProfiler(parts.slice(1));
+    if (base === "pmset") return showMacPmset(parts.slice(1));
+    if (base === "launchctl") return showMacLaunchctl(parts.slice(1));
+    if (base === "sysctl") return showMacSysctl(parts.slice(1));
+    if (base === "dscacheutil") return showMacDscacheutil(parts.slice(1));
+    if (base === "dscl") return showMacDscl(parts.slice(1));
+    if (base === "sudo") return push("err", "sudo: a password is required (simulated shell)");
+    invalid(cmd);
+  }
+
+  function macPrimaryIfaceName() {
+    return device.interfaces?.en0 ? "en0" : (Object.keys(device.interfaces || {})[0] || "en0");
+  }
+
+  function macPrimaryIface() {
+    return device.interfaces?.[macPrimaryIfaceName()] || {};
+  }
+
+  function showMacMan(name) {
+    const summaries = {
+      ls: "list directory contents",
+      ifconfig: "configure network interface parameters",
+      networksetup: "configuration tool for Network preferences",
+      launchctl: "interfaces with launchd",
+      defaults: "access the macOS user defaults system",
+      diskutil: "modify, verify and repair local disks",
+      system_profiler: "reports system hardware and software configuration",
+      pmset: "modify power management settings",
+      sysctl: "get or set kernel state",
+    };
+    push("", `${name.toUpperCase()}(1)                  General Commands Manual`);
+    push("", "");
+    push("", `NAME\n     ${name} - ${summaries[name] || "simulated macOS command"}`);
+    push("", "");
+    push("", "SYNOPSIS\n     Common flags are accepted when supported by the OpenPT shell simulator.");
+  }
+
+  function showMacLs(flags, args, cwd) {
+    const showAll = flags.some((f) => f.includes("a")) || flags.includes("--all");
+    const long = flags.some((f) => f.includes("l"));
+    const entries = macDirEntries(args[0] ? macResolvePath(args[0], cwd) : cwd, showAll);
+    if (long) {
+      push("", "total 40");
+      entries.forEach((e) => push("", `${e.mode}  1 ${macUser().padEnd(8)} staff ${String(e.size).padStart(7)} ${e.date} ${e.name}`));
+      return;
+    }
+    push("", entries.map((e) => e.name).join("  "));
+  }
+
+  function macDirEntries(path, showAll = false) {
+    const base = [
+      { name: "Desktop", mode: "drwx------", size: 128, date: "May 18 09:13" },
+      { name: "Documents", mode: "drwx------", size: 224, date: "May 18 09:17" },
+      { name: "Downloads", mode: "drwx------", size: 96, date: "May 17 21:04" },
+      { name: "openpt-notes.txt", mode: "-rw-r--r--", size: 2318, date: "May 18 09:22" },
+      { name: "lab-report.md", mode: "-rw-r--r--", size: 842, date: "May 18 09:25" },
+    ];
+    const root = [
+      { name: "Applications", mode: "drwxr-xr-x", size: 736, date: "May 16 11:02" },
+      { name: "Library", mode: "drwxr-xr-x", size: 512, date: "May 16 11:02" },
+      { name: "System", mode: "drwxr-xr-x", size: 320, date: "May 16 11:02" },
+      { name: "Users", mode: "drwxr-xr-x", size: 160, date: "May 16 11:02" },
+      { name: "Volumes", mode: "drwxr-xr-x", size: 96, date: "May 16 11:02" },
+    ];
+    const hidden = [{ name: ".zshrc", mode: "-rw-r--r--", size: 184, date: "May 18 09:11" }, { name: ".ssh", mode: "drwx------", size: 96, date: "May 18 09:12" }];
+    const files = Object.entries(device.files || {}).map(([name, body]) => ({ name: hostDisplayPath(name).split(/[\\/]/).pop(), mode: "-rw-r--r--", size: String(body || "").length, date: "May 18 09:30" }));
+    const list = path === "/" ? root : [...base, ...files];
+    return showAll ? [{ name: ".", mode: "drwx------", size: 256, date: "May 18 09:10" }, { name: "..", mode: "drwxr-xr-x", size: 160, date: "May 18 09:10" }, ...hidden, ...list] : list;
+  }
+
+  function showMacFind(tokens, cwd) {
+    const path = tokens.find((t) => !t.startsWith("-")) || cwd;
+    const nameIdx = tokens.indexOf("-name");
+    const pattern = nameIdx >= 0 ? tokens[nameIdx + 1] || "*" : "*";
+    const matches = ["openpt-notes.txt", "lab-report.md", "Desktop/capture.pcap", "Documents/startup-config.txt"].filter((n) => macGlobMatch(n, pattern));
+    pushMany(matches.map((n) => `${macResolvePath(path, cwd).replace(/\/$/, "")}/${n}`));
+  }
+
+  function showMacGrep(tokens) {
+    const opts = tokens.filter((t) => t.startsWith("-")).join(" ");
+    const words = tokens.filter((t) => !t.startsWith("-"));
+    const pattern = words[0] || "";
+    const file = words[1] || "openpt-notes.txt";
+    if (!pattern) return push("err", "usage: grep [-inrv] pattern [file ...]");
+    const prefix = opts.includes("n") ? "1:" : "";
+    push("", `${file}:${prefix}${pattern} found in simulated lab notes`);
+  }
+
+  function showMacTextCommand(base, tokens) {
+    const target = tokens.filter((t) => !t.startsWith("-")).pop() || "openpt-notes.txt";
+    if (base === "cat") return pushMany([`# ${target}`, "OpenPT macOS shell notes", "Use ping, traceroute, ifconfig, networksetup, curl, ps, df, and defaults for labs."]);
+    if (base === "head") return pushMany(["OpenPT macOS shell notes", "Use ping, traceroute, ifconfig."]);
+    if (base === "tail") return pushMany(["Use ps, df, launchctl.", "End of simulated file."]);
+    if (base === "wc") return push("", `       3      18     126 ${target}`);
+    if (base === "sort") return pushMany(["Applications", "Desktop", "Documents", "Downloads"]);
+    if (base === "uniq") return pushMany(["OpenPT", "macOS", "network"]);
+  }
+
+  function showMacUtilityCommand(base, tokens) {
+    if (!tokens.length && !["defaults", "say"].includes(base)) return push("err", `usage: ${base} [options] operand ...`);
+    if (base === "defaults") return showMacDefaults(tokens);
+    if (base === "plutil") return push("", "lab.plist: OK");
+    if (base === "open") return push("ok", `Opened ${tokens.filter((t) => !t.startsWith("-")).join(" ") || "."} (simulated)`);
+    if (base === "say") return push("dim", tokens.join(" ") || "Nothing to say.");
+    if (base === "xattr") return push("", tokens.includes("-l") ? "com.apple.quarantine: 0081;OpenPT;" : "");
+    push("ok", `${base}: ${tokens.join(" ")} (simulated)`);
+  }
+
+  function showMacDefaults(tokens) {
+    const action = tokens[0] || "";
+    if (action === "read") return push("", "{\n    AppleInterfaceStyle = Dark;\n    OpenPTLabMode = 1;\n}");
+    if (["write", "delete"].includes(action)) return push("ok", `defaults ${tokens.join(" ")} (simulated)`);
+    push("err", "usage: defaults read|write|delete domain [key] [value]");
+  }
+
+  function showMacUname(flags) {
+    if (flags.includes("-a")) return push("", `${macKernel()} ${device.hostname}.local 24.5.0 Darwin Kernel Version 24.5.0: arm64`);
+    if (flags.includes("-m")) return push("", "arm64");
+    if (flags.includes("-n")) return push("", `${device.hostname}.local`);
+    if (flags.includes("-r")) return push("", "24.5.0");
+    if (flags.includes("-v")) return push("", "Darwin Kernel Version 24.5.0: OpenPT simulated");
+    push("", "Darwin");
+  }
+
+  function showMacSwVers(flags) {
+    const rows = { "-productName": "macOS", "-productVersion": "15.5", "-buildVersion": "24F74" };
+    const selected = flags.find((f) => rows[f]);
+    if (selected) return push("", rows[selected]);
+    pushMany(["ProductName:\t\tmacOS", "ProductVersion:\t\t15.5", "BuildVersion:\t\t24F74"]);
+  }
+
+  function showMacEnv() {
+    pushMany([`USER=${macUser()}`, "SHELL=/bin/zsh", `HOME=/Users/${macUser()}`, "PATH=/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin", "TERM=xterm-256color"]);
+  }
+
+  function showMacPrintenv(name) {
+    const values = { USER: macUser(), SHELL: "/bin/zsh", HOME: `/Users/${macUser()}`, PATH: "/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin", TERM: "xterm-256color" };
+    if (!name) return showMacEnv();
+    if (values[name]) push("", values[name]);
+  }
+
+  function showMacIfconfig(tokens) {
+    const ifaceFilter = tokens.find((t) => !t.startsWith("-"));
+    const rows = Object.entries(device.interfaces || {}).filter(([name]) => !ifaceFilter || name === ifaceFilter);
+    rows.forEach(([name, e]) => {
+      push("", `${name}: flags=8863<UP,BROADCAST,SMART,RUNNING,SIMPLEX,MULTICAST> mtu 1500`);
+      push("", `\tether ${String(e.mac || "00:00:00:00:00:00").toLowerCase()}`);
+      if (e.ip) push("", `\tinet ${e.ip} netmask ${macHexMask(e.mask)} broadcast ${macBroadcast(e.ip, e.mask)}`);
+      push("", `\tstatus: ${e.up ? "active" : "inactive"}`);
+    });
+  }
+
+  function runMacIpconfig(tokens) {
+    const action = tokens[0];
+    const iface = tokens[1] || macPrimaryIfaceName();
+    const e = device.interfaces?.[iface] || macPrimaryIface();
+    if (action === "getifaddr") return push("", e.ip || "0.0.0.0");
+    if (action === "getoption") return push("", tokens[2] === "router" ? (e.gw || "0.0.0.0") : (e.dns || hostDnsServer() || "0.0.0.0"));
+    if (action === "set") {
+      if (String(tokens[2] || "").toUpperCase() === "DHCP") apply({ kind: "host-dhcp", iface });
+      return push("ok", `ipconfig set ${iface} ${tokens.slice(2).join(" ")} (simulated)`);
+    }
+    push("err", "usage: ipconfig getifaddr <interface> | getoption <interface> router | set <interface> DHCP");
+  }
+
+  function runMacNetworksetup(tokens) {
+    const action = tokens[0];
+    const iface = macPrimaryIfaceName();
+    const e = macPrimaryIface();
+    if (action === "-listallhardwareports") return pushMany([`Hardware Port: Ethernet\nDevice: ${iface}\nEthernet Address: ${String(e.mac || "").toLowerCase()}`, "Hardware Port: Wi-Fi\nDevice: en1\nEthernet Address: 02:00:00:00:00:01"]);
+    if (action === "-getinfo") return pushMany([`DHCP Configuration`, `IP address: ${e.ip || "0.0.0.0"}`, `Subnet mask: ${e.mask || "0.0.0.0"}`, `Router: ${e.gw || "0.0.0.0"}`]);
+    if (action === "-setmanual") {
+      const ip = tokens[tokens.length - 3], mask = tokens[tokens.length - 2], gw = tokens[tokens.length - 1];
+      apply({ kind: "host-ip", iface, ip, mask, gw });
+      return push("ok", `${iface} configured ${ip} ${mask} router ${gw}`);
+    }
+    if (action === "-setdhcp") {
+      apply({ kind: "host-dhcp", iface });
+      return push("dim", `${iface}: DHCP request sent.`);
+    }
+    if (action === "-setdnsservers") return push("ok", `DNS servers set to ${tokens.slice(2).join(", ")}`);
+    push("err", "usage: networksetup -listallhardwareports|-getinfo <service>|-setmanual <service> ip mask router|-setdhcp <service>");
+  }
+
+  function runMacScutil(tokens) {
+    if (tokens[0] === "--dns") return pushMany([`DNS configuration`, `resolver #1`, `  nameserver[0] : ${hostDnsServer() || "0.0.0.0"}`, "  if_index : 4 (en0)"]);
+    if (tokens[0] === "--nwi") return pushMany(["Network information", `IPv4: ${macPrimaryIface().ip || "0.0.0.0"} on en0`, "Reachable: yes"]);
+    if (tokens[0] === "--get") return push("", tokens[1] === "HostName" ? `${device.hostname}.local` : device.hostname);
+    push("err", "usage: scutil --dns|--nwi|--get ComputerName|HostName");
+  }
+
+  function showMacRoute(tokens) {
+    if (tokens.includes("default")) return pushMany(["   route to: default", `destination: default`, `    gateway: ${macPrimaryIface().gw || "0.0.0.0"}`, "  interface: en0", "      flags: <UP,GATEWAY,DONE,STATIC>"]);
+    push("err", "usage: route -n get default");
+  }
+
+  function showMacNetstat(tokens) {
+    if (tokens.some((t) => t.includes("r"))) return pushMany(["Routing tables", "Internet:", "Destination        Gateway            Flags        Netif", `default            ${macPrimaryIface().gw || "0.0.0.0"}        UGSc         en0`, `${OPT_Engine.networkAddress(macPrimaryIface().ip || "0.0.0.0", macPrimaryIface().mask || "255.255.255.0")}        link#4             UCS          en0`]);
+    pushMany(["Active Internet connections", "Proto Recv-Q Send-Q  Local Address          Foreign Address        (state)", `tcp4       0      0  ${macPrimaryIface().ip || "0.0.0.0"}.ssh      0.0.0.0.*              LISTEN`]);
+  }
+
+  function showMacArp(tokens) {
+    if (tokens.includes("-a") || !tokens.length) return showHostArp();
+    if (tokens.includes("-d")) return push("dim", "arp entry deleted (simulated)");
+    push("err", "usage: arp -a | arp -d host");
+  }
+
+  function showMacDig(tokens) {
+    const name = tokens.find((t) => !t.startsWith("+") && !t.startsWith("-") && !["A", "AAAA", "MX", "TXT"].includes(t.toUpperCase())) || "";
+    const resolved = resolveHostTarget(name);
+    pushMany(["; <<>> DiG 9.10 <<>> " + (tokens.join(" ") || name), ";; QUESTION SECTION:", `;${name || "."}\t\tIN\tA`, ";; ANSWER SECTION:"]);
+    push("", resolved ? `${name}\t60\tIN\tA\t${resolved}` : ";; no answers");
+  }
+
+  function showMacHost(name) {
+    const resolved = resolveHostTarget(name);
+    push(resolved ? "" : "err", resolved ? `${name} has address ${resolved}` : `Host ${name} not found: 3(NXDOMAIN)`);
+  }
+
+  function showMacScp(tokens) {
+    if (tokens.length < 2) return push("err", "usage: scp [-rp] source target");
+    push("ok", `${tokens[0]} -> ${tokens[1]} copied (simulated)`);
+  }
+
+  function showMacCurl(tokens) {
+    const url = tokens.find((t) => /^https?:\/\//.test(t) || (/^[\w.-]+(?:\/|$)/.test(t) && !t.startsWith("-")));
+    const headOnly = tokens.includes("-I") || tokens.includes("--head");
+    const host = String(url || "").replace(/^https?:\/\//, "").split(/[/:]/)[0];
+    const target = deviceByIpOrName(resolveHostTarget(host) || host);
+    if (headOnly) return pushMany([`HTTP/1.1 ${target ? "200 OK" : "000 Connect failed"}`, "Server: OpenPT", "Content-Type: text/html"]);
+    push(target ? "ok" : "err", target ? `<html><body><h1>${target.hostname}</h1></body></html>` : `curl: (7) Failed to connect to ${host || "host"}`);
+  }
+
+  function showMacNc(tokens) {
+    const host = tokens.find((t) => !t.startsWith("-") && !/^\d+$/.test(t));
+    const port = tokens.find((t) => /^\d+$/.test(t));
+    const target = deviceByIpOrName(resolveHostTarget(host) || host);
+    const service = Object.keys({ ssh: 22, telnet: 23, ftp: 21, http: 80, https: 443 }).find((name) => hostServicePort(name) === Number(port));
+    push(target && hostServiceEnabled(target, service) ? "ok" : "err", target && hostServiceEnabled(target, service) ? `Connection to ${host} port ${port} [tcp/*] succeeded!` : `nc: connectx to ${host || "host"} port ${port || "0"} failed: Connection refused`);
+  }
+
+  function showMacLsof() {
+    pushMany(["COMMAND   PID  USER   FD   TYPE DEVICE SIZE/OFF NODE NAME", `ssh       501 ${macUser()}   3u  IPv4 0x001      0t0  TCP *:22 (LISTEN)`, `mDNSResp  88 _mdns   5u  IPv4 0x002      0t0  UDP *:5353`]);
+  }
+
+  function showMacPs(tokens) {
+    if (tokens.includes("aux")) return pushMany(["USER       PID  %CPU %MEM      VSZ    RSS   TT  STAT STARTED      TIME COMMAND", `root         1   0.0  0.1  421000   9900   ??  Ss   09:00AM   0:01.20 /sbin/launchd`, `${macUser()}    501   0.1  0.4  430000  22100 s000  S    09:10AM   0:00.08 -zsh`]);
+    pushMany(["  PID TTY           TIME CMD", "  501 ttys000    0:00.08 -zsh", "  642 ttys000    0:00.01 ps"]);
+  }
+
+  function showMacTop() {
+    pushMany(["Processes: 321 total, 2 running, 319 sleeping", "Load Avg: 0.38, 0.31, 0.28  CPU usage: 4.2% user, 3.1% sys, 92.7% idle", "PID    COMMAND      %CPU  MEM", "501    zsh          0.1   8M", "88     mDNSResponder 0.0  5M"]);
+  }
+
+  function showMacDf() {
+    pushMany(["Filesystem       Size   Used  Avail Capacity iused      ifree %iused  Mounted on", "/dev/disk3s5s1  228Gi   12Gi  102Gi    11%  404k 1073741824    0%   /", "/dev/disk3s1    228Gi  110Gi  102Gi    52%  1.1M 1073741824    0%   /System/Volumes/Data"]);
+  }
+
+  function showMacDu(tokens) {
+    push("", `4.0K\t${tokens.filter((t) => !t.startsWith("-")).pop() || "."}`);
+  }
+
+  function showMacDiskutil(tokens) {
+    if (tokens[0] !== "list") return push("err", "usage: diskutil list");
+    pushMany(["/dev/disk3 (internal, physical):", "   #: TYPE NAME                    SIZE       IDENTIFIER", "   0: GUID_partition_scheme        *245.1 GB  disk3", "   1: Apple_APFS Container disk4    245.1 GB  disk3s1"]);
+  }
+
+  function showMacSystemProfiler(tokens) {
+    const type = tokens[0] || "SPHardwareDataType";
+    if (type === "SPNetworkDataType") return pushMany(["Network:", `  Ethernet:`, `    BSD Device Name: en0`, `    IPv4 Addresses: ${macPrimaryIface().ip || "0.0.0.0"}`]);
+    pushMany(["Hardware:", "  Model Name: Mac", "  Model Identifier: Mac15,3", "  Chip: Apple M3", "  Memory: 16 GB", `  Serial Number: OPENPT${device.id.slice(-6).toUpperCase()}`]);
+  }
+
+  function showMacPmset(tokens) {
+    if (tokens[0] === "-g" && tokens[1] === "batt") return push("", "Now drawing from 'AC Power'\n -InternalBattery-0 (id=1234567) 100%; charged; 0:00 remaining");
+    pushMany(["System-wide power settings:", " sleep                10", " displaysleep         10", " powernap             1"]);
+  }
+
+  function showMacLaunchctl(tokens) {
+    if (tokens[0] !== "list") return push("err", "usage: launchctl list");
+    pushMany(["PID\tStatus\tLabel", "88\t0\tcom.apple.mDNSResponder", "501\t0\tcom.apple.UserEventAgent-Aqua", "-\t0\tcom.openpt.lab-agent"]);
+  }
+
+  function showMacSysctl(tokens) {
+    const name = tokens.filter((t) => !t.startsWith("-")).pop() || "kern.ostype";
+    const values = { "kern.ostype": "Darwin", "kern.osrelease": "24.5.0", "hw.memsize": "17179869184", "hw.machine": "arm64" };
+    const value = values[name] || "1";
+    push("", tokens.includes("-n") ? value : `${name}: ${value}`);
+  }
+
+  function showMacDscacheutil(tokens) {
+    if (tokens.includes("-q") && tokens.includes("host")) return pushMany([`name: ${device.hostname}.local`, `ip_address: ${macPrimaryIface().ip || "127.0.0.1"}`]);
+    push("err", "usage: dscacheutil -q host -a name <host>");
+  }
+
+  function showMacDscl(tokens) {
+    if (tokens.includes("-list")) return pushMany(["_", "admin", "daemon", "nobody", macUser()]);
+    push("err", "usage: dscl . -list /Users");
+  }
+
   function runHost(cmd) {
     let m;
     if (cmd === "?" || cmd === "help") return showHelp();
@@ -342,25 +739,25 @@ function CLI({ device, devices = {}, links = [], onApply, onPing, pendingCmd, ac
     }
     if (cmd === "ip dhcp" || cmd === "dhcp") {
       apply({ kind: "host-dhcp" });
-      return push("dim", "DHCP discovery sent on eth0.");
+      return push("dim", `DHCP discovery sent on ${primaryHostIface()[0]}.`);
     }
     if (cmd === "ipconfig" || cmd === "ipconfig /all" || cmd === "show ip") {
       return showHostIpConfig(cmd === "ipconfig /all");
     }
     if (cmd === "ipconfig /release") {
       apply({ kind: "host-ip", ip: null, mask: null, gw: null });
-      return push("dim", "Windows IP Configuration\n\nEthernet adapter eth0: IP address released.");
+      return push("dim", `Windows IP Configuration\n\nEthernet adapter ${primaryHostIface()[0]}: IP address released.`);
     }
     if (cmd === "ipconfig /renew") {
       apply({ kind: "host-dhcp" });
-      return push("dim", "Windows IP Configuration\n\nEthernet adapter eth0: DHCP request sent.");
+      return push("dim", `Windows IP Configuration\n\nEthernet adapter ${primaryHostIface()[0]}: DHCP request sent.`);
     }
     if (cmd === "ipconfig /?") {
       return pushMany([
         "USAGE: ipconfig [/all] [/release] [/renew]",
         "  /all       Display full configuration information.",
-        "  /release   Release the IPv4 address for eth0.",
-        "  /renew     Renew the IPv4 address for eth0.",
+        `  /release   Release the IPv4 address for ${primaryHostIface()[0]}.`,
+        `  /renew     Renew the IPv4 address for ${primaryHostIface()[0]}.`,
       ], "dim");
     }
     if (cmd === "ipv6config" || cmd === "ipv6config /all") {
@@ -596,8 +993,8 @@ function CLI({ device, devices = {}, links = [], onApply, onPing, pendingCmd, ac
       return setMode({ name: "conf-vlan", vlan: Number(m[1]) });
     }
     if ((m = cmd.match(/^no vlan (\d+)$/))) return apply({ kind: "vlan-remove", id: Number(m[1]) });
-    if ((m = cmd.match(/^ip route (\S+) (\S+) (\S+)$/))) return apply({ kind: "ip-route", dst: m[1], mask: m[2], via: m[3] });
-    if ((m = cmd.match(/^no ip route (\S+) (\S+) (\S+)$/))) return apply({ kind: "no-ip-route", dst: m[1], mask: m[2], via: m[3] });
+    if ((m = cmd.match(/^ip route (\S+) (\S+) (\S+)$/))) return apply({ kind: "ip-route", dst: m[1], mask: m[2], via: normalizeIface(m[3], device) || m[3] });
+    if ((m = cmd.match(/^no ip route (\S+) (\S+) (\S+)$/))) return apply({ kind: "no-ip-route", dst: m[1], mask: m[2], via: normalizeIface(m[3], device) || m[3] });
     if ((m = cmd.match(/^router ospf (\d+)$/))) {
       apply({ kind: "ospf-create", pid: m[1] });
       return setMode({ name: "conf-router", proto: "ospf", pid: m[1] });
@@ -843,11 +1240,26 @@ function CLI({ device, devices = {}, links = [], onApply, onPing, pendingCmd, ac
     push("", `System image file is "flash:${device.image || "openpt"}.bin"`);
     push("", `cisco ${device.model || device.kind} processor with ${Object.keys(device.interfaces || {}).length} interfaces`);
   }
+  function logicalIfaceUp(name, ifc) {
+    if (!ifc || ifc.admUp === false) return false;
+    if (ifc.up) return true;
+    const parent = ifc.parentIface || String(name || "").match(/^(.+)\.\d+$/)?.[1];
+    if (parent && device.interfaces?.[parent]?.up && device.interfaces?.[parent]?.admUp !== false) return true;
+    if (OPT_Engine.dot1qVlanForIface?.(name, ifc) == null || !OPT_Engine.isRouterLike(device)) return false;
+    return Object.entries(device.interfaces || {}).some(([pname, pifc]) =>
+      pname !== name &&
+      OPT_Engine.ifacePortInfo(device, pname).media !== "virtual" &&
+      pifc.up &&
+      pifc.admUp !== false &&
+      (links || []).some((l) => (l.a === device.id && l.ai === pname) || (l.b === device.id && l.bi === pname))
+    );
+  }
   function showIpBrief() {
     push("dim", "Interface                      IP-Address      OK? Method Status                Protocol");
     Object.entries(device.interfaces || {}).forEach(([n, i]) => {
-      const status = i.admUp === false ? "administratively down" : (i.up ? "up" : "down");
-      push(i.up ? "ok" : "warn", `${shortIface(n).padEnd(30)}${(i.ip || "unassigned").padEnd(16)}YES manual ${status.padEnd(22)}${i.up ? "up" : "down"}`);
+      const up = logicalIfaceUp(n, i);
+      const status = i.admUp === false ? "administratively down" : (up ? "up" : "down");
+      push(up ? "ok" : "warn", `${shortIface(n).padEnd(30)}${(i.ip || "unassigned").padEnd(16)}YES manual ${status.padEnd(22)}${up ? "up" : "down"}`);
     });
   }
   function showInterfaces(cmd) {
@@ -855,7 +1267,8 @@ function CLI({ device, devices = {}, links = [], onApply, onPing, pendingCmd, ac
     const target = parts.length > 2 ? normalizeIface(parts.slice(2).join(" "), device) : null;
     const list = target ? [[target, device.interfaces[target]]] : Object.entries(device.interfaces || {});
     list.filter(([, i]) => i).forEach(([n, i]) => {
-      push("", `${shortIface(n)} is ${i.up ? "up" : "down"}, line protocol is ${i.up ? "up" : "down"}`);
+      const up = logicalIfaceUp(n, i);
+      push("", `${shortIface(n)} is ${up ? "up" : "down"}, line protocol is ${up ? "up" : "down"}`);
       push("", `  Hardware is ${i.routed ? "routed port" : (i.mode ? `switchport ${i.mode}` : "Ethernet")}, address is ${i.mac}`);
       if (i.ip) push("", `  Internet address is ${i.ip}/${OPT_Engine.maskBits(i.mask)}`);
       if (i.desc) push("", `  Description: ${i.desc}`);
@@ -865,7 +1278,10 @@ function CLI({ device, devices = {}, links = [], onApply, onPing, pendingCmd, ac
     if (!OPT_Engine.isRouterLike(device)) return push("err", "% IP routing table is not available on this device");
     push("dim", "Codes: C - connected, S - static, O - OSPF");
     if (!device.routes?.length) return push("dim", "Gateway of last resort is not set\n\nNo routes.");
-    (device.routes || []).forEach((r) => push("", `${r.type.padEnd(3)} ${r.dst}/${OPT_Engine.maskBits(r.mask)} ${r.via === "directly" ? `is directly connected, ${shortIface(r.iface)}` : `via ${r.via}, ${shortIface(r.iface)}`}`));
+    (device.routes || []).forEach((r) => {
+      const exitOnly = r.via === "directly" || device.interfaces?.[r.via];
+      push("", `${r.type.padEnd(3)} ${r.dst}/${OPT_Engine.maskBits(r.mask)} ${exitOnly ? `is directly connected, ${shortIface(r.iface)}` : `via ${r.via}, ${shortIface(r.iface)}`}`);
+    });
   }
   function showVlan() {
     if (!device.vlans) return push("err", "% VLAN database is not available on this device");
@@ -1165,6 +1581,11 @@ function CLI({ device, devices = {}, links = [], onApply, onPing, pendingCmd, ac
 function normalizeIface(s, device) {
   const cleaned = s.trim().replace(/\s+/g, "");
   for (const k of Object.keys(device.interfaces || {})) if (k.toLowerCase() === cleaned.toLowerCase()) return k;
+  const sub = cleaned.match(/^(.+)\.(\d+)$/);
+  if (sub) {
+    const parent = normalizeIface(sub[1], device);
+    if (parent && !parent.toLowerCase().startsWith("vlan")) return `${parent}.${sub[2]}`;
+  }
   const m = cleaned.match(/^(gigabitethernet|gig|gi|g|fastethernet|fast|fa|f|serial|ser|se|s|ethernet|eth|e|vlan|vl)(.+)$/i);
   if (!m) return null;
   const pre = m[1].toLowerCase();
@@ -1182,7 +1603,8 @@ function normalizeIface(s, device) {
 function expandIosAbbreviations(input, mode, device) {
   const cmd = String(input || "").trim().replace(/\s+/g, " ");
   if (!cmd || cmd === "?" || cmd.endsWith(" ?")) return cmd;
-  const modeName = commandHintKey(mode, device) === "host" ? "host" : (mode?.name === "conf-if-range" ? "conf-if-range" : mode?.name);
+  const hintKey = commandHintKey(mode, device);
+  const modeName = hintKey === "host" || hintKey === "mac" ? hintKey : (mode?.name === "conf-if-range" ? "conf-if-range" : mode?.name);
   const expanded = matchIosSpec(cmd, modeName);
   if (expanded) {
     if (expanded.startsWith("do ")) {
@@ -1266,9 +1688,70 @@ function isHostConsoleDevice(device) {
   return !!(OPT_Engine.isHostLike?.(device) || device?.kind === "server");
 }
 
+function isMacConsoleDevice(device) {
+  return device?.kind === "mac";
+}
+
 function commandHintKey(mode, device) {
+  if (mode?.name === "user" && isMacConsoleDevice(device)) return "mac";
   if (mode?.name === "user" && isHostConsoleDevice(device)) return "host";
   return mode?.name === "conf-if-range" ? "conf-if" : mode?.name;
+}
+
+function shellWords(text) {
+  const out = [];
+  String(text || "").replace(/"([^"]*)"|'([^']*)'|(\S+)/g, (_, dq, sq, bare) => {
+    out.push(dq ?? sq ?? bare);
+    return "";
+  });
+  return out;
+}
+
+function macUser() {
+  return "admin";
+}
+
+function macKernel() {
+  return "Darwin";
+}
+
+function macPromptPath(path) {
+  const home = `/Users/${macUser()}`;
+  if (!path || path === home) return "~";
+  if (path.startsWith(`${home}/`)) return `~/${path.slice(home.length + 1)}`;
+  return path;
+}
+
+function macResolvePath(path, cwd = `/Users/${macUser()}`) {
+  const raw = String(path || cwd).trim();
+  const home = `/Users/${macUser()}`;
+  const absolute = raw.startsWith("/") ? raw : raw === "~" ? home : raw.startsWith("~/") ? `${home}/${raw.slice(2)}` : `${cwd.replace(/\/$/, "")}/${raw}`;
+  const parts = [];
+  for (const part of absolute.split("/")) {
+    if (!part || part === ".") continue;
+    if (part === "..") parts.pop();
+    else parts.push(part);
+  }
+  return `/${parts.join("/")}` || "/";
+}
+
+function macGlobMatch(value, pattern) {
+  const escaped = String(pattern || "*").replace(/[.+^${}()|[\]\\]/g, "\\$&").replace(/\*/g, ".*").replace(/\?/g, ".");
+  return new RegExp(`^${escaped}$`, "i").test(value) || value.toLowerCase().includes(String(pattern || "").replace(/\*/g, "").toLowerCase());
+}
+
+function macHexMask(mask) {
+  const n = OPT_Engine.ipToInt ? OPT_Engine.ipToInt(mask || "255.255.255.0") : 0xffffff00;
+  return `0x${n.toString(16).padStart(8, "0")}`;
+}
+
+function macBroadcast(ip, mask) {
+  if (!OPT_Engine.ipToInt || !OPT_Engine.intToIp) return "255.255.255.255";
+  return OPT_Engine.intToIp(OPT_Engine.ipToInt(ip || "0.0.0.0") | (~OPT_Engine.ipToInt(mask || "255.255.255.0") >>> 0));
+}
+
+function macNetworkTarget(tokens) {
+  return tokens.filter((t) => !t.startsWith("-") && !/^\d+$/.test(t)).pop();
 }
 
 function isIpv4(value) {

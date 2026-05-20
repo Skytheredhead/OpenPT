@@ -126,6 +126,7 @@ function packetTracerKind(device) {
   if (text.includes("internet")) return "internet";
   if (text.includes("router")) return "router";
   if (text.includes("server")) return "server";
+  if (text.includes("mac")) return "mac";
   if (text.includes("pc")) return "pc";
   if (text.includes("switch") || /^sw/i.test(device?.name || "")) return "l2switch";
   return device?.kind || "l2switch";
@@ -145,6 +146,7 @@ function packetTracerPlatform(device) {
   if (text.includes("printer")) return "printer";
   if (text.includes("phone")) return "ipphone";
   if (text.includes("server")) return "genericServer";
+  if (text.includes("mac")) return "mac";
   if (text.includes("dsl")) return "dslmodem";
   if (text.includes("cable")) return "cablemodem";
   if (text.includes("internet")) return "internet";
@@ -349,6 +351,7 @@ const OPENPT_VERSION = "0.2.4-sync.20260518";
 const SYNC_AUTOSAVE_CHANGES = 20;
 const SYNC_AUTOSAVE_MS = 60_000;
 const SYNC_MIN_SAVE_MS = 10_000;
+const CLI_REVEAL_MIN_HEIGHT = 360;
 
 const SERVER_CONFIG_SECTIONS = [
   ["http", "HTTP"],
@@ -435,7 +438,7 @@ const ENDPOINT_DESKTOP_APPS = [
 ];
 
 function isEndpointAppsDevice(device) {
-  return device?.kind === "pc" || device?.kind === "laptop";
+  return device?.kind === "pc" || device?.kind === "mac" || device?.kind === "laptop";
 }
 
 function endpointAppByKey(key) {
@@ -1050,6 +1053,7 @@ function App() {
   const [fileDropActive, setFileDropActive] = useState(false);
   const [ctx, setCtx] = useState(null);  // { x, y, devId }
   const [pendingCmd, setPendingCmd] = useState(null);  // { devId, cmd, nonce }
+  const [cliFocusNonce, setCliFocusNonce] = useState(0);
   const [bottomPanelHeight, setBottomPanelHeight] = useState(() => {
     try {
       const saved = Number(localStorage.getItem("openpt:bottom-height"));
@@ -1837,7 +1841,7 @@ function App() {
     const kind = cat?.kind || catalogId;
     // pick a friendly name
     const existing = Object.values(devices).filter(d => (cat?.platform ? d.platform === cat.platform : d.kind === kind)).length + 1;
-    const baseName = { router: "R", l2switch: "SW", l3switch: "MLS", pc: "PC", laptop: "LAP", server: "SRV", wrt: "WRT", asa: "ASA", printer: "PRN", phone: "IPPHONE", ap: "AP", cloud: "CLOUD", internet: "INET", dslmodem: "DSL", cablemodem: "CABLE" }[kind] || "DEV";
+    const baseName = { router: "R", l2switch: "SW", l3switch: "MLS", pc: "PC", mac: "MAC", laptop: "LAP", server: "SRV", wrt: "WRT", asa: "ASA", printer: "PRN", phone: "IPPHONE", ap: "AP", cloud: "CLOUD", internet: "INET", dslmodem: "DSL", cablemodem: "CABLE" }[kind] || "DEV";
     const d = OPT_Engine.makeDevice(kind, `${baseName}${existing}`, x, y, {}, { platform: cat?.platform });
     const id = d.id;
     if (OPT_Engine.isHostLike?.(d) || kind === "server") {
@@ -1851,6 +1855,55 @@ function App() {
     setDevices((m) => ({ ...m, [id]: d }));
     log("ok", "topology", `added ${(cat?.label || d.model)} ${d.hostname}`);
     setSelectedId(id);
+  };
+
+  const visibleCanvasCenter = () => {
+    const pan = topologyViewState?.pan || { x: 0, y: 0, k: 1 };
+    const wrap = document.querySelector(".canvas-wrap");
+    if (wrap) {
+      const r = wrap.getBoundingClientRect();
+      if (r.width > 0 && r.height > 0) {
+        return {
+          x: (r.width / 2 - pan.x) / (pan.k || 1),
+          y: (r.height / 2 - pan.y) / (pan.k || 1),
+        };
+      }
+    }
+
+    const ds = Object.values(devices);
+    if (!ds.length) return { x: 320, y: 240 };
+    return {
+      x: (Math.min(...ds.map((d) => d.x)) + Math.max(...ds.map((d) => d.x))) / 2,
+      y: (Math.min(...ds.map((d) => d.y)) + Math.max(...ds.map((d) => d.y))) / 2,
+    };
+  };
+
+  const openCanvasPointNear = (base) => {
+    const occupied = Object.values(devices);
+    if (!occupied.length) return { x: Math.round(base.x), y: Math.round(base.y) };
+
+    const clear = (p) => occupied.every((d) => Math.hypot((d.x || 0) - p.x, (d.y || 0) - p.y) >= 86);
+    for (let ring = 0; ring <= 8; ring++) {
+      const radius = ring * 72;
+      const steps = ring ? Math.max(8, ring * 8) : 1;
+      for (let i = 0; i < steps; i++) {
+        const angle = -Math.PI / 2 + (i / steps) * Math.PI * 2;
+        const p = {
+          x: base.x + Math.cos(angle) * radius,
+          y: base.y + Math.sin(angle) * radius,
+        };
+        if (clear(p)) return { x: Math.round(p.x), y: Math.round(p.y) };
+      }
+    }
+
+    const offset = occupied.length * 36;
+    return { x: Math.round(base.x + offset), y: Math.round(base.y + offset) };
+  };
+
+  const addDeviceFromMenu = (catalogId) => {
+    const p = openCanvasPointNear(visibleCanvasCenter());
+    setActiveCenterTab("topology");
+    addDevice(catalogId, p.x, p.y);
   };
 
   const moveDevice = (id, x, y) => {
@@ -2037,7 +2090,8 @@ function App() {
           break;
         case "interface-create":
           if (!ifaces[cmd.iface]) {
-            ifaces[cmd.iface] = { ip: null, mask: null, up: true, admUp: true, mac: randMac(), desc: "" };
+            const sub = String(cmd.iface).match(/^(.+)\.(\d+)$/);
+            ifaces[cmd.iface] = { ip: null, mask: null, up: true, admUp: true, mac: randMac(), desc: "", ...(sub ? { parentIface: sub[1] } : {}) };
             if (cmd.iface.toLowerCase().startsWith("vlan")) {
               const id = Number(cmd.iface.replace(/\D/g, ""));
               d.vlans = { ...(d.vlans || {}), [id]: d.vlans?.[id] || `VLAN${id}` };
@@ -2046,8 +2100,11 @@ function App() {
           }
           break;
         case "host-ip":
-          ifaces.eth0 = { ...ifaces.eth0, ip: cmd.ip, mask: cmd.mask, gw: cmd.gw, dhcp: false, up: true, admUp: true };
-          log("ok", d.hostname, `eth0 address ${cmd.ip} ${cmd.mask} gateway ${cmd.gw}`);
+          {
+            const hostIface = cmd.iface || (ifaces.eth0 ? "eth0" : (ifaces.en0 ? "en0" : Object.keys(ifaces)[0]));
+            ifaces[hostIface] = { ...ifaces[hostIface], ip: cmd.ip, mask: cmd.mask, gw: cmd.gw, dhcp: false, up: true, admUp: true };
+            log("ok", d.hostname, `${ifaceName(hostIface)} address ${cmd.ip} ${cmd.mask} gateway ${cmd.gw}`);
+          }
           break;
         case "ip-address":
           ifaces[cmd.iface] = { ...ifaces[cmd.iface], ip: cmd.ip, mask: cmd.mask };
@@ -2552,6 +2609,15 @@ function App() {
     handlePing(devId, cleaned);
   };
 
+  const revealCliPanel = () => {
+    setBottomCollapsed(false);
+    setBottomPanelHeight((height) => {
+      const maxHeight = Math.max(180, window.innerHeight - 170);
+      const target = Math.min(maxHeight, Math.max(CLI_REVEAL_MIN_HEIGHT, Math.round(window.innerHeight * 0.42)));
+      return Math.max(height, target);
+    });
+  };
+
   const reportImportError = async (activity = lastImportReport) => {
     if (!syncClient || !activity) return;
     try {
@@ -2577,7 +2643,9 @@ function App() {
   const openConsole = (id) => {
     setSelectedId(id);
     setOpenConsoles((cs) => cs.includes(id) ? cs : [...cs, id]);
+    revealCliPanel();
     setActiveBottom(id);
+    setCliFocusNonce((n) => n + 1);
   };
   const openServerModule = (id) => {
     setSelectedId(id);
@@ -2749,6 +2817,7 @@ function App() {
             setDevices({}); setLinks([]); setSelectedId(null); setSelectedLinkId(null); setEvents([]); setPackets([]); setPtActivity(null); log("warn", "system", "topology cleared");
           }}
           onDeleteSelected={() => selectedId && deleteDevice(selectedId)}
+          onAddDeviceFromMenu={addDeviceFromMenu}
           onPing={(srcName, dst) => {
             const src = Object.values(devices).find(d => d.hostname === srcName);
             if (src) handlePing(src.id, dst);
@@ -3051,6 +3120,7 @@ function App() {
                     onPing={handlePing}
                     pendingCmd={pendingCmd && pendingCmd.devId === id ? pendingCmd : null}
                     active={activeBottom === id}
+                    focusNonce={cliFocusNonce}
                     scrollState={terminalScrolls[id]}
                     onScrollStateChange={(devId, state) => setTerminalScrolls((m) => ({ ...m, [devId]: state }))}
                     historyState={cliHistory[id] || {}}
@@ -3347,7 +3417,7 @@ function TitleMenus(props) {
   const deviceGroups = [
     { title: "Routers", kinds: ["router"] },
     { title: "Switches", kinds: ["l2switch", "l3switch"] },
-    { title: "End Devices", kinds: ["pc", "laptop", "server", "printer", "phone", "ap"] },
+    { title: "End Devices", kinds: ["pc", "mac", "laptop", "server", "printer", "phone", "ap"] },
   ].map((group) => ({
     ...group,
     devices: DeviceCatalog.filter((d) => group.kinds.includes(d.kind)),
@@ -3456,6 +3526,10 @@ function TitleMenus(props) {
                         <div
                           key={d.id || d.kind}
                           draggable
+                          onClick={() => {
+                            props.onAddDeviceFromMenu && props.onAddDeviceFromMenu(d.id || d.kind);
+                            close();
+                          }}
                           onDragStart={(e) => {
                             e.dataTransfer.effectAllowed = "copy";
                             e.dataTransfer.setData("text/x-openpt-device", d.id || d.kind);
@@ -3466,7 +3540,7 @@ function TitleMenus(props) {
                             display: "flex", flexDirection: "column", alignItems: "center",
                             gap: 4, padding: "10px 4px 6px",
                             background: "var(--bg-2)", border: "1px solid transparent",
-                            borderRadius: 7, cursor: "grab",
+                            borderRadius: 7, cursor: "copy",
                           }}
                           onMouseEnter={(e) => { e.currentTarget.style.borderColor = "var(--line)"; }}
                           onMouseLeave={(e) => { e.currentTarget.style.borderColor = "transparent"; }}
@@ -3714,8 +3788,9 @@ function computeDiagnostics(devices, links) {
   const items = [];
   for (const d of Object.values(devices)) {
     if (OPT_Engine.isHostLike?.(d)) {
-      const e = d.interfaces?.eth0;
-      if (!e || !e.ip) items.push({ label: `⚠ ${d.hostname}: no IP on eth0`, disabled: true });
+      const hostIface = d.interfaces?.eth0 ? "eth0" : (d.interfaces?.en0 ? "en0" : Object.keys(d.interfaces || {})[0]);
+      const e = d.interfaces?.[hostIface];
+      if (!e || !e.ip) items.push({ label: `⚠ ${d.hostname}: no IP on ${hostIface || "host interface"}`, disabled: true });
       else if (!e.gw) items.push({ label: `⚠ ${d.hostname}: no default gateway`, disabled: true });
     }
     if (OPT_Engine.isRouterLike?.(d) && !OPT_Engine.isSwitchLike?.(d) && (!d.routes || d.routes.length === 0)) {
@@ -6049,8 +6124,9 @@ function AnalysisPanel({ devices, links, events }) {
   // simple checks
   for (const d of Object.values(devices)) {
     if (OPT_Engine.isHostLike?.(d)) {
-      const e = d.interfaces.eth0;
-      if (!e || !e.ip) issues.push({ s: "err", host: d.hostname, m: `no IP configured on eth0` });
+      const hostIface = d.interfaces.eth0 ? "eth0" : (d.interfaces.en0 ? "en0" : Object.keys(d.interfaces || {})[0]);
+      const e = d.interfaces[hostIface];
+      if (!e || !e.ip) issues.push({ s: "err", host: d.hostname, m: `no IP configured on ${hostIface || "host interface"}` });
       else if (!e.gw) issues.push({ s: "warn", host: d.hostname, m: `no default gateway` });
     }
     if (OPT_Engine.isRouterLike?.(d) && !OPT_Engine.isSwitchLike?.(d) && (!d.routes || d.routes.length === 0))

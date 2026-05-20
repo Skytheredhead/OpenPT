@@ -6,7 +6,7 @@ function Palette({ onDragStart, activeLink, onLinkPick }) {
   const groups = [
     { title: "Routers", kinds: ["router"] },
     { title: "Switches", kinds: ["l2switch", "l3switch"] },
-    { title: "End Devices", kinds: ["pc", "laptop", "server", "printer", "phone", "ap"] },
+    { title: "End Devices", kinds: ["pc", "mac", "laptop", "server", "printer", "phone", "ap"] },
   ].map((group) => ({
     ...group,
     devices: cat.filter((d) => group.kinds.includes(d.kind)),
