@@ -631,6 +631,321 @@ function mergeProjectIntoTabs(tabs, activeWid, project) {
   return tabs.map((tab) => tab.id === activeWid ? { ...tab, name: `${title}.opt`, cloudProjectId: project?.id || tab.cloudProjectId } : tab);
 }
 
+const OPENPT_PRACTICE_LABS = [
+  { key: "etherchannel-vlan", title: "VLAN Trunks and EtherChannel", desc: "Configure access VLANs, LACP, and a trunking port-channel between two switches." },
+  { key: "dhcp-routerb", title: "RouterB DHCP Pool", desc: "Build a DHCP pool with reserved addresses, gateway, DNS, domain, and NetBIOS options." },
+  { key: "ospf-area0-dr", title: "OSPF Area 0 DR Election", desc: "Advertise exact subnets and tune shared-segment OSPF priorities." },
+  { key: "ssh-line-access", title: "SSH and Line Access Controls", desc: "Set console idle timers, VTY transports, SSH keys, and SSHv2." },
+];
+
+function practiceActivity({ title, instructionsHtml, hints, answerCommands = {}, assessmentItems = [] }) {
+  return {
+    title,
+    sourceName: `${title}.opt`,
+    instructionsHtml,
+    hints,
+    answerCommands,
+    assessmentItems: assessmentItems.map((item, index) => ({
+      id: `${title}-${index}`,
+      points: item.points || 1,
+      rootName: item.rootName || title,
+      components: item.components || "Assessment Items",
+      name: item.name,
+      pathParts: item.pathParts || [item.device, item.iface, item.name].filter(Boolean),
+      parentPath: item.parentPath || [item.rootName || title, item.device, item.iface].filter(Boolean).join(" / "),
+      path: item.path || [item.rootName || title, item.device, item.iface, item.name].filter(Boolean).join(" / "),
+      value: item.value || "",
+    })),
+  };
+}
+
+function legacyIface(seed = {}) {
+  return { ip: null, mask: null, gw: null, up: false, admUp: false, mac: randMac(), desc: "", ...seed };
+}
+
+function switchPort(seed = {}) {
+  return { ip: null, mask: null, gw: null, up: false, admUp: false, mac: randMac(), desc: "", mode: "access", vlan: 1, nativeVlan: 1, allowedVlans: "all", stp: { portfast: false, bpduguard: false, state: "forwarding" }, ...seed };
+}
+
+function setLegacyIfaces(device, ifaces) {
+  device.interfaces = { ...(device.interfaces || {}), ...ifaces };
+  return device;
+}
+
+function connect(a, ai, b, bi, type = "copper") {
+  a.interfaces[ai] = { ...(a.interfaces[ai] || legacyIface()), up: true, admUp: true };
+  b.interfaces[bi] = { ...(b.interfaces[bi] || legacyIface()), up: true, admUp: true };
+  return { id: OPT_Engine.uid("l"), a: a.id, ai, b: b.id, bi, type, up: true };
+}
+
+function practiceLabInstructions(title, paragraphs, tasks, notes = []) {
+  const p = paragraphs.map((line) => `<p>${line}</p>`).join("");
+  const t = tasks.length ? `<ul>${tasks.map((task) => `<li>${task}</li>`).join("")}</ul>` : "";
+  const n = notes.map((line) => `<p>${line}</p>`).join("");
+  return `<h1>Tasks</h1>${p}${t}${n}`;
+}
+
+function makeOpenPtPracticeLab(key) {
+  switch (key) {
+    case "etherchannel-vlan": return makeEtherchannelVlanLab();
+    case "dhcp-routerb": return makeDhcpRouterBLab();
+    case "ospf-area0-dr": return makeOspfArea0DrLab();
+    case "ssh-line-access": return makeSshLineAccessLab();
+    default: return null;
+  }
+}
+
+function makeEtherchannelVlanLab() {
+  const SwitchA = OPT_Engine.makeDevice("l2switch", "SwitchA", 260, 160);
+  const SwitchB = OPT_Engine.makeDevice("l2switch", "SwitchB", 760, 160, {}, { vlans: { 1: "default", 10: "VLAN10", 20: "VLAN20" } });
+  for (const iface of ["FastEthernet0/1", "FastEthernet0/2"]) {
+    SwitchA.interfaces[iface] = switchPort({ up: true, admUp: true, desc: "to SwitchB" });
+    SwitchB.interfaces[iface] = switchPort({ up: true, admUp: true, mode: "trunk", channelGroup: { id: 1, mode: "active" }, desc: "to SwitchA" });
+  }
+  SwitchB.interfaces["Port-channel1"] = switchPort({ up: true, admUp: true, mode: "trunk", trunkEncapsulation: "dot1q", desc: "LACP trunk to SwitchA" });
+  SwitchB.etherchannels = { 1: { protocol: "LACP", members: ["FastEthernet0/1", "FastEthernet0/2"] } };
+  for (const [iface, vlan] of [["FastEthernet0/3", 10], ["FastEthernet0/4", 10], ["FastEthernet0/8", 20], ["FastEthernet0/9", 20]]) {
+    SwitchB.interfaces[iface] = switchPort({ vlan, mode: "access", admUp: true, desc: `access VLAN ${vlan}` });
+  }
+  const PC1 = OPT_Engine.makeDevice("pc", "PC1", 140, 390, { eth0: { ip: "192.168.10.11", mask: "255.255.255.0", gw: "", up: true, admUp: true } });
+  const PC2 = OPT_Engine.makeDevice("pc", "PC2", 360, 390, { eth0: { ip: "192.168.20.11", mask: "255.255.255.0", gw: "", up: true, admUp: true } });
+  const PC3 = OPT_Engine.makeDevice("pc", "PC3", 640, 390, { eth0: { ip: "192.168.10.12", mask: "255.255.255.0", gw: "", up: true, admUp: true } });
+  const PC4 = OPT_Engine.makeDevice("pc", "PC4", 860, 390, { eth0: { ip: "192.168.20.12", mask: "255.255.255.0", gw: "", up: true, admUp: true } });
+  const links = [
+    connect(SwitchA, "FastEthernet0/1", SwitchB, "FastEthernet0/1"),
+    connect(SwitchA, "FastEthernet0/2", SwitchB, "FastEthernet0/2"),
+    connect(SwitchA, "FastEthernet0/3", PC1, "eth0"),
+    connect(SwitchA, "FastEthernet0/8", PC2, "eth0"),
+    connect(SwitchB, "FastEthernet0/3", PC3, "eth0"),
+    connect(SwitchB, "FastEthernet0/8", PC4, "eth0"),
+  ];
+  const activity = practiceActivity({
+    title: "VLAN Trunks and EtherChannel",
+    instructionsHtml: practiceLabInstructions("VLAN Trunks and EtherChannel", [
+      "Your company's network includes two switches, SwitchA and SwitchB. SwitchB has already been configured with the correct VLAN, trunk, and EtherChannel settings.",
+      "Configure SwitchA with the following parameters:",
+    ], [
+      "Switch ports FastEthernet 0/3, FastEthernet 0/4, FastEthernet 0/8, and FastEthernet 0/9 should be explicitly configured as access ports.",
+      "VLAN 10 should contain switch ports FastEthernet 0/3 and FastEthernet 0/4.",
+      "VLAN 20 should contain switch ports FastEthernet 0/8 and FastEthernet 0/9.",
+      "Switch ports FastEthernet 0/1 and FastEthernet 0/2 should use a standards-based EtherChannel negotiation protocol.",
+      "Switch ports FastEthernet 0/1 and FastEthernet 0/2 should be members of EtherChannel port-group 1 and actively negotiate EtherChannel links.",
+      "The EtherChannel virtual interface should use standards-based trunk encapsulation and always function as a trunk.",
+    ]),
+    hints: [
+      "Standards-based EtherChannel negotiation means LACP. On Cisco-style switches, active mode initiates LACP negotiation.",
+      "Configure the physical member interfaces first with channel-group 1 mode active, then configure interface Port-channel1 as the trunk.",
+      "Use switchport trunk encapsulation dot1q and switchport mode trunk on the port-channel.",
+    ],
+    answerCommands: {
+      SwitchA: [
+        "interface range FastEthernet0/3-4", "switchport mode access", "switchport access vlan 10",
+        "interface range FastEthernet0/8-9", "switchport mode access", "switchport access vlan 20",
+        "interface range FastEthernet0/1-2", "channel-group 1 mode active",
+        "interface Port-channel1", "switchport trunk encapsulation dot1q", "switchport mode trunk",
+      ],
+    },
+    assessmentItems: [
+      ...["FastEthernet0/3", "FastEthernet0/4"].flatMap((iface) => [
+        { device: "SwitchA", iface, name: "switchport mode access", components: "VLAN Configuration" },
+        { device: "SwitchA", iface, name: "switchport access vlan 10", components: "VLAN Configuration" },
+      ]),
+      ...["FastEthernet0/8", "FastEthernet0/9"].flatMap((iface) => [
+        { device: "SwitchA", iface, name: "switchport mode access", components: "VLAN Configuration" },
+        { device: "SwitchA", iface, name: "switchport access vlan 20", components: "VLAN Configuration" },
+      ]),
+      ...["FastEthernet0/1", "FastEthernet0/2"].flatMap((iface) => [
+        { device: "SwitchA", iface, name: "channel group 1", components: "EtherChannel Configuration", points: 2 },
+        { device: "SwitchA", iface, name: "channel mode active", components: "EtherChannel Configuration", points: 2 },
+      ]),
+      { device: "SwitchA", iface: "Port-channel1", name: "switchport mode trunk", components: "Trunk Configuration" },
+      { device: "SwitchA", iface: "Port-channel1", name: "switchport trunk encapsulation dot1q", components: "Trunk Configuration", value: "switchport trunk encapsulation dot1q" },
+    ],
+  });
+  return { title: activity.title, fileName: "vlan-etherchannel", devices: { [SwitchA.id]: SwitchA, [SwitchB.id]: SwitchB, [PC1.id]: PC1, [PC2.id]: PC2, [PC3.id]: PC3, [PC4.id]: PC4 }, links, activity };
+}
+
+function makeDhcpRouterBLab() {
+  const RouterA = setLegacyIfaces(OPT_Engine.makeDevice("router", "RouterA", 300, 120), {
+    "FastEthernet0/0": legacyIface({ ip: "10.0.12.1", mask: "255.255.255.252", up: true, admUp: true, desc: "to RouterB" }),
+    "FastEthernet0/1": legacyIface({ ip: "10.0.13.1", mask: "255.255.255.252", up: true, admUp: true, desc: "to RouterC" }),
+  });
+  const RouterB = setLegacyIfaces(OPT_Engine.makeDevice("router", "RouterB", 300, 300), {
+    "FastEthernet0/0": legacyIface({ ip: "192.168.11.1", mask: "255.255.255.0", up: true, admUp: true, desc: "to HostB LAN" }),
+    "FastEthernet0/1": legacyIface({ ip: "10.0.12.2", mask: "255.255.255.252", up: true, admUp: true, desc: "to RouterA" }),
+  });
+  const RouterC = setLegacyIfaces(OPT_Engine.makeDevice("router", "RouterC", 620, 120), {
+    "FastEthernet0/0": legacyIface({ ip: "10.0.13.2", mask: "255.255.255.252", up: true, admUp: true, desc: "to RouterA" }),
+    "FastEthernet0/1": legacyIface({ ip: "10.0.34.1", mask: "255.255.255.252", up: true, admUp: true, desc: "to RouterD" }),
+  });
+  const RouterD = setLegacyIfaces(OPT_Engine.makeDevice("router", "RouterD", 620, 300), {
+    "FastEthernet0/0": legacyIface({ ip: "192.168.44.1", mask: "255.255.255.0", up: true, admUp: true, desc: "to HostD LAN" }),
+    "FastEthernet0/1": legacyIface({ ip: "10.0.34.2", mask: "255.255.255.252", up: true, admUp: true, desc: "to RouterC" }),
+  });
+  for (const r of [RouterA, RouterB, RouterC, RouterD]) r.secrets.enable = "cisco";
+  const HostB = OPT_Engine.makeDevice("pc", "HostB", 300, 480, { eth0: { ip: "", mask: "", gw: "", dhcp: true, up: true, admUp: true } });
+  const HostD = OPT_Engine.makeDevice("pc", "HostD", 620, 480, { eth0: { ip: "192.168.44.10", mask: "255.255.255.0", gw: "192.168.44.1", up: true, admUp: true } });
+  const links = [
+    connect(RouterA, "FastEthernet0/0", RouterB, "FastEthernet0/1", "cross"),
+    connect(RouterA, "FastEthernet0/1", RouterC, "FastEthernet0/0", "cross"),
+    connect(RouterC, "FastEthernet0/1", RouterD, "FastEthernet0/1", "cross"),
+    connect(RouterB, "FastEthernet0/0", HostB, "eth0", "cross"),
+    connect(RouterD, "FastEthernet0/0", HostD, "eth0", "cross"),
+  ];
+  const activity = practiceActivity({
+    title: "RouterB DHCP Pool",
+    instructionsHtml: practiceLabInstructions("RouterB DHCP Pool", [
+      "You want to configure dynamic IP addressing on RouterB for its connected hosts. The first 10 addresses on the subnet should be reserved for static addresses; the remainder of the subnet should be available for dynamic IP address allocation.",
+      "Your supervisor has asked you to complete the following tasks:",
+    ], [
+      "Configure a pool named <strong>pool1</strong> on RouterB to assign IP addresses for the hosts on the network connected to the FastEthernet 0/0 interface of RouterB.",
+      "Ensure that the hosts use RouterB as the default gateway.",
+      "Ensure that the hosts use the DNS server at 192.168.11.3.",
+      "Ensure that the hosts use the domain name <strong>openpt.dev</strong>.",
+      "Ensure that the hosts use the NetBIOS server at 192.168.11.4.",
+    ], [
+      "Configure only RouterB to complete these tasks. Host configuration will be performed by another administrator.",
+      "All router interfaces are operational, and the proper IP addresses have been configured.",
+      "All passwords are set to <strong>cisco</strong>.",
+    ]),
+    hints: [
+      "The network on RouterB FastEthernet0/0 is 192.168.11.0/24, and RouterB itself is 192.168.11.1.",
+      "Reserve the first 10 usable addresses with ip dhcp excluded-address 192.168.11.1 192.168.11.10.",
+      "Inside ip dhcp pool pool1, configure network, default-router, dns-server, domain-name, and netbios-name-server.",
+    ],
+    assessmentItems: [
+      { device: "RouterB", name: "ip dhcp excluded-address 192.168.11.1 192.168.11.10", components: "DHCP Configuration", value: "ip dhcp excluded-address 192.168.11.1 192.168.11.10" },
+      { device: "RouterB", name: "ip dhcp pool pool1", components: "DHCP Configuration", value: "ip dhcp pool pool1" },
+      { device: "RouterB", name: "network 192.168.11.0 255.255.255.0", components: "DHCP Configuration", value: "network 192.168.11.0 255.255.255.0" },
+      { device: "RouterB", name: "default-router 192.168.11.1", components: "DHCP Configuration", value: "default-router 192.168.11.1" },
+      { device: "RouterB", name: "dns-server 192.168.11.3", components: "DHCP Configuration", value: "dns-server 192.168.11.3" },
+      { device: "RouterB", name: "domain-name openpt.dev", components: "DHCP Configuration", value: "domain-name openpt.dev" },
+      { device: "RouterB", name: "netbios-name-server 192.168.11.4", components: "DHCP Configuration", value: "netbios-name-server 192.168.11.4" },
+    ],
+  });
+  return { title: activity.title, fileName: "routerb-dhcp", devices: { [RouterA.id]: RouterA, [RouterB.id]: RouterB, [RouterC.id]: RouterC, [RouterD.id]: RouterD, [HostB.id]: HostB, [HostD.id]: HostD }, links, activity };
+}
+
+function makeOspfArea0DrLab() {
+  const RouterA = setLegacyIfaces(OPT_Engine.makeDevice("router", "RouterA", 460, 150), {
+    "FastEthernet0/0": legacyIface({ ip: "10.10.10.1", mask: "255.255.255.0", up: true, admUp: true, desc: "shared segment" }),
+    "FastEthernet0/1": legacyIface({ ip: "192.168.1.1", mask: "255.255.255.0", up: true, admUp: true, desc: "to HostA" }),
+  });
+  const RouterB = setLegacyIfaces(OPT_Engine.makeDevice("router", "RouterB", 220, 390), {
+    "FastEthernet0/0": legacyIface({ ip: "10.10.10.2", mask: "255.255.255.0", up: true, admUp: true, desc: "shared segment" }),
+    "FastEthernet0/1": legacyIface({ ip: "192.168.2.1", mask: "255.255.255.0", up: true, admUp: true, desc: "to HostB" }),
+  });
+  const RouterC = setLegacyIfaces(OPT_Engine.makeDevice("router", "RouterC", 700, 390), {
+    "FastEthernet0/0": legacyIface({ ip: "10.10.10.3", mask: "255.255.255.0", up: true, admUp: true, desc: "shared segment" }),
+    "FastEthernet0/1": legacyIface({ ip: "192.168.3.1", mask: "255.255.255.0", up: true, admUp: true, desc: "to HostC" }),
+  });
+  const SwitchA = OPT_Engine.makeDevice("l2switch", "SwitchA", 460, 300, {
+    "FastEthernet0/1": switchPort({ up: true, admUp: true, desc: "to RouterA" }),
+    "FastEthernet0/2": switchPort({ up: true, admUp: true, desc: "to RouterB" }),
+    "FastEthernet0/3": switchPort({ up: true, admUp: true, desc: "to RouterC" }),
+  });
+  const HostA = OPT_Engine.makeDevice("pc", "HostA", 460, 40, { eth0: { ip: "192.168.1.10", mask: "255.255.255.0", gw: "192.168.1.1", up: true, admUp: true } });
+  const HostB = OPT_Engine.makeDevice("pc", "HostB", 220, 540, { eth0: { ip: "192.168.2.10", mask: "255.255.255.0", gw: "192.168.2.1", up: true, admUp: true } });
+  const HostC = OPT_Engine.makeDevice("pc", "HostC", 700, 540, { eth0: { ip: "192.168.3.10", mask: "255.255.255.0", gw: "192.168.3.1", up: true, admUp: true } });
+  const links = [
+    connect(HostA, "eth0", RouterA, "FastEthernet0/1", "cross"),
+    connect(RouterA, "FastEthernet0/0", SwitchA, "FastEthernet0/1"),
+    connect(RouterB, "FastEthernet0/0", SwitchA, "FastEthernet0/2"),
+    connect(RouterC, "FastEthernet0/0", SwitchA, "FastEthernet0/3"),
+    connect(RouterB, "FastEthernet0/1", HostB, "eth0", "cross"),
+    connect(RouterC, "FastEthernet0/1", HostC, "eth0", "cross"),
+  ];
+  const activity = practiceActivity({
+    title: "OSPF Area 0 DR Election",
+    instructionsHtml: practiceLabInstructions("OSPF Area 0 DR Election", [
+      "Your company's network includes three routers: RouterA, RouterB, and RouterC. Each router is connected to SwitchA over its FastEthernet 0/0 interface. IP addresses have been configured on all devices in the topology.",
+      "Perform the following configurations:",
+    ], [
+      "Configure OSPF on each router by using OSPF process ID 1.",
+      "Configure OSPF to advertise the specific subnetworks that are configured on each router interface.",
+      "Configure all OSPF interfaces to operate in OSPF Area 0.",
+      "Configure RouterA so that, in the future, it will almost always assume the role as the DR of the routers' shared segment, even if other routers are connected to the shared segment.",
+      "Configure RouterC so that, in the future, it will never assume the role as the DR of the routers' shared segment.",
+    ]),
+    hints: [
+      "Use wildcard masks with network statements. A /24 subnet uses wildcard 0.0.0.255.",
+      "The shared segment is 10.10.10.0/24. Each router also has its own /24 LAN.",
+      "Set ip ospf priority 255 on RouterA FastEthernet0/0 and ip ospf priority 0 on RouterC FastEthernet0/0.",
+    ],
+    assessmentItems: [
+      ...[
+        ["RouterA", "10.10.10.0 0.0.0.255", "192.168.1.0 0.0.0.255"],
+        ["RouterB", "10.10.10.0 0.0.0.255", "192.168.2.0 0.0.0.255"],
+        ["RouterC", "10.10.10.0 0.0.0.255", "192.168.3.0 0.0.0.255"],
+      ].flatMap(([device, shared, lan]) => [
+        { device, name: "router ospf 1", components: "OSPF Configuration", value: "router ospf 1" },
+        { device, name: `network ${shared} area 0`, components: "OSPF Configuration", value: `network ${shared} area 0` },
+        { device, name: `network ${lan} area 0`, components: "OSPF Configuration", value: `network ${lan} area 0` },
+      ]),
+      { device: "RouterA", iface: "FastEthernet0/0", name: "ip ospf priority 255", components: "OSPF Configuration", value: "ip ospf priority 255" },
+      { device: "RouterC", iface: "FastEthernet0/0", name: "ip ospf priority 0", components: "OSPF Configuration", value: "ip ospf priority 0" },
+    ],
+  });
+  return { title: activity.title, fileName: "ospf-area0-dr", devices: { [RouterA.id]: RouterA, [RouterB.id]: RouterB, [RouterC.id]: RouterC, [SwitchA.id]: SwitchA, [HostA.id]: HostA, [HostB.id]: HostB, [HostC.id]: HostC }, links, activity };
+}
+
+function makeSshLineAccessLab() {
+  const ASW1 = OPT_Engine.makeDevice("l2switch", "ASW1", 250, 170);
+  const ASW2 = OPT_Engine.makeDevice("l2switch", "ASW2", 250, 380);
+  const DSW1 = OPT_Engine.makeDevice("l2switch", "DSW1", 500, 170);
+  const DSW2 = OPT_Engine.makeDevice("l2switch", "DSW2", 500, 380);
+  const CSW1 = OPT_Engine.makeDevice("l2switch", "CSW1", 760, 170);
+  const CSW2 = OPT_Engine.makeDevice("l2switch", "CSW2", 760, 380);
+  const R1 = OPT_Engine.makeDevice("router", "R1", 1010, 170);
+  const R2 = OPT_Engine.makeDevice("router", "R2", 1010, 380);
+  const PC1 = OPT_Engine.makeDevice("pc", "PC1", 80, 170, { eth0: { ip: "10.10.10.11", mask: "255.255.255.0", gw: "", up: true, admUp: true } });
+  const PC2 = OPT_Engine.makeDevice("pc", "PC2", 80, 380, { eth0: { ip: "10.10.20.11", mask: "255.255.255.0", gw: "", up: true, admUp: true } });
+  const links = [
+    connect(PC1, "eth0", ASW1, "FastEthernet0/1"),
+    connect(PC2, "eth0", ASW2, "FastEthernet0/1"),
+    connect(ASW1, "FastEthernet0/23", DSW1, "FastEthernet0/1"),
+    connect(ASW2, "FastEthernet0/23", DSW2, "FastEthernet0/1"),
+    connect(ASW1, "FastEthernet0/24", DSW2, "FastEthernet0/2"),
+    connect(ASW2, "FastEthernet0/24", DSW1, "FastEthernet0/2"),
+    connect(DSW1, "FastEthernet0/23", CSW1, "FastEthernet0/1"),
+    connect(DSW2, "FastEthernet0/23", CSW2, "FastEthernet0/1"),
+    connect(DSW1, "FastEthernet0/24", CSW2, "FastEthernet0/2"),
+    connect(DSW2, "FastEthernet0/24", CSW1, "FastEthernet0/2"),
+    connect(CSW1, "FastEthernet0/23", R1, "GigabitEthernet0/0/0"),
+    connect(CSW2, "FastEthernet0/23", R2, "GigabitEthernet0/0/0"),
+    connect(CSW1, "FastEthernet0/24", R2, "GigabitEthernet0/0/1"),
+    connect(CSW2, "FastEthernet0/24", R1, "GigabitEthernet0/0/1"),
+  ];
+  const activity = practiceActivity({
+    title: "SSH and Line Access Controls",
+    instructionsHtml: practiceLabInstructions("SSH and Line Access Controls", [
+      "You are responsible for configuring switches CSW1 and CSW2. You have been asked to achieve the following goals:",
+    ], [
+      "Configure the console port on CSW1 to disconnect the current session after three minutes of inactivity.",
+      "Configure the console port on CSW2 to never disconnect an idle session.",
+      "Configure the first five vty ports on CSW1 to accept only the SSH protocol for inbound connections.",
+      "Configure the first five vty ports on CSW2 to accept no protocols for inbound connections.",
+      "Enable the SSH server on CSW1. Use the domain <strong>openpt.dev</strong> and the default modulus value when generating RSA keys for the SSH server.",
+      "Ensure that CSW1 will accept only SSHv2 connections.",
+    ]),
+    hints: [
+      "Use line console 0 for console idle timers. exec-timeout 0 0 means never time out.",
+      "The first five VTY ports are line vty 0 4. Use transport input ssh on CSW1 and transport input none on CSW2.",
+      "On CSW1, set ip domain-name openpt.dev, generate RSA keys without specifying a modulus, then set ip ssh version 2.",
+    ],
+    assessmentItems: [
+      { device: "CSW1", name: "line console 0 exec-timeout 3 0", components: "Line Configuration", value: "exec-timeout 3 0" },
+      { device: "CSW2", name: "line console 0 exec-timeout 0 0", components: "Line Configuration", value: "exec-timeout 0 0" },
+      { device: "CSW1", name: "line vty 0 4 transport input ssh", components: "Line Configuration", value: "transport input ssh" },
+      { device: "CSW2", name: "line vty 0 4 transport input none", components: "Line Configuration", value: "transport input none" },
+      { device: "CSW1", name: "ip domain-name openpt.dev", components: "SSH Configuration", value: "ip domain-name openpt.dev" },
+      { device: "CSW1", name: "crypto key generate rsa modulus 2048", components: "SSH Configuration", value: "crypto key generate rsa modulus 2048" },
+      { device: "CSW1", name: "ip ssh version 2", components: "SSH Configuration", value: "ip ssh version 2" },
+    ],
+  });
+  return { title: activity.title, fileName: "ssh-line-access", devices: { [ASW1.id]: ASW1, [ASW2.id]: ASW2, [DSW1.id]: DSW1, [DSW2.id]: DSW2, [CSW1.id]: CSW1, [CSW2.id]: CSW2, [R1.id]: R1, [R2.id]: R2, [PC1.id]: PC1, [PC2.id]: PC2 }, links, activity };
+}
+
 function App() {
   const [t, setTweak] = useTweaks(TWEAK_DEFAULTS);
   const dragDepth = useRef(0);
@@ -927,6 +1242,26 @@ function App() {
     setCloudProjectId(null); setCloudVersion(0); setCloudBaseDoc(null); setCloudLease(null); setShareToken(null); setShareMode(null); setSyncStatus({ state: cloudUser ? "local" : "local", message: cloudUser ? "Signed in" : "Local only" });
     setDirtyTabs((m) => ({ ...m, [id]: true }));
     pushAppUndo("opened starter lab", before);
+  };
+  const loadPracticeLab = async (key) => {
+    const lab = makeOpenPtPracticeLab(key);
+    if (!lab) return;
+    const ok = await requestConfirm({ title: `Load ${lab.title}?`, message: "Replace the current topology with this practice lab?", confirmLabel: "Load lab", danger: true });
+    if (!ok) return;
+    if (!markProjectChanged("load-practice-lab")) return;
+    const norm = OPT_Engine.normalizeTopology(lab.devices, lab.links);
+    setStarterScreenVisible(false);
+    setDevices(norm.devices);
+    setLinks(norm.links);
+    setSelectedId(null);
+    setSelectedLinkId(null);
+    setEvents([]);
+    setPackets([]);
+    setPtActivity(lab.activity);
+    setPtSidebarOpen(true);
+    setActiveCenterTab("topology");
+    setTabs((ts) => ts.map((tab) => tab.id === activeWid ? { ...tab, name: `${lab.fileName}.opt` } : tab));
+    log("ok", "system", `loaded lab: ${lab.title}`);
   };
   const closeTab = async (id) => {
     if (dirtyTabs[id]) {
@@ -2064,6 +2399,10 @@ function App() {
           d.services[cmd.name] = cmd.value;
           log("ok", d.hostname, `${cmd.value ? "" : "no "}service ${cmd.name}`);
           break;
+        case "ip-domain-name":
+          d.domainName = cmd.value;
+          log("ok", d.hostname, cmd.value ? `ip domain-name ${cmd.value}` : "no ip domain-name");
+          break;
         case "wireless":
           d.wireless = d.wireless || {};
           d.wireless[cmd.field] = cmd.value;
@@ -2087,6 +2426,10 @@ function App() {
           break;
         case "line-timeout":
           d.lines[cmd.line] = { ...(d.lines[cmd.line] || {}), timeout: { minutes: cmd.minutes, seconds: cmd.seconds } };
+          break;
+        case "ssh-version":
+          d.ssh = { ...(d.ssh || {}), version: cmd.version };
+          d.services.ssh = true;
           break;
         case "interface-create":
           if (!ifaces[cmd.iface]) {
@@ -2200,6 +2543,12 @@ function App() {
           break;
         case "encapsulation":
           ifaces[cmd.iface] = { ...ifaces[cmd.iface], encapsulation: cmd.value };
+          break;
+        case "trunk-encapsulation":
+          ifaces[cmd.iface] = { ...ifaces[cmd.iface], trunkEncapsulation: cmd.value, mode: "trunk" };
+          break;
+        case "ospf-priority":
+          ifaces[cmd.iface] = { ...ifaces[cmd.iface], ospfPriority: cmd.priority };
           break;
         case "tunnel-source":
           ifaces[cmd.iface] = { ...ifaces[cmd.iface], tunnelSource: cmd.value };
@@ -2318,6 +2667,12 @@ function App() {
           break;
         case "dhcp-dns":
           d.dhcp.pools[cmd.pool] = { ...(d.dhcp.pools[cmd.pool] || {}), dnsServer: cmd.ip };
+          break;
+        case "dhcp-domain":
+          d.dhcp.pools[cmd.pool] = { ...(d.dhcp.pools[cmd.pool] || {}), domainName: cmd.domain };
+          break;
+        case "dhcp-netbios":
+          d.dhcp.pools[cmd.pool] = { ...(d.dhcp.pools[cmd.pool] || {}), netbiosServer: cmd.ip };
           break;
         case "dhcp-lease":
           d.dhcp.pools[cmd.pool] = { ...(d.dhcp.pools[cmd.pool] || {}), leaseDays: cmd.days };
@@ -2831,6 +3186,8 @@ function App() {
               setDevices(s.devices); setLinks(s.links); setSelectedId(null);
               setPtActivity(null);
               log("ok", "system", "loaded lab: Two-router VLAN routing");
+            } else {
+              await loadPracticeLab(key);
             }
           }}
           onLinkR1G01={() => {
@@ -3469,8 +3826,10 @@ function TitleMenus(props) {
       { label: "Two-router VLAN routing  ●", on: () => props.onLab("starter") },
       { label: "Static routing basics", disabled: true },
       { label: "Spanning-tree loop", disabled: true },
-      { label: "DHCP & default gateway", disabled: true },
-      { label: "OSPF single area", disabled: true },
+      ...OPENPT_PRACTICE_LABS.map((lab) => ({
+        label: lab.title,
+        on: () => props.onLab(lab.key),
+      })),
     ],
     Devices: { kind: "devices" },
     Simulation: [
@@ -4170,6 +4529,14 @@ function packetTracerGradeItem(item, context) {
     return actualIface.mode === want ? correct(`${iface} is ${want}`) : incorrect(`Expected ${iface} switchport mode ${want}`);
   }
 
+  if (/access vlan|vlan membership|assigned vlan/.test(text) && actualIface) {
+    const want = expectedIface?.vlan || (String(item?.value || item?.name || "").match(/\b(\d+)\b/) || [])[1];
+    if (!want) return unchecked();
+    return Number(actualIface.vlan) === Number(want)
+      ? correct(`${iface} is assigned to VLAN ${want}`)
+      : incorrect(`Expected ${iface} access VLAN ${want}`);
+  }
+
   if (/channel group/.test(text) && actualIface) {
     const want = expectedIface?.channelGroup?.id;
     if (!want) return unchecked();
@@ -4184,6 +4551,41 @@ function packetTracerGradeItem(item, context) {
     return packetTracerCompare(actualIface.channelGroup?.mode, want)
       ? correct(`${iface} channel mode ${want}`)
       : incorrect(`Expected ${iface} channel mode ${want}`);
+  }
+
+  if (/ospf priority/.test(text) && actualIface) {
+    const want = (String(item?.value || item?.name || "").match(/priority\s+(\d+)/i) || [])[1];
+    if (!want) return unchecked();
+    return Number(actualIface.ospfPriority) === Number(want)
+      ? correct(`${iface} OSPF priority ${want}`)
+      : incorrect(`Expected ${iface} OSPF priority ${want}`);
+  }
+
+  if (/exec-timeout/.test(text) && device) {
+    const match = String(item?.value || item?.name || "").match(/exec-timeout\s+(\d+)\s+(\d+)/i);
+    const line = /vty/.test(text) ? "vty" : "console";
+    if (!match) return unchecked();
+    const actual = device.lines?.[line]?.timeout;
+    return Number(actual?.minutes) === Number(match[1]) && Number(actual?.seconds || 0) === Number(match[2])
+      ? correct(`${line} exec-timeout ${match[1]} ${match[2]}`)
+      : incorrect(`Expected ${line} exec-timeout ${match[1]} ${match[2]}`);
+  }
+
+  if (/transport input/.test(text) && device) {
+    const want = (String(item?.value || item?.name || "").match(/transport input\s+(.+)$/i) || [])[1]?.trim();
+    if (!want) return unchecked();
+    const actual = (device.lines?.vty?.transport || []).join(" ");
+    return packetTracerCompare(actual, want)
+      ? correct(`vty transport input ${want}`)
+      : incorrect(`Expected vty transport input ${want}`);
+  }
+
+  if (/ip ssh version/.test(text) && device) {
+    const want = (String(item?.value || item?.name || "").match(/ip ssh version\s+(\d+)/i) || [])[1];
+    if (!want) return unchecked();
+    return Number(device.ssh?.version) === Number(want)
+      ? correct(`SSH version ${want}`)
+      : incorrect(`Expected ip ssh version ${want}`);
   }
 
   const value = item?.value || item?.attrs?.value || item?.attrs?.expected || "";
@@ -5920,6 +6322,9 @@ function RubricNode({ node, depth }) {
 
 function PacketTracerSidebar({ activity, onClose, onReportError }) {
   const [topTab, setTopTab] = useState("instructions");
+  useEffect(() => {
+    setTopTab("instructions");
+  }, [activity?.title]);
   if (!activity) return null;
 
   const progress = activity.progress || null;
@@ -5932,12 +6337,16 @@ function PacketTracerSidebar({ activity, onClose, onReportError }) {
   const title = activity.title || activity.sourceName || "Packet Tracer Activity";
   const isPerfect = typeof progress?.percent === "number" && progress.percent >= 100;
   const hasImportIssue = activity.unsupported || activity.reverseReport?.decoder?.error || activity.diagnostics?.decoder?.error;
+  const hints = activity.hints || [];
 
   return (
     <div className="pt-sidebar">
       <div className="pt-sb-head">
         <div className="pt-sb-title" title={title}>{title}</div>
         <div className="pt-sb-head-right">
+          {hints.length > 0 && (
+            <button className={`pt-sb-help ${topTab === "hints" ? "active" : ""}`} onClick={() => setTopTab(topTab === "hints" ? "instructions" : "hints")} title="Show lab hints">?</button>
+          )}
           {hasImportIssue && onReportError && (
             <button className="tb-btn" style={{ padding: "3px 7px", fontSize: 11 }} onClick={onReportError}>Report Error</button>
           )}
@@ -5964,6 +6373,19 @@ function PacketTracerSidebar({ activity, onClose, onReportError }) {
           >{lbl}</div>
         ))}
       </div>
+
+      {topTab === "hints" && (
+        <div className="pt-sb-body">
+          <div className="pt-sb-hints">
+            {hints.map((hint, index) => (
+              <div key={index} className="pt-sb-hint">
+                <span>{index + 1}</span>
+                <p>{hint}</p>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
       {topTab === "instructions" && (
         <div className="pt-sb-body">
@@ -6096,8 +6518,7 @@ function LabsPanel({ onLoadStarter }) {
         { title: "Two-router VLAN routing", desc: "Configure inter-VLAN routing across two routers connected by a serial link.", active: true },
         { title: "Static routing basics", desc: "Three routers, build static routes to reach loopbacks.", active: false },
         { title: "Spanning-tree loop", desc: "Diagnose a STP convergence issue between two switches.", active: false },
-        { title: "DHCP & default gateway", desc: "Configure a DHCP pool and observe address assignment.", active: false },
-        { title: "OSPF single area", desc: "Bring up area 0 between three routers, watch neighbor adjacencies.", active: false },
+        ...OPENPT_PRACTICE_LABS.map((lab) => ({ title: lab.title, desc: lab.desc, active: false })),
       ].map((l, i) => (
         <div key={i}
              onClick={() => l.active && onLoadStarter()}

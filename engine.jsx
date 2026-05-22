@@ -110,6 +110,7 @@ function defaultStateFor(kind) {
       vty: { password: "", login: false, transport: ["ssh", "telnet"] },
     },
     services: { passwordEncryption: false, cdp: true, lldp: false, ssh: false, http: isServer, dns: isServer, tftp: isServer, aaa: isServer, radius: isServer, syslog: isServer, ntp: isServer },
+    domainName: "",
     dhcp: { excluded: [], pools: {}, bindings: [] },
     ospf: {},
     rip: {},
@@ -124,6 +125,7 @@ function defaultStateFor(kind) {
     vrfs: {},
     aaa: { enabled: false, methods: [] },
     crypto: { rsaKeys: null, ikev1: {}, ipsec: {} },
+    ssh: { version: null },
     snmp: { communities: [], hosts: [] },
     ntp: { servers: [] },
     netflow: { exporters: {}, monitors: {} },
@@ -849,6 +851,8 @@ function serializeConfig(d) {
   const out = ["!", `! ${d.model || d.kind} running-config`, "!", `hostname ${d.hostname}`];
   if (d.secrets?.enable) out.push(`enable secret ${d.secrets.enable}`);
   if (d.services?.passwordEncryption) out.push("service password-encryption");
+  if (d.domainName) out.push(`ip domain-name ${d.domainName}`);
+  if (d.ssh?.version) out.push(`ip ssh version ${d.ssh.version}`);
   if (d.aaa?.enabled) out.push("aaa new-model");
   if (d.vtp?.domain) out.push(`vtp domain ${d.vtp.domain}`);
   if (d.vtp?.mode) out.push(`vtp mode ${d.vtp.mode}`);
@@ -885,6 +889,8 @@ function serializeConfig(d) {
     if (p.network) out.push(` network ${p.network} ${p.mask}`);
     if (p.defaultRouter) out.push(` default-router ${p.defaultRouter}`);
     if (p.dnsServer) out.push(` dns-server ${p.dnsServer}`);
+    if (p.domainName) out.push(` domain-name ${p.domainName}`);
+    if (p.netbiosServer) out.push(` netbios-name-server ${p.netbiosServer}`);
     out.push("!");
   }
   if (d.vlans) {
@@ -912,6 +918,8 @@ function serializeConfig(d) {
     if (ifc.dhcpSnoopingTrust) out.push(" ip dhcp snooping trust");
     if (ifc.daiTrust) out.push(" ip arp inspection trust");
     if (ifc.encapsulation) out.push(` encapsulation ${ifc.encapsulation}`);
+    if (ifc.trunkEncapsulation) out.push(` switchport trunk encapsulation ${ifc.trunkEncapsulation}`);
+    if (ifc.ospfPriority !== undefined) out.push(` ip ospf priority ${ifc.ospfPriority}`);
     if (ifc.tunnelSource) out.push(` tunnel source ${ifc.tunnelSource}`);
     if (ifc.tunnelDestination) out.push(` tunnel destination ${ifc.tunnelDestination}`);
     if (ifc.policyRouteMap) out.push(` ip policy route-map ${ifc.policyRouteMap}`);
@@ -956,6 +964,23 @@ function serializeConfig(d) {
     out.push(`router bgp ${asn}`);
     for (const n of b.neighbors || []) out.push(` neighbor ${n.ip} remote-as ${n.remoteAs}`);
     for (const n of b.networks || []) out.push(` network ${n.network}${n.mask ? ` mask ${n.mask}` : ""}`);
+    out.push("!");
+  }
+  if (d.lines?.console) {
+    out.push("line console 0");
+    if (d.lines.console.password) out.push(` password ${d.lines.console.password}`);
+    if (d.lines.console.login) out.push(" login");
+    if (d.lines.console.loggingSync) out.push(" logging synchronous");
+    if (d.lines.console.timeout) out.push(` exec-timeout ${d.lines.console.timeout.minutes} ${d.lines.console.timeout.seconds || 0}`);
+    out.push("!");
+  }
+  if (d.lines?.vty) {
+    out.push("line vty 0 4");
+    if (d.lines.vty.password) out.push(` password ${d.lines.vty.password}`);
+    if (d.lines.vty.login) out.push(" login");
+    if (d.lines.vty.transport?.length) out.push(` transport input ${d.lines.vty.transport.join(" ")}`);
+    if (d.lines.vty.loggingSync) out.push(" logging synchronous");
+    if (d.lines.vty.timeout) out.push(` exec-timeout ${d.lines.vty.timeout.minutes} ${d.lines.vty.timeout.seconds || 0}`);
     out.push("!");
   }
   for (const [name, c] of Object.entries(d.qos?.classMaps || {})) out.push(`class-map ${c.matchType || "match-any"} ${name}`, ...(c.matches || []).map((m) => ` match ${m}`), "!");

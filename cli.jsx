@@ -4,14 +4,14 @@ const { OPT_Engine } = window;
 
 const COMMAND_HINTS = {
   user: ["enable", "show", "ping", "traceroute", "ipconfig", "services", "service", "exit"],
-  host: ["?", "help", "arp", "arp -a", "delete", "dir", "ftp", "ipconfig", "ipconfig /all", "ipconfig /release", "ipconfig /renew", "ipv6config", "netstat", "nslookup", "ping", "snmpget", "snmpgetbulk", "snmpset", "ssh", "telnet", "tracert", "services", "service", "exit"],
+  host: ["?", "help", "arp", "arp -a", "curl", "delete", "dir", "ftp", "ipconfig", "ipconfig /all", "ipconfig /release", "ipconfig /renew", "ipv6config", "netstat", "nslookup", "ping", "snmpget", "snmpgetbulk", "snmpset", "ssh", "telnet", "tracert", "services", "service", "exit"],
   mac: ["help", "man", "pwd", "cd", "ls", "find", "grep", "cat", "head", "tail", "wc", "sort", "uniq", "touch", "mkdir", "rm", "cp", "mv", "chmod", "chown", "xattr", "mdls", "mdfind", "plutil", "defaults", "open", "say", "whoami", "id", "groups", "hostname", "uname", "sw_vers", "date", "uptime", "env", "printenv", "ifconfig", "ipconfig", "networksetup", "scutil", "route", "netstat", "arp", "ping", "traceroute", "nslookup", "dig", "host", "ssh", "telnet", "ftp", "sftp", "scp", "curl", "nc", "lsof", "ps", "top", "kill", "df", "du", "mount", "diskutil", "system_profiler", "pmset", "launchctl", "sysctl", "dscacheutil", "dscl", "sudo", "clear", "exit"],
   priv: ["configure terminal", "show running-config", "show startup-config", "show version", "show ip interface brief", "show ip route", "show vlan brief", "show interfaces trunk", "show mac address-table", "show spanning-tree", "show etherchannel summary", "show port-security", "show ip dhcp snooping", "show ip arp inspection", "show ip ospf neighbor", "show ip protocols", "show access-lists", "show ip dhcp binding", "show ip nat translations", "show vrf", "show route-map", "show policy-map", "show ip sla summary", "show platform", "show inventory", "show license", "dir", "copy running-config startup-config", "write memory", "disable", "exit"],
-  conf: ["hostname", "interface", "interface range", "vlan", "router ospf", "router eigrp", "router rip", "router bgp", "ip route", "ip routing", "ip dhcp pool", "ip dhcp excluded-address", "ip access-list", "access-list", "ip prefix-list", "route-map", "vrf definition", "ip nat pool", "ip nat inside source", "aaa new-model", "crypto key generate rsa", "ntp server", "snmp-server community", "logging host", "ip dhcp snooping", "ip arp inspection vlan", "monitor session", "class-map", "policy-map", "ip sla", "track", "username", "enable secret", "line console 0", "line vty 0 4", "service password-encryption", "end", "exit"],
-  "conf-if": ["description", "ip address", "no ip address", "switchport mode access", "switchport mode trunk", "switchport access vlan", "switchport voice vlan", "switchport trunk allowed vlan", "switchport trunk native vlan", "switchport port-security", "channel-group", "ip dhcp snooping trust", "ip arp inspection trust", "ip access-group", "ip policy route-map", "ip nat inside", "ip nat outside", "service-policy input", "service-policy output", "encapsulation ppp", "encapsulation hdlc", "tunnel source", "tunnel destination", "storm-control", "spanning-tree portfast", "spanning-tree guard root", "shutdown", "no shutdown", "exit"],
+  conf: ["hostname", "interface", "interface range", "vlan", "router ospf", "router eigrp", "router rip", "router bgp", "ip route", "ip routing", "ip domain-name", "ip ssh version", "ip dhcp pool", "ip dhcp excluded-address", "ip access-list", "access-list", "ip prefix-list", "route-map", "vrf definition", "ip nat pool", "ip nat inside source", "aaa new-model", "crypto key generate rsa", "ntp server", "snmp-server community", "logging host", "ip dhcp snooping", "ip arp inspection vlan", "monitor session", "class-map", "policy-map", "ip sla", "track", "username", "enable secret", "line console 0", "line vty 0 4", "service password-encryption", "end", "exit"],
+  "conf-if": ["description", "ip address", "no ip address", "switchport mode access", "switchport mode trunk", "switchport access vlan", "switchport voice vlan", "switchport trunk encapsulation", "switchport trunk allowed vlan", "switchport trunk native vlan", "switchport port-security", "channel-group", "ip ospf priority", "ip dhcp snooping trust", "ip arp inspection trust", "ip access-group", "ip policy route-map", "ip nat inside", "ip nat outside", "service-policy input", "service-policy output", "encapsulation ppp", "encapsulation hdlc", "tunnel source", "tunnel destination", "storm-control", "spanning-tree portfast", "spanning-tree guard root", "shutdown", "no shutdown", "exit"],
   "conf-vlan": ["name", "exit"],
   "conf-router": ["router-id", "network", "passive-interface", "default-information originate", "exit"],
-  "conf-dhcp": ["network", "default-router", "dns-server", "lease", "exit"],
+  "conf-dhcp": ["network", "default-router", "dns-server", "domain-name", "netbios-name-server", "lease", "exit"],
   "conf-line": ["password", "login", "transport input", "logging synchronous", "exec-timeout", "exit"],
   "conf-acl": ["permit", "deny", "remark", "exit"],
   "conf-route-map": ["match ip address", "match ip address prefix-list", "set ip next-hop", "set metric", "exit"],
@@ -42,7 +42,7 @@ const IOS_ABBREVIATION_SPECS = [
   ...[
     "help", "?", "arp", "arp -a", "arp -d", "arp -d <word>", "delete <rest>", "dir", "ftp <word>", "ipconfig",
     "ipconfig /all", "ipconfig /release", "ipconfig /renew", "ipconfig /?", "ipv6config", "ipv6config /all",
-    "netstat", "netstat -a", "netstat -r", "nslookup <word>", "ping <word>", "snmpget <rest>",
+    "netstat", "netstat -a", "netstat -r", "nslookup <word>", "ping <word>", "curl <rest>", "snmpget <rest>",
     "snmpgetbulk <rest>", "snmpset <rest>", "ssh <rest>", "telnet <word>", "tracert <word>",
   ].map((pattern) => ({ modes: ["host"], pattern })),
   ...[
@@ -65,7 +65,7 @@ const IOS_ABBREVIATION_SPECS = [
   ].map((pattern) => ({ modes: ["priv"], pattern })),
   ...[
     "hostname <word>", "enable secret <rest>", "service password-encryption", "no service password-encryption",
-    "ip routing", "no ip routing", "ip multicast-routing", "no ip multicast-routing", "username <word> secret <rest>",
+    "ip routing", "no ip routing", "ip multicast-routing", "no ip multicast-routing", "ip domain-name <word>", "no ip domain-name", "username <word> secret <rest>",
     "interface range <rest>", "interface <rest>", "vlan <word>", "no vlan <word>", "ip route <word> <word> <word>",
     "no ip route <word> <word> <word>", "router ospf <word>", "router eigrp <word>", "router rip", "router bgp <word>",
     "ip dhcp pool <word>", "ip dhcp excluded-address <rest>", "no ip dhcp excluded-address <rest>",
@@ -74,7 +74,7 @@ const IOS_ABBREVIATION_SPECS = [
     "route-map <word> permit <word?>", "route-map <word> deny <word?>", "vrf definition <word>",
     "ip nat pool <word> <word> <word> netmask <word>", "ip nat inside source static <word> <word>",
     "ip nat inside source list <word> interface <word> overload", "ip nat inside source list <word> pool <word> overload",
-    "aaa new-model", "no aaa new-model", "aaa authentication login <word> <rest>", "crypto key generate rsa modulus <word>",
+    "aaa new-model", "no aaa new-model", "aaa authentication login <word> <rest>", "ip ssh version <word>", "crypto key generate rsa modulus <word>",
     "crypto key generate rsa", "ntp server <word>", "snmp-server community <rest>", "snmp-server host <rest>", "logging host <word>",
     "ip dhcp snooping", "ip dhcp snooping vlan <rest>", "ip arp inspection vlan <rest>",
     "monitor session <word> source interface <word>", "monitor session <word> destination interface <word>",
@@ -87,7 +87,7 @@ const IOS_ABBREVIATION_SPECS = [
     "description <rest>", "no description", "ip address <word> <word>", "no ip address", "shutdown", "no shutdown",
     "nameif <word>", "security-level <word>",
     "switchport", "no switchport", "switchport mode access", "switchport mode trunk", "switchport access vlan <word>",
-    "switchport voice vlan <word>", "switchport trunk native vlan <word>", "switchport trunk allowed vlan <rest>",
+    "switchport voice vlan <word>", "switchport trunk encapsulation <word>", "switchport trunk native vlan <word>", "switchport trunk allowed vlan <rest>",
     "switchport port-security", "no switchport port-security", "switchport port-security maximum <word>",
     "switchport port-security violation protect", "switchport port-security violation restrict", "switchport port-security violation shutdown",
     "switchport port-security mac-address <word>", "channel-group <word> mode active", "channel-group <word> mode passive",
@@ -100,7 +100,7 @@ const IOS_ABBREVIATION_SPECS = [
     "ip nat inside", "ip nat outside", "no ip nat inside", "no ip nat outside", "speed auto", "speed 10", "speed 100", "speed 1000",
     "duplex auto", "duplex full", "duplex half", "encapsulation ppp", "encapsulation hdlc", "encapsulation dot1q <word>",
     "tunnel source <word>", "tunnel destination <word>", "service-policy input <word>", "service-policy output <word>",
-    "ip pim sparse-mode", "ip pim dense-mode", "ip igmp join-group <word>", "standby <word> ip <word>", "standby <word> priority <word>",
+    "ip ospf priority <word>", "ip pim sparse-mode", "ip pim dense-mode", "ip igmp join-group <word>", "standby <word> ip <word>", "standby <word> priority <word>",
   ].map((pattern) => ({ modes: ["conf-if", "conf-if-range"], pattern })),
   ...["name <rest>"].map((pattern) => ({ modes: ["conf-vlan"], pattern })),
   ...[
@@ -108,7 +108,7 @@ const IOS_ABBREVIATION_SPECS = [
     "network <word> mask <word>", "network <word> <word?>", "passive-interface <rest>", "no passive-interface <rest>",
     "default-information originate",
   ].map((pattern) => ({ modes: ["conf-router"], pattern })),
-  ...["network <word> <word>", "default-router <word>", "dns-server <word>", "lease <word>"].map((pattern) => ({ modes: ["conf-dhcp"], pattern })),
+  ...["network <word> <word>", "default-router <word>", "dns-server <word>", "domain-name <word>", "netbios-name-server <word>", "lease <word>"].map((pattern) => ({ modes: ["conf-dhcp"], pattern })),
   ...["password <rest>", "login", "no login", "transport input <rest>", "logging synchronous", "exec-timeout <word> <word?>"].map((pattern) => ({ modes: ["conf-line"], pattern })),
   ...["permit <rest>", "deny <rest>", "remark <rest>"].map((pattern) => ({ modes: ["conf-acl"], pattern })),
   ...["match <rest>", "set <rest>"].map((pattern) => ({ modes: ["conf-route-map", "conf-class-map"], pattern })),
@@ -654,13 +654,30 @@ function CLI({ device, devices = {}, links = [], onApply, onPing, pendingCmd, ac
     push("ok", `${tokens[0]} -> ${tokens[1]} copied (simulated)`);
   }
 
+  function httpResponseForUrl(url) {
+    const raw = String(url || "").trim();
+    const withoutScheme = raw.replace(/^https?:\/\//, "");
+    const host = withoutScheme.split(/[/:]/)[0];
+    const path = `/${withoutScheme.split("/").slice(1).join("/") || "index.html"}`.replace(/\/$/, "/index.html");
+    const ip = resolveHostTarget(host) || host;
+    const target = deviceByIpOrName(ip);
+    const service = raw.startsWith("https://") ? "https" : "http";
+    if (!host || !target) return { ok: false, error: `curl: (7) Failed to connect to ${host || "host"}` };
+    if (!hostServiceEnabled(target, service)) return { ok: false, error: `curl: (7) Failed to connect to ${host} port ${hostServicePort(service)}: Connection refused` };
+    const plan = onPing && onPing(device.id, ip, { silent: true });
+    if (plan && !plan.ok) return { ok: false, error: `curl: (7) No route to host ${host}: ${shortIfaceText(plan.error)}` };
+    const fileName = path.replace(/^\//, "") || "index.html";
+    const serverFile = (target.serverConfig?.http?.files || []).find((f) => f.name === fileName) || (target.serverConfig?.http?.files || []).find((f) => f.name === "index.html");
+    const flashContent = target.files?.[`flash:${fileName}`] || target.files?.["flash:index.html"];
+    return { ok: true, body: flashContent || serverFile?.content || `<html><body><h1>${target.hostname}</h1></body></html>` };
+  }
+
   function showMacCurl(tokens) {
     const url = tokens.find((t) => /^https?:\/\//.test(t) || (/^[\w.-]+(?:\/|$)/.test(t) && !t.startsWith("-")));
     const headOnly = tokens.includes("-I") || tokens.includes("--head");
-    const host = String(url || "").replace(/^https?:\/\//, "").split(/[/:]/)[0];
-    const target = deviceByIpOrName(resolveHostTarget(host) || host);
-    if (headOnly) return pushMany([`HTTP/1.1 ${target ? "200 OK" : "000 Connect failed"}`, "Server: OpenPT", "Content-Type: text/html"]);
-    push(target ? "ok" : "err", target ? `<html><body><h1>${target.hostname}</h1></body></html>` : `curl: (7) Failed to connect to ${host || "host"}`);
+    const response = httpResponseForUrl(url);
+    if (headOnly) return pushMany([`HTTP/1.1 ${response.ok ? "200 OK" : "000 Connect failed"}`, "Server: OpenPT", "Content-Type: text/html"]);
+    push(response.ok ? "ok" : "err", response.ok ? response.body : response.error);
   }
 
   function showMacNc(tokens) {
@@ -786,6 +803,12 @@ function CLI({ device, devices = {}, links = [], onApply, onPing, pendingCmd, ac
     }
     if ((m = cmd.match(/^ping (.+)$/))) {
       return doPing(resolveHostTarget(m[1]) || m[1]);
+    }
+    if ((m = cmd.match(/^curl (.+)$/))) {
+      const tokens = m[1].trim().split(/\s+/);
+      const response = httpResponseForUrl(tokens.find((t) => /^https?:\/\//.test(t) || (/^[\w.-]+(?:\/|$)/.test(t) && !t.startsWith("-"))), tokens.includes("-I") || tokens.includes("--head"));
+      if (tokens.includes("-I") || tokens.includes("--head")) return pushMany([`HTTP/1.1 ${response.ok ? "200 OK" : "000 Connect failed"}`, "Server: OpenPT", "Content-Type: text/html"]);
+      return push(response.ok ? "ok" : "err", response.ok ? response.body : response.error);
     }
     if ((m = cmd.match(/^tracert (.+)$/))) {
       return doPing(resolveHostTarget(m[1]) || m[1], true);
@@ -976,6 +999,8 @@ function CLI({ device, devices = {}, links = [], onApply, onPing, pendingCmd, ac
     if (cmd === "no ip routing") return apply({ kind: "ip-routing", value: false });
     if (cmd === "ip multicast-routing") return apply({ kind: "service", name: "multicastRouting", value: true });
     if (cmd === "no ip multicast-routing") return apply({ kind: "service", name: "multicastRouting", value: false });
+    if ((m = cmd.match(/^ip domain-name (\S+)$/))) return apply({ kind: "ip-domain-name", value: m[1] });
+    if (cmd === "no ip domain-name") return apply({ kind: "ip-domain-name", value: "" });
     if ((m = cmd.match(/^username (\S+) secret (.+)$/))) return apply({ kind: "username", user: m[1], secret: m[2] });
     if ((m = cmd.match(/^(?:interface|int) range (.+)$/))) {
       const ifaces = expandIfaceRange(m[1], device);
@@ -1024,6 +1049,7 @@ function CLI({ device, devices = {}, links = [], onApply, onPing, pendingCmd, ac
     if (cmd === "aaa new-model") return apply({ kind: "aaa", enabled: true });
     if (cmd === "no aaa new-model") return apply({ kind: "aaa", enabled: false });
     if ((m = cmd.match(/^aaa authentication login (\S+) (.+)$/))) return apply({ kind: "aaa-method", service: "login", list: m[1], methods: m[2] });
+    if ((m = cmd.match(/^ip ssh version ([12])$/))) return apply({ kind: "ssh-version", version: Number(m[1]) });
     if ((m = cmd.match(/^crypto key generate rsa(?: modulus (\d+))?$/))) return apply({ kind: "crypto-rsa", modulus: Number(m[1] || 2048) });
     if ((m = cmd.match(/^ntp server (\S+)$/))) return apply({ kind: "ntp-server", server: m[1] });
     if ((m = cmd.match(/^snmp-server community (\S+)(?: (RO|RW))?$/i))) return apply({ kind: "snmp-community", name: m[1], access: (m[2] || "RO").toUpperCase() });
@@ -1064,6 +1090,7 @@ function CLI({ device, devices = {}, links = [], onApply, onPing, pendingCmd, ac
     if ((m = cmd.match(/^switchport mode (access|trunk)$/))) return applyIface("swmode", { value: m[1] });
     if ((m = cmd.match(/^switchport access vlan (\d+)$/))) return applyIface("swvlan", { value: Number(m[1]) });
     if ((m = cmd.match(/^switchport voice vlan (\d+)$/))) return applyIface("voice-vlan", { value: Number(m[1]) });
+    if ((m = cmd.match(/^switchport trunk encapsulation (\S+)$/))) return applyIface("trunk-encapsulation", { value: m[1] });
     if ((m = cmd.match(/^switchport trunk native vlan (\d+)$/))) return applyIface("trunk-native", { value: Number(m[1]) });
     if ((m = cmd.match(/^switchport trunk allowed vlan (.+)$/))) return applyIface("trunk-allowed", { value: m[1].trim() });
     if (cmd === "switchport port-security") return applyIface("port-security", { enabled: true });
@@ -1098,6 +1125,7 @@ function CLI({ device, devices = {}, links = [], onApply, onPing, pendingCmd, ac
     if ((m = cmd.match(/^ip igmp join-group (\S+)$/))) return applyIface("igmp-join", { group: m[1] });
     if ((m = cmd.match(/^standby (\d+) ip (\S+)$/))) return applyIface("hsrp", { group: m[1], ip: m[2] });
     if ((m = cmd.match(/^standby (\d+) priority (\d+)$/))) return applyIface("hsrp", { group: m[1], priority: Number(m[2]) });
+    if ((m = cmd.match(/^ip ospf priority (\d+)$/))) return applyIface("ospf-priority", { priority: Number(m[1]) });
     invalid(cmd);
   }
 
@@ -1126,6 +1154,8 @@ function CLI({ device, devices = {}, links = [], onApply, onPing, pendingCmd, ac
     if ((m = cmd.match(/^network (\S+) (\S+)$/))) return apply({ kind: "dhcp-network", pool: mode.pool, network: m[1], mask: m[2] });
     if ((m = cmd.match(/^default-router (\S+)$/))) return apply({ kind: "dhcp-default-router", pool: mode.pool, ip: m[1] });
     if ((m = cmd.match(/^dns-server (\S+)$/))) return apply({ kind: "dhcp-dns", pool: mode.pool, ip: m[1] });
+    if ((m = cmd.match(/^domain-name (\S+)$/))) return apply({ kind: "dhcp-domain", pool: mode.pool, domain: m[1] });
+    if ((m = cmd.match(/^netbios-name-server (\S+)$/))) return apply({ kind: "dhcp-netbios", pool: mode.pool, ip: m[1] });
     if ((m = cmd.match(/^lease (\d+)$/))) return apply({ kind: "dhcp-lease", pool: mode.pool, days: Number(m[1]) });
     invalid(cmd);
   }
