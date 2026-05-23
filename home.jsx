@@ -3,6 +3,24 @@
 
 const { useState, useEffect, useRef, useMemo } = React;
 
+function useNarrowScreen(query = "(max-width: 720px)") {
+  const [matches, setMatches] = useState(() => {
+    if (typeof window === "undefined" || !window.matchMedia) return false;
+    return window.matchMedia(query).matches;
+  });
+
+  useEffect(() => {
+    if (!window.matchMedia) return;
+    const media = window.matchMedia(query);
+    const onChange = () => setMatches(media.matches);
+    onChange();
+    media.addEventListener?.("change", onChange);
+    return () => media.removeEventListener?.("change", onChange);
+  }, [query]);
+
+  return matches;
+}
+
 // ── Sample data ────────────────────────────────────────────────────
 const SAMPLE_QS = [
   {
@@ -346,12 +364,16 @@ function MiniTopology({
   className = "",
 }) {
   const G = window.Glyph || {};
+  const scalePoint = (x, y) => ({
+    x: Math.round(x * (width / 540)),
+    y: Math.round(y * (height / 320)),
+  });
   const defaultDevices = initialDevices || [
-    { id: "r1", kind: "router",   x: 130, y: 90,  label: "R1",   color: "var(--accent)" },
-    { id: "s1", kind: "l2switch", x: 310, y: 180, label: "SW1",  color: "var(--fg-1)" },
-    { id: "p1", kind: "pc",       x: 160, y: 270, label: "PC-A", color: "var(--ok)" },
-    { id: "p2", kind: "pc",       x: 460, y: 270, label: "PC-B", color: "var(--ok)" },
-    { id: "c1", kind: "cloud",    x: 500, y: 90,  label: "ISP",  color: "var(--magenta)" },
+    { id: "r1", kind: "router",   ...scalePoint(130, 90),  label: "R1",   color: "var(--accent)" },
+    { id: "s1", kind: "l2switch", ...scalePoint(310, 180), label: "SW1",  color: "var(--fg-1)" },
+    { id: "p1", kind: "pc",       ...scalePoint(160, 270), label: "PC-A", color: "var(--ok)" },
+    { id: "p2", kind: "pc",       ...scalePoint(460, 270), label: "PC-B", color: "var(--ok)" },
+    { id: "c1", kind: "cloud",    ...scalePoint(500, 90),  label: "ISP",  color: "var(--magenta)" },
   ];
   const defaultLinks = initialLinks || [
     { a: "r1", b: "s1", type: "auto" },
@@ -556,6 +578,10 @@ function MiniQuestion({ questions = SAMPLE_QS, onAnswered }) {
 function HomePage({ onEnterLab, onEnterStarter, onEnterImport, onStartQuiz }) {
   const ArrowRight = window.Icon?.arrowRight;
   const Github = window.Icon?.github;
+  const isPhone = useNarrowScreen();
+  const demoSize = isPhone
+    ? { topologyWidth: 330, topologyHeight: 250, cliHeight: 230 }
+    : { topologyWidth: 680, topologyHeight: 360, cliHeight: 310 };
 
   return (
     <div className="home-root">
@@ -608,7 +634,7 @@ function HomePage({ onEnterLab, onEnterStarter, onEnterImport, onStartQuiz }) {
           </div>
           <div className="home-frame-body">
             <div className="home-frame-canvas">
-              <MiniTopology width={680} height={360} />
+              <MiniTopology width={demoSize.topologyWidth} height={demoSize.topologyHeight} />
               <button type="button" className="home-topology-cta" onClick={onEnterLab}>
                 <span>Open the lab</span>
                 {ArrowRight && <ArrowRight aria-hidden="true" />}
@@ -616,7 +642,7 @@ function HomePage({ onEnterLab, onEnterStarter, onEnterImport, onStartQuiz }) {
             </div>
             <div className="home-frame-cli">
               <div className="home-frame-cli-label">R1 console</div>
-              <MiniCli height={310} />
+              <MiniCli height={demoSize.cliHeight} />
             </div>
           </div>
         </div>

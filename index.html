@@ -1077,6 +1077,199 @@
     transition: width 180ms cubic-bezier(0.4, 0, 0.2, 1);
     will-change: width;
   }
+
+  @media (max-width: 760px) {
+    html, body {
+      overflow: hidden;
+    }
+    .app {
+      grid-template-rows: auto minmax(0, 1fr);
+    }
+    .titlebar {
+      min-height: 46px;
+      padding: 6px 8px;
+      gap: 8px;
+      flex-wrap: wrap;
+      align-content: center;
+    }
+    .tb-logo {
+      min-width: 0;
+      flex: 1 1 auto;
+    }
+    .tb-logo .quiz-link-btn {
+      margin-left: auto !important;
+      padding: 5px 7px !important;
+      font-size: 0 !important;
+      gap: 0;
+    }
+    .tb-logo .quiz-link-btn svg {
+      width: 14px;
+      height: 14px;
+    }
+    .tb-menus,
+    .tb-center {
+      display: none;
+    }
+    .tb-actions {
+      width: 100%;
+      overflow-x: auto;
+      padding-bottom: 2px;
+      gap: 6px;
+      scrollbar-width: none;
+    }
+    .tb-actions::-webkit-scrollbar {
+      display: none;
+    }
+    .tb-btn {
+      min-height: 32px;
+      padding: 5px 10px;
+      font-size: 11.5px;
+      flex: 0 0 auto;
+    }
+    .lease-banner {
+      flex-wrap: wrap;
+      gap: 8px;
+      padding: 8px 10px;
+    }
+    .workspace {
+      position: relative;
+      min-width: 0;
+      overflow: hidden;
+    }
+    .center-col {
+      width: 100%;
+      grid-template-rows: 34px minmax(0, 1fr) min(34vh, var(--bottom-panel-height, 220px));
+    }
+    .tab-bar,
+    .bp-tabs {
+      overflow-x: auto;
+      overflow-y: hidden;
+      scrollbar-width: none;
+    }
+    .tab-bar::-webkit-scrollbar,
+    .bp-tabs::-webkit-scrollbar {
+      display: none;
+    }
+    .tab {
+      min-width: 108px;
+      max-width: 74vw;
+      padding: 0 10px;
+      font-size: 11.5px;
+      flex: 0 0 auto;
+    }
+    .tab-tools {
+      position: sticky;
+      right: 0;
+      background: var(--bg-1);
+      padding-right: 6px;
+      border-left: 1px solid var(--line-soft);
+    }
+    .tab-tool {
+      width: 34px;
+      height: 30px;
+    }
+    .bottom-panel {
+      grid-template-rows: 34px minmax(0, 1fr);
+    }
+    .bottom-resizer,
+    .side-resizer,
+    .pt-sidebar-resizer,
+    .apps-sidebar-resizer,
+    .server-module-resizer {
+      display: none !important;
+    }
+    .bp-tab {
+      min-height: 34px;
+      padding: 0 11px;
+      font-size: 10.5px;
+      flex: 0 0 auto;
+    }
+    .event-tools {
+      display: none;
+    }
+    .bp-collapse {
+      position: sticky;
+      right: 0;
+      min-width: 34px;
+      background: var(--bg-1);
+      border-left: 1px solid var(--line);
+    }
+    .pt-sidebar,
+    .apps-sidebar,
+    .server-module-sidebar {
+      position: absolute;
+      inset: 0 0 auto 0;
+      z-index: 90;
+      width: 100% !important;
+      min-width: 0 !important;
+      max-width: none !important;
+      height: min(58vh, 460px);
+      box-shadow: 0 18px 46px rgba(0,0,0,.55);
+      border-right: 0;
+      border-bottom: 1px solid var(--line);
+    }
+    .apps-sidebar {
+      left: auto;
+      right: 0;
+    }
+    .pt-sidebar-stub {
+      position: absolute;
+      left: 8px;
+      top: 44px;
+      z-index: 80;
+      height: 34px;
+      width: 34px;
+      border-radius: 8px;
+      background: var(--bg-2);
+      border: 1px solid var(--line);
+      box-shadow: 0 8px 24px rgba(0,0,0,.4);
+    }
+    .toast {
+      width: calc(100vw - 24px);
+      bottom: max(10px, env(safe-area-inset-bottom));
+      justify-content: center;
+      text-align: center;
+    }
+    .ctxmenu {
+      max-width: calc(100vw - 16px);
+      max-height: calc(100vh - 16px);
+      overflow: auto;
+    }
+  }
+
+  @media (max-width: 520px) {
+    .center-col {
+      grid-template-rows: 34px minmax(0, 1fr) min(38vh, var(--bottom-panel-height, 210px));
+    }
+    .tab-new {
+      width: 36px;
+      flex: 0 0 36px;
+    }
+    .canvas-wrap {
+      background-size: 20px 20px;
+    }
+    .pt-check-window {
+      padding: 10px;
+    }
+    .pt-check-tabs {
+      justify-content: flex-start;
+      overflow-x: auto;
+    }
+    .pt-check-grid {
+      grid-template-columns: minmax(220px, 1fr) 72px 52px 120px minmax(110px, 1fr);
+    }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after {
+      animation-duration: 0.001s !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: 0.001s !important;
+      scroll-behavior: auto !important;
+    }
+  }
 </style>
 <link rel="stylesheet" href="styles.css" />
 </head>

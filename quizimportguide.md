@@ -53,10 +53,45 @@
 - Quiz label: `CCNA / Semester 2 / Modules 7-9 Quiz`
 - Imported count: 34 questions
 
+- Source PDF: `/Users/skylarenns/Downloads/sem 2 mod 10-13.pdf`
+- Destination bank: `ccna/sem-02/m-10-13`
+- Quiz label: `CCNA / Semester 2 / Modules 10-13 Quiz`
+- Imported count: 60 questions
+
+- Source PDF: `/Users/skylarenns/Downloads/sem 2 mod 14-16.pdf`
+- Destination bank: `ccna/sem-02/m-14-16`
+- Quiz label: `CCNA / Semester 2 / Modules 14-16 Quiz`
+- Imported count: 48 questions
+
+- Source PDFs: `/Users/skylarenns/Downloads/sem2 final pt 1.pdf` and `/Users/skylarenns/Downloads/sem2 final pt 2.pdf`
+- Destination bank: `ccna/sem-02/final`
+- Quiz label: `CCNA / Semester 2 / Final exam`
+- Imported count: 127 questions
+
 - Source PDF: `/Users/skylarenns/Downloads/sem 3 mod 1-2.pdf`
 - Destination bank: `ccna/sem-03/m-1-2`
 - Quiz label: `CCNA / Semester 3 / Modules 1-2 Quiz`
 - Imported count: 46 questions
+
+- Source PDF: `/Users/skylarenns/Downloads/sem3 mod 3-5.pdf`
+- Destination bank: `ccna/sem-03/m-3-5`
+- Quiz label: `CCNA / Semester 3 / Modules 3-5 Quiz`
+- Imported count: 61 questions
+
+- Source PDF: `/Users/skylarenns/Downloads/sem 3 mod 6-8.pdf`
+- Destination bank: `ccna/sem-03/m-6-8`
+- Quiz label: `CCNA / Semester 3 / Modules 6-8 Quiz`
+- Imported count: 48 questions
+
+- Source PDF: `/Users/skylarenns/Downloads/sem3 mod 9-12.pdf`
+- Destination bank: `ccna/sem-03/m-9-12`
+- Quiz label: `CCNA / Semester 3 / Modules 9-12 Quiz`
+- Imported count: 58 questions
+
+- Source PDF: `/Users/skylarenns/Downloads/sem3 mod 13-14.pdf`
+- Destination bank: `ccna/sem-03/m-13-14`
+- Quiz label: `CCNA / Semester 3 / Modules 13-14 Quiz`
+- Imported count: 34 questions
 
 ## What Was Imported
 
@@ -68,7 +103,21 @@ The Semester 2 Modules 5-6 PDF is also a OneNote-image export. Meaningful conten
 
 The Semester 2 Modules 7-9 PDF is also a OneNote-image export. Meaningful content appears on pages 1-42; pages 43-85 are effectively blank aside from the OneNote frame/footer. The import includes readable DHCPv4, SLAAC/DHCPv6, and FHRP quiz-style questions. Some exhibit-dependent questions were reworded into text-only prompts when the relevant answer intent was clear from adjacent slides; diagram questions with missing topology details should remain skipped unless visually reviewed.
 
+The Semester 2 Modules 10-13 PDF is also a OneNote-image export. Meaningful content appears on pages 1-57; pages 58-115 are effectively blank aside from the OneNote frame/footer. The import includes readable LAN security, switch security, WLAN concepts, and WLAN configuration questions. Several questions with heavily degraded exhibit/PT details were skipped; some wireless and security questions were reworded to preserve the concept without depending on unreadable screenshot fragments.
+
+The Semester 2 Modules 14-16 PDF is also a OneNote-image export. Meaningful content appears on pages 1-41; pages 42-83 are effectively blank aside from the OneNote frame/footer. The import includes readable routing concepts, IPv4/IPv6 static route, floating static route, and static/default route troubleshooting questions. Exhibit questions were converted to text prompts when the routing table or route facts were readable; topology fragments that were too degraded were skipped or simplified only when the answer intent was clear.
+
+The Semester 2 final is split across two OneNote-image PDFs. Part 1 has meaningful content on pages 1-74; pages 75-147 are effectively blank aside from the OneNote frame/footer. Part 2 has meaningful content on pages 1-21; pages 22-41 are effectively blank aside from the OneNote frame/footer. The combined final bank imports both parts into `ccna/sem-02/final`. It keeps clear multiple-choice and choose-many final review items, including some repeated concepts from module quizzes, and skips heavily degraded diagram-only fragments where the topology could not be preserved fairly.
+
 The Semester 3 Modules 1-2 PDF follows the same OneNote-image pattern. Meaningful content appears on pages 1-25; pages 26-47 are effectively blank aside from the OneNote frame/footer. The import uses rendered pages under `tmp/pdfs/sem3-mod1-2-pages` and Tesseract OCR under `tmp/pdfs/sem3-mod1-2-ocr`. Several OSPF exhibit questions were converted into text prompts with the relevant router IDs, priorities, timers, or costs instead of screenshot exhibits so the answer remains fair without image artifacts.
+
+The Semester 3 Modules 3-5 PDF is also a OneNote-image export. Meaningful content appears on pages 1-34; pages 35-67 are effectively blank aside from the OneNote frame/footer. The import uses rendered pages under `tmp/pdfs/sem3-mod3-5-pages` and Tesseract OCR under `tmp/pdfs/sem3-mod3-5-ocr`. ACL exhibit questions were imported only when the relevant addresses, interfaces, directions, or ACE sequence details were readable; a few degraded topology-only items were converted into text prompts with the necessary facts.
+
+The Semester 3 Modules 6-8 PDF is also a OneNote-image export. Meaningful content appears on pages 1-36; pages 37-73 are effectively blank aside from the OneNote frame/footer. The import uses rendered pages under `tmp/pdfs/sem3-mod6-8-pages` and Tesseract OCR under `tmp/pdfs/sem3-mod6-8-ocr`. NAT and WAN exhibit questions were converted to text prompts when the relevant translations, addresses, or WAN scenario facts were readable; one degraded Packet Tracer troubleshooting item was skipped rather than guessed.
+
+The Semester 3 Modules 9-12 PDF is also a OneNote-image export. Meaningful content appears on pages 1-53; pages 54-107 are effectively blank aside from the OneNote frame/footer. The import uses rendered pages under `tmp/pdfs/sem3-mod9-12-pages` and Tesseract OCR under `tmp/pdfs/sem3-mod9-12-ocr`. QoS, network management, design, and troubleshooting questions were imported when the prompt and answer intent were readable. A few degraded exhibit questions were converted to text prompts only when the visible slide content made the answer clear.
+
+The Semester 3 Modules 13-14 PDF is also a OneNote-image export. Meaningful content appears on pages 1-31; pages 32-63 are effectively blank aside from the OneNote frame/footer. The import uses rendered pages under `tmp/pdfs/sem3-mod13-14-pages` and Tesseract OCR under `tmp/pdfs/sem3-mod13-14-ocr`. Cloud, virtualization, SDN, controller, API, and configuration-management questions were imported when readable. A few automation questions with missing answer text were included only where the standard Cisco concept made the intended answer unambiguous; the incomplete IBN assurance item was skipped.
 
 The imported bank includes:
 
@@ -81,12 +130,12 @@ The imported bank includes:
 ## App Wiring
 
 - Semester 3 final bank data lives in `quiz/questions-data.js`, with a readable JSON mirror in `quiz/questions-ccna3.json`.
-- Semester 3 Modules 1-2 bank data lives in `quiz/questions-sem3-mod1-2.js`.
+- Semester 3 Modules 1-2, Modules 3-5, Modules 6-8, Modules 9-12, and Modules 13-14 bank data lives in `quiz/questions-sem3-mod1-2.js`, `quiz/questions-sem3-mod3-5.js`, `quiz/questions-sem3-mod6-8.js`, `quiz/questions-sem3-mod9-12.js`, and `quiz/questions-sem3-mod13-14.js`.
 - Semester 1 bank data lives in `quiz/questions-sem1-mod1-3.js`, `quiz/questions-sem1-mod4-7.js`, `quiz/questions-sem1-mod8-10.js`, `quiz/questions-sem1-mod11-13.js`, `quiz/questions-sem1-mod16-17.js`, and `quiz/questions-sem1-final.js`.
-- Semester 2 Modules 1-4, Modules 5-6, and Modules 7-9 bank data lives in `quiz/questions-sem2-mod1-4.js`, `quiz/questions-sem2-mod5-6.js`, and `quiz/questions-sem2-mod7-9.js`.
+- Semester 2 Modules 1-4, Modules 5-6, Modules 7-9, Modules 10-13, Modules 14-16, and final bank data lives in `quiz/questions-sem2-mod1-4.js`, `quiz/questions-sem2-mod5-6.js`, `quiz/questions-sem2-mod7-9.js`, `quiz/questions-sem2-mod10-13.js`, `quiz/questions-sem2-mod14-16.js`, and `quiz/questions-sem2-final.js`.
 - `quiz/index.html` loads the original Semester 3 final bank first, then appends the Semester 3, Semester 1, and Semester 2 module banks.
 - `quiz/questions.jsx` now preserves bank metadata and optional structured exhibits.
-- `quiz/home.jsx` exposes the imported Semester 1 quizzes including `Semester 1 -> Final exam`, `Semester 2 -> Modules 1-4 Quiz`, `Semester 2 -> Modules 5-6 Quiz`, `Semester 2 -> Modules 7-9 Quiz`, and `Semester 3 -> Modules 1-2 Quiz` as available quizzes.
+- `quiz/home.jsx` exposes the imported Semester 1 quizzes including `Semester 1 -> Final exam`, the imported Semester 2 module quizzes plus `Semester 2 -> Final exam`, and all imported Semester 3 module quizzes through `Semester 3 -> Modules 13-14 Quiz`.
 - `quiz/app.jsx` filters the quiz pool by the selected bank instead of launching every question globally.
 - `quiz/quiz.jsx` renders structured exhibits below the question and above the answers.
 
