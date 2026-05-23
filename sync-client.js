@@ -270,6 +270,12 @@
         body: JSON.stringify(payload || {})
       });
     }
+    async sendFeedback(payload) {
+      return request("/api/feedback", {
+        method: "POST",
+        body: JSON.stringify(payload || {})
+      });
+    }
   }
 
   window.OpenPTSync = {

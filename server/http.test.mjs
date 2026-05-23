@@ -144,6 +144,33 @@ test("production frontend origin can register against backend-only API", { timeo
   });
 });
 
+test("frontend serves lab and quiz path entrypoints", { timeout: 15_000 }, async () => {
+  await withTestServer({}, async (baseUrl) => {
+    const labRedirect = await fetch(`${baseUrl}/lab`, { redirect: "manual" });
+    assert.equal(labRedirect.status, 308);
+    assert.equal(labRedirect.headers.get("location"), "/lab/");
+
+    const lab = await fetch(`${baseUrl}/lab/`);
+    assert.equal(lab.status, 200);
+    const labHtml = await lab.text();
+    assert.match(labHtml, /<title>OpenPT<\/title>/);
+    assert.match(labHtml, /<base href="\/" \/>/);
+
+    const quizRedirect = await fetch(`${baseUrl}/quiz`, { redirect: "manual" });
+    assert.equal(quizRedirect.status, 308);
+    assert.equal(quizRedirect.headers.get("location"), "/quiz/");
+
+    const quiz = await fetch(`${baseUrl}/quiz/`);
+    assert.equal(quiz.status, 200);
+    const quizHtml = await quiz.text();
+    assert.match(quizHtml, /<title>OpenPT Quiz v0\.1<\/title>/);
+
+    const quizStyles = await fetch(`${baseUrl}/quiz/styles.css`);
+    assert.equal(quizStyles.status, 200);
+    assert.match(quizStyles.headers.get("content-type") || "", /text\/css/);
+  });
+});
+
 test("logout requires csrf and released leases can be reacquired after logout", { timeout: 15_000 }, async () => {
   await withTestServer({}, async (baseUrl) => {
     const session = await registerSession(baseUrl);

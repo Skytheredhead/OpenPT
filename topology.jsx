@@ -329,7 +329,7 @@ function Topology(props) {
     }
     return Array.from(groups.entries());
   };
-  const linkLabelPositions = React.useMemo(() => {
+  const linkGeometries = React.useMemo(() => {
     const pairGroups = new Map();
     links.forEach((l) => {
       const key = [l.a, l.b].filter(Boolean).sort().join(":");
@@ -350,18 +350,39 @@ function Topology(props) {
       const dx = b.x - a.x, dy = b.y - a.y;
       const len = Math.hypot(dx, dy) || 1;
       const tx = dx / len, ty = dy / len;
+      const px = -ty, py = tx;
       const slot = pairSlots[l.id] || { offset: 0, count: 1 };
-      const midShift = slot.count > 1 ? slot.offset * 68 : 0;
-      const chipGap = Math.max(20, Math.min(42, len * 0.14));
-      const mx = (a.x + b.x) / 2 + tx * midShift;
-      const my = (a.y + b.y) / 2 + ty * midShift;
+      const endShift = slot.count > 1 ? slot.offset * 9 : 0;
+      const curveShift = slot.count > 1 ? slot.offset * 46 : 0;
+      const labelShift = slot.count > 1 ? slot.offset * 30 : 0;
+      const r = 22;
+      const sx = a.x + tx * r + px * endShift;
+      const sy = a.y + ty * r + py * endShift;
+      const ex = b.x - tx * r + px * endShift;
+      const ey = b.y - ty * r + py * endShift;
+      const cx = (a.x + b.x) / 2 + px * curveShift;
+      const cy = (a.y + b.y) / 2 + py * curveShift;
+      const pointOnCable = (t) => {
+        if (slot.count <= 1) return { x: sx + (ex - sx) * t, y: sy + (ey - sy) * t };
+        const inv = 1 - t;
+        return {
+          x: inv * inv * sx + 2 * inv * t * cx + t * t * ex,
+          y: inv * inv * sy + 2 * inv * t * cy + t * t * ey,
+        };
+      };
+      const labelA = pointOnCable(slot.count > 1 ? 0.32 : 0.43);
+      const labelB = pointOnCable(slot.count > 1 ? 0.68 : 0.57);
       let angle = Math.atan2(dy, dx) * 180 / Math.PI;
       if (angle > 90) angle -= 180;
       if (angle < -90) angle += 180;
       positions[l.id] = {
         angle,
-        a: { x: mx - tx * chipGap, y: my - ty * chipGap },
-        b: { x: mx + tx * chipGap, y: my + ty * chipGap },
+        line: {
+          sx, sy, ex, ey,
+          path: slot.count > 1 ? `M ${sx} ${sy} Q ${cx} ${cy} ${ex} ${ey}` : null,
+        },
+        a: { x: labelA.x + px * labelShift * 0.18, y: labelA.y + py * labelShift * 0.18 },
+        b: { x: labelB.x + px * labelShift * 0.18, y: labelB.y + py * labelShift * 0.18 },
       };
     });
     return positions;
@@ -516,12 +537,17 @@ function Topology(props) {
             {links.map(l => {
               const a = devices[l.a], b = devices[l.b];
               if (!a || !b) return null;
+              const geom = linkGeometries[l.id];
               const dx = b.x - a.x, dy = b.y - a.y;
               const len = Math.hypot(dx, dy) || 1;
-              // shrink ends so cable doesn't enter the icon body
               const r = 22;
-              const sx = a.x + (dx / len) * r, sy = a.y + (dy / len) * r;
-              const ex = b.x - (dx / len) * r, ey = b.y - (dy / len) * r;
+              const fallbackLine = {
+                sx: a.x + (dx / len) * r,
+                sy: a.y + (dy / len) * r,
+                ex: b.x - (dx / len) * r,
+                ey: b.y - (dy / len) * r,
+              };
+              const line = geom?.line || fallbackLine;
               const stroke = l.type === "serial" ? "var(--warn)"
                              : l.type === "fiber" ? "var(--violet)"
                              : l.type === "console" ? "var(--fg-3)"
@@ -530,7 +556,11 @@ function Topology(props) {
                             : (!l.up ? "4,4" : "");
               return (
                 <g key={l.id}>
-                  <line x1={sx} y1={sy} x2={ex} y2={ey} stroke={stroke} strokeWidth={1.4} strokeDasharray={dash} opacity={l.up ? 0.85 : 0.4} />
+                  {line.path ? (
+                    <path d={line.path} fill="none" stroke={stroke} strokeWidth={1.55} strokeDasharray={dash} opacity={l.up ? 0.9 : 0.42} strokeLinecap="round" />
+                  ) : (
+                    <line x1={line.sx} y1={line.sy} x2={line.ex} y2={line.ey} stroke={stroke} strokeWidth={1.4} strokeDasharray={dash} opacity={l.up ? 0.85 : 0.4} strokeLinecap="round" />
+                  )}
                 </g>
               );
             })}
@@ -541,7 +571,7 @@ function Topology(props) {
         {links.map(l => {
           const a = devices[l.a], b = devices[l.b];
           if (!a || !b) return null;
-          const labelPosition = linkLabelPositions[l.id];
+          const labelPosition = linkGeometries[l.id];
           const dx = b.x - a.x, dy = b.y - a.y;
           const len = Math.hypot(dx, dy) || 1;
           const tx = dx / len, ty = dy / len;

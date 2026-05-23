@@ -9,9 +9,15 @@ import { ObjectStore } from "./object-store.mjs";
 import { OpenPTStore, LIMITS } from "./storage.mjs";
 import { AbuseGuard, clientIp } from "./abuse-guard.mjs";
 import { reportFingerprint, sanitizeErrorReport, sendErrorReportEmail } from "./error-report.mjs";
+import { sanitizeFeedback, sendFeedbackEmail } from "./feedback.mjs";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const root = resolve(__dirname, "..");
+try {
+  process.loadEnvFile?.(join(root, ".env"));
+} catch (err) {
+  if (err?.code !== "ENOENT") console.warn("Could not load .env:", err.message);
+}
 const dataDir = resolve(process.env.OPENPT_DATA_DIR || join(root, ".openpt-data"));
 const port = Number(process.env.PORT || 5173);
 const host = process.env.HOST || "127.0.0.1";
@@ -151,6 +157,17 @@ app.post("/api/error-reports", { bodyLimit: 256 * 1024 }, async (req, reply) => 
   sendErrorReportEmail(report, { logger: req.log }).catch((err) => {
     req.log.warn({ err, fingerprint }, "error report email failed");
   });
+  reply.status(202);
+  return { ok: true };
+});
+
+app.post("/api/feedback", { bodyLimit: 15 * 1024 * 1024 }, async (req, reply) => {
+  if (req.user) requireCsrf(req);
+  const ip = clientIp(req);
+  abuse.check("feedbackIpMinute", ip);
+  abuse.check("feedbackIpHour", ip);
+  const feedback = sanitizeFeedback(req.body || {});
+  await sendFeedbackEmail(feedback);
   reply.status(202);
   return { ok: true };
 });
@@ -375,6 +392,18 @@ if (!backendOnly) {
     root,
     prefix: "/",
     wildcard: false
+  });
+
+  app.get("/lab", async (req, reply) => {
+    return reply.redirect("/lab/", 308);
+  });
+
+  app.get("/lab/", async (req, reply) => {
+    return reply.sendFile("index.html");
+  });
+
+  app.get("/quiz", async (req, reply) => {
+    return reply.redirect("/quiz/", 308);
   });
 
   app.get("/share/:token", async (req, reply) => {

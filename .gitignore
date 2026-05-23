@@ -12,6 +12,7 @@ dist/
 build/
 .cache/
 .vercel/
+tmp/
 *.sqlite
 *.sqlite-shm
 *.sqlite-wal

@@ -11,6 +11,8 @@ const DEFAULT_LIMITS = {
   errorReportIp: { limit: 5, windowMs: 60 * 60_000 },
   errorReportFingerprint: { limit: 2, windowMs: 24 * 60 * 60_000 },
   errorReportUser: { limit: 10, windowMs: 60 * 60_000 },
+  feedbackIpMinute: { limit: 1, windowMs: 60_000 },
+  feedbackIpHour: { limit: 10, windowMs: 60 * 60_000 },
 };
 
 export function clientIp(req) {

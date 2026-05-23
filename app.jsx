@@ -16,6 +16,7 @@ const TweakSlider = window.TweakSlider;
 const TweakToggle = window.TweakToggle;
 const TweakColor = window.TweakColor;
 const TweakButton = window.TweakButton;
+const QUIZ_LIBRARY_URL = "/quiz/?view=library";
 const ifaceName = (name) => OPT_Engine.shortIfaceName ? OPT_Engine.shortIfaceName(name) : name;
 const ifaceText = (text) => OPT_Engine.shortIfaceNamesInText ? OPT_Engine.shortIfaceNamesInText(text) : text;
 
@@ -1014,6 +1015,13 @@ function App() {
   const [ptActivity, setPtActivity] = useState(initial.ptActivity);
   const [ptSidebarOpen, setPtSidebarOpen] = useState(initial.ptSidebarOpen ?? !!initial.ptActivity);
   const [starterScreenVisible, setStarterScreenVisible] = useState(initial.starterScreenVisible || false);
+  const [viewMode, setViewMode] = useState(() => {
+    try { return localStorage.getItem("openpt:viewMode") || "home"; }
+    catch (e) { return "home"; }
+  });
+  useEffect(() => {
+    try { localStorage.setItem("openpt:viewMode", viewMode); } catch (e) {}
+  }, [viewMode]);
   const [bottomCollapsed, setBottomCollapsed] = useState(() => {
     try { return localStorage.getItem("openpt:bottom-collapsed") === "1"; } catch (e) { return false; }
   });
@@ -1181,11 +1189,15 @@ function App() {
     return () => clearTimeout(handle);
   }, [tabs, activeWid, devices, links, selectedIds, openConsoles, activeBottom, ptActivity, ptSidebarOpen, starterScreenVisible]);
 
-  // Hide boot splash on first mount (with a brief hold so the splash is actually seen)
+  // Hide boot splash on first mount. Home page doesn't need it; lab gets the brief hold.
   useEffect(() => {
     const root = document.getElementById("root");
     const boot = document.getElementById("boot");
-    // give the splash a beat, then cross-fade
+    if (viewMode === "home") {
+      if (root) root.classList.add("ready");
+      if (boot) boot.remove();
+      return;
+    }
     const t = setTimeout(() => {
       if (root) root.classList.add("ready");
       if (boot) {
@@ -1409,6 +1421,7 @@ function App() {
   const [authOpen, setAuthOpen] = useState(false);
   const [projectsOpen, setProjectsOpen] = useState(false);
   const [shareOpen, setShareOpen] = useState(false);
+  const [feedbackOpen, setFeedbackOpen] = useState(false);
   const [conflict, setConflict] = useState(null);
   const [meaningfulChanges, setMeaningfulChanges] = useState(0);
   const [firstDirtyAt, setFirstDirtyAt] = useState(null);
@@ -3120,6 +3133,17 @@ function App() {
     ? `Autosave in ${Math.ceil(autosaveDueMs / 1000)}s`
     : syncStatus.message;
 
+  if (viewMode === "home" && window.HomePage) {
+    return (
+      <window.HomePage
+        onEnterLab={() => { setViewMode("app"); createEmptyProjectFromStarterScreen(); }}
+        onEnterStarter={() => { setViewMode("app"); newStarterTab(); }}
+        onEnterImport={() => { setViewMode("app"); openPacketTracerFilePicker(); }}
+        onStartQuiz={() => { window.location.href = QUIZ_LIBRARY_URL; }}
+      />
+    );
+  }
+
   return (
     <div
       className="app"
@@ -3141,10 +3165,31 @@ function App() {
       />
       {/* Title bar */}
       <div className="titlebar">
-        <div className="tb-logo">
+        <div
+          className="tb-logo"
+          onClick={() => setViewMode("home")}
+          style={{ cursor: "pointer" }}
+          title="Back to home"
+        >
           <div className="glyph"/>
           OpenPT
           <span style={{ color: "var(--fg-3)", fontWeight: 400, fontSize: 11, marginLeft: 6 }}>{OPENPT_VERSION}</span>
+          <button
+            type="button"
+            className="tb-btn quiz-link-btn"
+            title="Open OpenPT Quiz"
+            onClick={() => window.open(QUIZ_LIBRARY_URL, "_blank", "noopener,noreferrer")}
+            style={{ marginLeft: 10, padding: "3px 8px", fontSize: 11 }}
+          >
+            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/>
+              <circle cx="12" cy="17" r="0.5" fill="currentColor"/>
+            </svg>
+            Quizzes
+            <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ opacity: 0.7 }}>
+              <path d="M7 17L17 7M9 7h8v8"/>
+            </svg>
+          </button>
         </div>
         <TitleMenus
           devices={devices}
@@ -3650,6 +3695,13 @@ function App() {
         />
       )}
 
+      <FeedbackWidget
+        open={feedbackOpen}
+        syncClient={syncClient}
+        onToggle={() => setFeedbackOpen((open) => !open)}
+        onClose={() => setFeedbackOpen(false)}
+      />
+
       <TweaksPanel>
         <TweakSection label="Theme" />
         <TweakColor label="Accent" value={ACCENTS[t.accent]?.a || ACCENTS.cyan.a}
@@ -3760,6 +3812,125 @@ function App() {
 }
 
 // ── Helper components ────────────────────────────────────
+function FeedbackWidget({ open, syncClient, onToggle, onClose }) {
+  const inputRef = useRef(null);
+  const [form, setForm] = useState({ subject: "", email: "", content: "" });
+  const [attachments, setAttachments] = useState([]);
+  const [status, setStatus] = useState(null);
+  const [sending, setSending] = useState(false);
+  const canAttach = attachments.length < 2 && !sending;
+  const update = (key, value) => {
+    setForm((current) => ({ ...current, [key]: value }));
+    if (status?.kind === "err") setStatus(null);
+  };
+  const readAttachment = (file) => new Promise((resolve, reject) => {
+    if (!file.type || !["image/jpeg", "image/png", "image/webp", "image/gif"].includes(file.type)) {
+      reject(new Error("Choose a JPEG, PNG, WebP, or GIF image."));
+      return;
+    }
+    if (file.size > 5 * 1024 * 1024) {
+      reject(new Error("Images must be 5MB or smaller."));
+      return;
+    }
+    const reader = new FileReader();
+    reader.onload = () => {
+      const dataUrl = String(reader.result || "");
+      resolve({
+        filename: file.name || "feedback-image",
+        contentType: file.type,
+        data: dataUrl.includes(",") ? dataUrl.split(",").pop() : dataUrl,
+      });
+    };
+    reader.onerror = () => reject(new Error("Could not read image."));
+    reader.readAsDataURL(file);
+  });
+  const pickAttachment = () => {
+    if (!canAttach) return;
+    inputRef.current?.click();
+  };
+  const onFile = async (event) => {
+    const file = event.target.files?.[0];
+    event.target.value = "";
+    if (!file) return;
+    try {
+      const attachment = await readAttachment(file);
+      setAttachments((items) => items.length >= 2 ? items : [...items, attachment]);
+      setStatus(null);
+    } catch (err) {
+      setStatus({ kind: "err", msg: err.message || "Could not attach image." });
+    }
+  };
+  const removeAttachment = (index) => {
+    setAttachments((items) => items.filter((_, i) => i !== index));
+  };
+  const submit = async (event) => {
+    event.preventDefault();
+    if (!syncClient) {
+      setStatus({ kind: "err", msg: "Feedback is unavailable right now." });
+      return;
+    }
+    if (!form.content.trim()) {
+      setStatus({ kind: "err", msg: "Add a little feedback first." });
+      return;
+    }
+    setSending(true);
+    setStatus(null);
+    try {
+      await syncClient.sendFeedback({ ...form, attachments });
+      setForm({ subject: "", email: "", content: "" });
+      setAttachments([]);
+      setStatus({ kind: "ok", msg: "Feedback sent." });
+    } catch (err) {
+      const msg = err.status === 429 ? "Please wait a moment before sending more feedback." : (err.message || "Could not send feedback.");
+      setStatus({ kind: "err", msg });
+    } finally {
+      setSending(false);
+    }
+  };
+
+  return (
+    <div className={`feedback-overlay ${open ? "open" : ""}`}>
+      {open && (
+        <form className="feedback-card" onSubmit={submit}>
+          <div className="feedback-head">
+            <h2>Feedback</h2>
+            <button type="button" className="feedback-close" onClick={onClose} aria-label="Close feedback">{Icon.close()}</button>
+          </div>
+          <label htmlFor="feedback-subject">
+            <span>subject</span>
+            <input id="feedback-subject" value={form.subject} maxLength={200} onChange={(e) => update("subject", e.target.value)} />
+          </label>
+          <label htmlFor="feedback-email">
+            <span>email</span>
+            <input id="feedback-email" type="email" value={form.email} maxLength={320} onChange={(e) => update("email", e.target.value)} />
+          </label>
+          <label htmlFor="feedback-content">
+            <span>content</span>
+            <textarea id="feedback-content" value={form.content} maxLength={4000} onChange={(e) => update("content", e.target.value)} />
+          </label>
+          <input ref={inputRef} type="file" accept="image/jpeg,image/png,image/webp,image/gif" hidden onChange={onFile} />
+          <div className="feedback-attachments">
+            <button type="button" className="feedback-attach" disabled={!canAttach} onClick={pickAttachment}>
+              {attachments.length ? "Add another image" : "Add image"}
+            </button>
+            {attachments.map((attachment, index) => (
+              <div key={`${attachment.filename}-${index}`} className="feedback-file">
+                <span>{attachment.filename}</span>
+                <button type="button" onClick={() => removeAttachment(index)} aria-label={`Remove ${attachment.filename}`}>×</button>
+              </div>
+            ))}
+          </div>
+          {status && <div className={`feedback-status ${status.kind}`}>{status.msg}</div>}
+          <div className="feedback-actions">
+            <button type="submit" className="feedback-submit" disabled={sending}>{sending ? "Sending..." : "Send"}</button>
+          </div>
+        </form>
+      )}
+      <button type="button" className="feedback-button" onClick={onToggle}>Feedback</button>
+    </div>
+  );
+}
+
 function TitleMenus(props) {
   const [open, setOpen] = useState(null);
   const ref = useRef(null);

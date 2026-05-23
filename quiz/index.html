@@ -1,0 +1,314 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>OpenPT Quiz v0.1</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Geist:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet" />
+<style>
+  :root {
+    --bg-0: oklch(0.16 0.005 240);
+    --bg-1: oklch(0.19 0.006 240);
+    --bg-2: oklch(0.23 0.007 240);
+    --bg-3: oklch(0.27 0.008 240);
+    --bg-hi: oklch(0.32 0.010 240);
+    --line: oklch(0.32 0.010 240 / 0.7);
+    --line-soft: oklch(0.32 0.010 240 / 0.3);
+    --fg-0: oklch(0.96 0.003 240);
+    --fg-1: oklch(0.78 0.005 240);
+    --fg-2: oklch(0.60 0.006 240);
+    --fg-3: oklch(0.45 0.007 240);
+    --accent: oklch(0.78 0.13 220);
+    --accent-dim: oklch(0.48 0.11 220);
+    --accent-soft: oklch(0.78 0.13 220 / 0.14);
+    --ok: oklch(0.78 0.15 150);
+    --ok-soft: oklch(0.78 0.15 150 / 0.14);
+    --warn: oklch(0.84 0.14 90);
+    --warn-soft: oklch(0.84 0.14 90 / 0.14);
+    --err: oklch(0.70 0.19 25);
+    --err-soft: oklch(0.70 0.19 25 / 0.16);
+    --magenta: oklch(0.72 0.17 330);
+    --violet: oklch(0.72 0.15 290);
+    --grid-dot: oklch(0.42 0.012 240 / 0.18);
+    --font-ui: "Geist", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+    --font-mono: "JetBrains Mono", ui-monospace, "SF Mono", Menlo, monospace;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; background: var(--bg-0); color: var(--fg-0); font-family: var(--font-ui); -webkit-font-smoothing: antialiased; overflow: hidden; }
+  body { font-size: 13px; letter-spacing: -0.005em; }
+  button { font-family: inherit; color: inherit; cursor: default; }
+  ::selection { background: var(--accent-soft); }
+
+  /* ── App shell ───────────────────────────────────────────── */
+  .app { display: grid; grid-template-rows: 1fr; height: 100vh; width: 100vw; }
+  .main-area {
+    min-height: 0; min-width: 0; overflow: hidden;
+    background-color: var(--bg-0);
+    background-image: radial-gradient(circle at center, var(--grid-dot) 0.8px, transparent 1px);
+    background-size: 24px 24px;
+    position: relative;
+  }
+  .titlebar {
+    display: flex; align-items: center;
+    background: var(--bg-1);
+    border-bottom: 1px solid var(--line);
+    padding: 0 12px; gap: 16px; user-select: none;
+    transition: background .35s ease, border-color .35s ease;
+  }
+  /* On home, the titlebar dissolves — logo+title live above the library card */
+  .app.route-home .titlebar {
+    background: transparent;
+    border-bottom-color: transparent;
+  }
+  /* Fixed bottom-right version badge */
+  .app-version {
+    position: fixed;
+    right: 14px;
+    bottom: 10px;
+    font-family: var(--font-mono);
+    font-size: 10.5px;
+    letter-spacing: 0.08em;
+    color: var(--fg-3);
+    opacity: .55;
+    user-select: none;
+    pointer-events: none;
+    z-index: 5;
+  }
+  .tb-logo { display: flex; align-items: center; gap: 8px; font-weight: 600; letter-spacing: -0.01em; }
+  .tb-logo .glyph {
+    width: 18px; height: 18px; position: relative;
+    background:
+      radial-gradient(circle at 50% 50%, var(--accent) 0 2.2px, transparent 2.5px),
+      radial-gradient(circle at 18% 22%, var(--fg-1) 0 1.2px, transparent 1.5px),
+      radial-gradient(circle at 82% 22%, var(--fg-1) 0 1.2px, transparent 1.5px),
+      radial-gradient(circle at 50% 88%, var(--fg-1) 0 1.2px, transparent 1.5px);
+  }
+  .tb-logo .glyph::before {
+    content: ""; position: absolute; inset: 0;
+    background:
+      linear-gradient(45deg, transparent 47%, var(--fg-3) 47% 53%, transparent 53%),
+      linear-gradient(-45deg, transparent 47%, var(--fg-3) 47% 53%, transparent 53%);
+    opacity: .55;
+  }
+  .tb-logo .glyph::after {
+    content: ""; position: absolute; inset: 0;
+    background: radial-gradient(circle at 50% 50%, var(--bg-1) 0 3px, transparent 3.5px);
+  }
+  .tb-logo .scope { color: var(--fg-3); font-weight: 400; }
+
+  .tb-menus { display: flex; gap: 2px; }
+  .tb-menu {
+    padding: 4px 8px; border-radius: 5px;
+    color: var(--fg-1); font-size: 12.5px;
+    user-select: none;
+  }
+  .tb-menu:hover { background: var(--bg-2); color: var(--fg-0); }
+  .tb-center { flex: 1; display: flex; justify-content: center; align-items: center; }
+  .tb-status-chip {
+    display: flex; align-items: center; gap: 6px;
+    padding: 3px 10px 3px 8px;
+    background: var(--bg-2);
+    border: 1px solid var(--line);
+    border-radius: 6px;
+    font-size: 12px; color: var(--fg-1);
+    font-family: var(--font-mono);
+    white-space: nowrap;
+  }
+  .tb-status-chip .dot {
+    width: 6px; height: 6px; border-radius: 50%;
+    background: var(--ok); box-shadow: 0 0 8px var(--ok);
+  }
+  .tb-status-chip.ready .dot { background: var(--accent); box-shadow: 0 0 8px var(--accent); }
+  .tb-status-chip.live .dot { background: var(--warn); box-shadow: 0 0 8px var(--warn); animation: tbpulse 1.4s infinite; }
+  @keyframes tbpulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.4; } }
+
+  .tb-actions { display: flex; gap: 6px; }
+  .tb-btn {
+    appearance: none; border: 1px solid var(--line); background: var(--bg-2);
+    color: var(--fg-1); padding: 4px 9px; border-radius: 6px;
+    font-size: 12px; display: inline-flex; align-items: center; gap: 6px;
+    white-space: nowrap;
+  }
+  .tb-btn:hover { background: var(--bg-3); color: var(--fg-0); }
+  .tb-btn.primary { background: var(--accent-soft); border-color: var(--accent-dim); color: var(--accent); }
+  .tb-btn.primary:hover { background: color-mix(in oklab, var(--accent) 22%, transparent); }
+  .tb-btn .kbd {
+    font-family: var(--font-mono); font-size: 10.5px;
+    background: var(--bg-1); padding: 1px 4px; border-radius: 3px;
+    color: var(--fg-2); border: 1px solid var(--line);
+  }
+
+  /* ── Workspace ─────────────────────────────────────────── */
+  .workspace { display: flex; min-height: 0; }
+  .activity-bar {
+    width: 48px;
+    background: var(--bg-1);
+    border-right: 1px solid var(--line);
+    display: flex; flex-direction: column; align-items: center;
+    padding: 8px 0; gap: 4px;
+  }
+  .activity-btn {
+    width: 38px; height: 38px; border-radius: 8px;
+    display: flex; align-items: center; justify-content: center;
+    color: var(--fg-2); position: relative;
+  }
+  .activity-btn:hover { color: var(--fg-0); background: var(--bg-2); }
+  .activity-btn.active { color: var(--accent); }
+  .activity-btn.active::before {
+    content: ""; position: absolute; left: -10px; top: 6px; bottom: 6px;
+    width: 2px; background: var(--accent); border-radius: 2px;
+  }
+  .activity-spacer { flex: 1; }
+
+  .side-panel {
+    width: 280px;
+    background: var(--bg-1);
+    border-right: 1px solid var(--line);
+    display: flex; flex-direction: column;
+    min-height: 0;
+  }
+  .side-head {
+    padding: 10px 12px 8px;
+    font-size: 10.5px; letter-spacing: 0.08em; text-transform: uppercase;
+    color: var(--fg-3); font-weight: 600;
+    display: flex; align-items: center; justify-content: space-between;
+  }
+  .side-body { flex: 1; overflow-y: auto; }
+
+  .qlib-section { padding: 4px 0 8px; }
+  .qlib-section-title {
+    font-size: 10.5px; letter-spacing: 0.08em; text-transform: uppercase;
+    color: var(--fg-3); font-weight: 600;
+    padding: 6px 14px 4px;
+    display: flex; align-items: center; gap: 6px;
+  }
+  .qlib-section-title .chev { font-family: var(--font-mono); font-size: 9px; color: var(--fg-3); }
+  .qlib-folder {
+    display: flex; align-items: center; gap: 6px;
+    padding: 4px 14px 4px 18px;
+    font-size: 12.5px; color: var(--fg-1);
+  }
+  .qlib-folder:hover { background: var(--bg-2); color: var(--fg-0); }
+  .qlib-folder .chev { font-family: var(--font-mono); font-size: 9px; width: 10px; color: var(--fg-3); }
+  .qlib-folder .icn { color: var(--accent); display: inline-flex; }
+  .qlib-item {
+    display: flex; align-items: center; gap: 8px;
+    padding: 4px 14px 4px 38px;
+    font-size: 12px; color: var(--fg-1);
+    border-left: 2px solid transparent;
+  }
+  .qlib-item .icn { color: var(--fg-3); display: inline-flex; }
+  .qlib-item .ct { margin-left: auto; font-family: var(--font-mono); font-size: 10.5px; color: var(--fg-3); }
+  .qlib-item:hover { background: var(--bg-2); color: var(--fg-0); }
+  .qlib-item.active { background: var(--accent-soft); color: var(--fg-0); border-left-color: var(--accent); }
+  .qlib-item.active .icn { color: var(--accent); }
+  .qlib-empty { padding: 6px 14px 6px 38px; color: var(--fg-3); font-size: 11.5px; font-style: italic; }
+
+  /* ── Center column ─── */
+  .center-col { flex: 1; min-width: 0; display: grid; grid-template-rows: 32px 1fr; background: var(--bg-0); }
+
+  .tab-bar {
+    background: var(--bg-1);
+    border-bottom: 1px solid var(--line);
+    display: flex; align-items: stretch;
+  }
+  .tab {
+    display: flex; align-items: center; gap: 8px;
+    padding: 0 14px;
+    font-size: 12.5px; color: var(--fg-2);
+    border-right: 1px solid var(--line);
+    min-width: 120px;
+    white-space: nowrap;
+    max-width: 320px;
+  }
+  .tab .icn { display: inline-flex; color: var(--accent); opacity: .85; }
+  .tab.active { background: var(--bg-0); color: var(--fg-0); border-bottom: 1px solid var(--bg-0); margin-bottom: -1px; }
+  .tab.active .icn { opacity: 1; }
+  .tab .close {
+    color: var(--fg-3); margin-left: 8px;
+    width: 16px; height: 16px;
+    display: flex; align-items: center; justify-content: center;
+    border-radius: 3px;
+    font-size: 14px;
+  }
+  .tab .close:hover { background: var(--bg-3); color: var(--fg-0); }
+  .tab-spacer { flex: 1; }
+  .tab-tools { display: flex; align-items: center; gap: 4px; padding-right: 8px; }
+  .tab-tool {
+    width: 28px; height: 24px; border-radius: 4px;
+    display: flex; align-items: center; justify-content: center;
+    color: var(--fg-2);
+  }
+  .tab-tool:hover { background: var(--bg-2); color: var(--fg-0); }
+
+  .pane { position: relative; min-height: 0; min-width: 0; overflow: hidden; }
+  .pane.dotgrid {
+    background-color: var(--bg-0);
+    background-image: radial-gradient(circle at center, var(--grid-dot) 0.8px, transparent 1px);
+    background-size: 24px 24px;
+  }
+  .pane-scroll { height: 100%; overflow-y: auto; }
+
+  /* ── Status bar ──────────────────────────────────────────── */
+  .statusbar {
+    background: var(--bg-1);
+    border-top: 1px solid var(--line);
+    display: flex; align-items: center;
+    padding: 0 12px;
+    font-size: 11px;
+    color: var(--fg-2);
+    font-family: var(--font-mono);
+    gap: 14px;
+  }
+  .statusbar .s-item { display: flex; align-items: center; gap: 6px; }
+  .statusbar .s-spacer { flex: 1; }
+  .statusbar .s-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--ok); }
+  .statusbar .s-pill {
+    background: var(--accent-soft); color: var(--accent);
+    padding: 1px 6px; border-radius: 3px;
+    border: 1px solid var(--accent-dim);
+  }
+
+  /* Scrollbars */
+  ::-webkit-scrollbar { width: 10px; height: 10px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb { background: var(--bg-3); border-radius: 5px; border: 2px solid transparent; background-clip: content-box; }
+  ::-webkit-scrollbar-thumb:hover { background: var(--bg-hi); background-clip: content-box; border: 2px solid transparent; }
+
+  /* Root fade-in (no splash — scripts load fast enough that a splash just flashes) */
+  #root { opacity: 0; transition: opacity 220ms ease; }
+  #root.ready { opacity: 1; }
+</style>
+<link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+<div id="root"></div>
+
+<script src="https://unpkg.com/react@18.3.1/umd/react.development.js" integrity="sha384-hD6/rw4ppMLGNu3tX5cjIb+uRZ7UkRJ6BPkLpg4hAu/6onKUg4lLsHAs9EBPT82L" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" integrity="sha384-u6aeetuaXnQ38mYT8rp6sbXaQe3NL9t+IBXmnYxwkUI2Hw4bsp2Wvmx4yRQF1uAm" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" integrity="sha384-m08KidiNqLdpJqLq95G/LEi8Qvjl/xUYll3QILypMoQ65QorJ9Lvtp2RXYGBFj1y" crossorigin="anonymous"></script>
+
+<script type="text/babel" src="tweaks-panel.jsx"></script>
+<script type="text/babel" src="icons.jsx"></script>
+<script type="text/babel" src="../device-glyphs.jsx"></script>
+<script src="questions-data.js"></script>
+<script src="questions-sem3-mod1-2.js"></script>
+<script src="questions-sem1-mod1-3.js"></script>
+<script src="questions-sem1-mod4-7.js"></script>
+<script src="questions-sem1-mod8-10.js"></script>
+<script src="questions-sem1-mod11-13.js"></script>
+<script src="questions-sem1-mod16-17.js"></script>
+<script src="questions-sem1-final.js"></script>
+<script src="questions-sem2-mod1-4.js"></script>
+<script src="questions-sem2-mod5-6.js"></script>
+<script src="questions-sem2-mod7-9.js"></script>
+<script type="text/babel" src="questions.jsx"></script>
+<script type="text/babel" src="engine.jsx"></script>
+<script type="text/babel" src="home.jsx"></script>
+<script type="text/babel" src="quiz.jsx"></script>
+<script type="text/babel" src="results.jsx"></script>
+<script type="text/babel" src="app.jsx"></script>
+</body>
+</html>
