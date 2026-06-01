@@ -59,6 +59,31 @@ test("logout sends csrf when present and clears cached csrf", async () => {
   assert.equal(sessionValues.has("openpt:csrf"), false);
 });
 
+test("project browser methods call expected endpoints", async () => {
+  const calls = [];
+  const Sync = await loadSyncClient({
+    windowSetup(window) {
+      window.localStorage = new MapStorage();
+      window.sessionStorage = new MapStorage(new Map([["openpt:csrf", "csrf-token"]]));
+    },
+    fetchImpl: async (url, options = {}) => {
+      calls.push({ url, method: options.method || "GET", body: options.body ? JSON.parse(options.body) : null });
+      return new Response(JSON.stringify({ ok: true, project: { id: "p1" } }), { status: 200 });
+    },
+  });
+  const client = new Sync.OpenPTSyncClient();
+  await client.renameProject("p1", "New Name");
+  await client.duplicateProject("p1", "Copy");
+  await client.deleteProject("p1");
+  assert.deepEqual(calls.map((call) => [call.method, call.url]), [
+    ["POST", "/api/projects/p1"],
+    ["POST", "/api/projects/p1/duplicate"],
+    ["DELETE", "/api/projects/p1"],
+  ]);
+  assert.equal(calls[0].body.title, "New Name");
+  assert.equal(calls[1].body.title, "Copy");
+});
+
 class MapStorage {
   constructor(values = new Map()) {
     this.values = values;

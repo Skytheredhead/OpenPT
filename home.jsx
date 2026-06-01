@@ -575,7 +575,7 @@ function MiniQuestion({ questions = SAMPLE_QS, onAnswered }) {
 }
 
 // ── HomePage ───────────────────────────────────────────────────────
-function HomePage({ onEnterLab, onEnterStarter, onEnterImport, onStartQuiz }) {
+function HomePage({ onEnterLab, onEnterStarter, onEnterImport, onStartQuiz, onStartJeopardy }) {
   const ArrowRight = window.Icon?.arrowRight;
   const Github = window.Icon?.github;
   const isPhone = useNarrowScreen();
@@ -595,6 +595,7 @@ function HomePage({ onEnterLab, onEnterStarter, onEnterImport, onStartQuiz }) {
         <div className="home-nav-links">
           <a className="home-nav-link" onClick={onEnterLab}>Simulate</a>
           <a className="home-nav-link" onClick={onStartQuiz}>Practice</a>
+          <a className="home-nav-link" onClick={onStartJeopardy}>Jeopardy</a>
           <a className="home-nav-link" onClick={onEnterImport}>Import</a>
         </div>
       </nav>
@@ -614,6 +615,7 @@ function HomePage({ onEnterLab, onEnterStarter, onEnterImport, onStartQuiz }) {
         <div className="home-cta">
           <button type="button" className="home-btn primary" onClick={onEnterLab}>Open the lab →</button>
           <button type="button" className="home-btn" onClick={onStartQuiz}>Start studying</button>
+          <button type="button" className="home-btn" onClick={onStartJeopardy}>Play Jeopardy</button>
         </div>
       </section>
 
@@ -675,6 +677,7 @@ function HomePage({ onEnterLab, onEnterStarter, onEnterImport, onStartQuiz }) {
             If you're Cisco — no they're not your exact questions (but they're dang close).
           </p>
           <button type="button" className="home-btn primary" onClick={onStartQuiz}>Start studying →</button>
+          <button type="button" className="home-btn" onClick={onStartJeopardy}>Play Jeopardy →</button>
         </div>
         <div className="home-section-demo">
           <MiniQuestion />

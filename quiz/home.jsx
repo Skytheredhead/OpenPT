@@ -6,13 +6,16 @@ const { useState, useEffect, useMemo } = React;
 const CATALOG = [
   {
     id: 'ccna', label: 'CCNA',
+    exams: [
+      { id: 'all', label: 'ALL Quiz', available: true, count: 1172, allQuestions: true },
+    ],
     semesters: [
       { id: 'sem-01', label: 'Semester 1', exams: [
         { id: 'm-1-3',  label: 'Module 1-3 Quiz', available: true, count: 28 },
         { id: 'm-4-7',  label: 'Module 4-7 Quiz', available: true, count: 45 },
         { id: 'm-8-10', label: 'Module 8-10 Quiz', available: true, count: 38 },
         { id: 'm-11-13',label: 'Module 11-13 Quiz', available: true, count: 40 },
-        { id: 'm-14-15',label: 'Module 14-15 Quiz' },
+        { id: 'm-14-15',label: 'Module 14-15 Quiz', available: true, count: 35 },
         { id: 'm-16-17',label: 'Module 16-17 Quiz', available: true, count: 35 },
         { id: 'final',  label: 'Final exam', available: true, count: 161 },
       ]},
@@ -48,13 +51,27 @@ const HomePage = ({ onLaunch }) => {
 
   const selectedExam = useMemo(() => {
     if (!selected) return null;
-    const [courseId, semId, examId] = selected.split('/');
+    const parts = selected.split('/');
+    const [courseId] = parts;
     const course = CATALOG.find(c => c.id === courseId);
-    const sem = course?.semesters.find(s => s.id === semId);
+    if (!course) return null;
+    if (parts.length === 2) {
+      const [, examId] = parts;
+      const exam = course.exams?.find(e => e.id === examId);
+      if (!exam) return null;
+      return { course, sem: null, exam, courseId, semId: null, examId, key: selected };
+    }
+    const [, semId, examId] = parts;
+    const sem = course.semesters.find(s => s.id === semId);
     const exam = sem?.exams.find(e => e.id === examId);
     if (!exam) return null;
-    return { course, sem, exam, courseId, semId, examId };
+    return { course, sem, exam, courseId, semId, examId, key: selected };
   }, [selected]);
+
+  const launchSelection = (modeArg = mode, sizeArg = size, keyArg = selected, selectedArg = selectedExam) => {
+    const launchSize = selectedArg?.exam?.allQuestions ? selectedArg.exam.count : sizeArg;
+    onLaunch(modeArg, launchSize, keyArg);
+  };
 
   function toggleCourse(id) { setOpenCourses(s => ({ ...s, [id]: !s[id] })); }
   function toggleSem(key) { setOpenSems(s => ({ ...s, [key]: !s[key] })); }
@@ -65,7 +82,7 @@ const HomePage = ({ onLaunch }) => {
       if (!selectedExam?.exam.available) return;
       if (e.key === 'p' || e.key === 'P') setMode('practice');
       else if (e.key === 'q' || e.key === 'Q') setMode('quiz');
-      else if (e.key === 'Enter') onLaunch(mode, size, selected);
+      else if (e.key === 'Enter') launchSelection();
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
@@ -96,9 +113,27 @@ const HomePage = ({ onLaunch }) => {
                   <span className="chev">{courseOpen ? '▼' : '▶'}</span>
                   <span className="icn"><Icon name="folder" size={13} /></span>
                   <span className="label">{course.label}</span>
-                  <span className="ct">{course.semesters.length} sem</span>
                 </div>
                 <Collapse open={courseOpen}>
+                  {(course.exams || []).map(exam => {
+                    const examKey = `${course.id}/${exam.id}`;
+                    const isSel = selected === examKey;
+                    const isAvail = !!exam.available;
+                    return (
+                      <div
+                        key={exam.id}
+                        className={`tree-row tree-exam tree-course-exam ${isSel ? 'selected' : ''} ${!isAvail ? 'soon' : ''}`}
+                        onClick={() => setSelected(isSel ? null : examKey)}
+                        onDoubleClick={() => isAvail && launchSelection(mode, size, examKey, { exam })}>
+                        <span className="chev" />
+                        <span className="icn">
+                          <Icon name="quiz" size={14} />
+                        </span>
+                        <span className="label">{exam.label}</span>
+                        <span className="ct ok">{exam.count} q</span>
+                      </div>
+                    );
+                  })}
                   {course.semesters.map(sem => {
                     const semKey = `${course.id}/${sem.id}`;
                     const semOpen = openSems[semKey];
@@ -108,7 +143,6 @@ const HomePage = ({ onLaunch }) => {
                           <span className="chev">{semOpen ? '▼' : '▶'}</span>
                           <span className="icn"><Icon name="folder" size={13} /></span>
                           <span className="label">{sem.label}</span>
-                          <span className="ct">{sem.exams.length}</span>
                         </div>
                         <Collapse open={semOpen}>
                           {sem.exams.map(exam => {
@@ -122,7 +156,7 @@ const HomePage = ({ onLaunch }) => {
                                 key={exam.id}
                                 className={`tree-row tree-exam ${isSel ? 'selected' : ''} ${!isAvail ? 'soon' : ''}`}
                                 onClick={() => setSelected(isSel ? null : examKey)}
-                                onDoubleClick={() => isAvail && onLaunch(mode, size, examKey)}>
+                                onDoubleClick={() => isAvail && launchSelection(mode, size, examKey, { exam })}>
                                 <span className="chev" />
                                 <span className="icn">
                                   <Icon name={iconName} size={14} />
@@ -167,8 +201,9 @@ const SelectionCard = ({ selectedExam, mode, setMode, size, setSize, onLaunch })
   const course = selectedExam?.course;
   const isAvail = !!exam?.available;
   const isFinal = exam?.id === 'final';
+  const isAll = !!exam?.allQuestions;
   const count = exam?.count;
-  const maxSize = Math.min(count || 0, 100);
+  const maxSize = isAll ? count : Math.min(count || 0, 100);
 
   return (
     <div className={`sel-card ${visible ? 'visible' : ''}`} aria-hidden={!visible}>
@@ -180,23 +215,18 @@ const SelectionCard = ({ selectedExam, mode, setMode, size, setSize, onLaunch })
             </div>
             <div className="sel-meta">
               <div className="sel-crumbs">
-                {course?.label} <span className="sel-sep">/</span> {sem?.label}
+                {course?.label}{sem && <><span className="sel-sep">/</span> {sem.label}</>}
               </div>
-              <div className="sel-title">{exam?.label}</div>
-              <div className="sel-tags">
-                {isAvail ? (
-                  <>
-                    <span className="sel-tag ok">
-                      <span className="dot" /> ready
-                    </span>
-                    <span className="sel-tag">{count} questions</span>
-                  </>
-                ) : (
+              <div className="sel-title">
+                {exam?.label}{isAvail && count ? ` - ${count}q` : ''}
+              </div>
+              {!isAvail && (
+                <div className="sel-tags">
                   <span className="sel-tag warn">
                     <span className="dot" /> bank not imported
                   </span>
-                )}
-              </div>
+                </div>
+              )}
             </div>
           </div>
 
@@ -223,20 +253,26 @@ const SelectionCard = ({ selectedExam, mode, setMode, size, setSize, onLaunch })
               <div className="sel-row">
                 <div className="sel-label">length</div>
                 <div className="sel-seg">
-                  {[25, 50, 75, 100].filter(n => n <= maxSize || n === 25).map(n => (
-                    <button
-                      key={n}
-                      type="button"
-                      className={`sel-seg-btn ${size === n ? 'active' : ''}`}
-                      onClick={() => setSize(Math.min(n, count))}>
-                      {Math.min(n, count)}
+                  {isAll ? (
+                    <button type="button" className="sel-seg-btn active" onClick={() => setSize(count)}>
+                      ALL
                     </button>
-                  ))}
+                  ) : (
+                    [25, 50, 75, 100].filter(n => n <= maxSize || n === 25).map(n => (
+                      <button
+                        key={n}
+                        type="button"
+                        className={`sel-seg-btn ${size === n ? 'active' : ''}`}
+                        onClick={() => setSize(Math.min(n, count))}>
+                        {Math.min(n, count)}
+                      </button>
+                    ))
+                  )}
                 </div>
               </div>
 
               <div className="sel-actions">
-                <button type="button" className="sel-start" onClick={() => onLaunch(mode, size, `${selectedExam.courseId}/${selectedExam.semId}/${selectedExam.examId}`)}>
+                <button type="button" className="sel-start" onClick={() => onLaunch(mode, isAll ? count : size, selectedExam.key)}>
                   <Icon name="play" size={12} />
                   Start {mode}
                 </button>

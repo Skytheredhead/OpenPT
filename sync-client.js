@@ -203,8 +203,24 @@
     }
 
     async me() { return request("/api/me"); }
-    async register(email, password, proof = {}) { return request("/api/auth/register", { method: "POST", body: JSON.stringify({ email, password, ...proof }) }); }
-    async login(email, password) { return request("/api/auth/login", { method: "POST", body: JSON.stringify({ email, password }) }); }
+    async register(email, password, proof = {}) {
+      return request("/api/auth/register", { method: "POST", body: JSON.stringify({ email, password, clientLabel: this.clientLabel, ...proof }) });
+    }
+    async login(email, password) {
+      return request("/api/auth/login", { method: "POST", body: JSON.stringify({ email, password, clientLabel: this.clientLabel }) });
+    }
+    async verifyEmail(token) {
+      return request("/api/auth/verify-email", { method: "POST", body: JSON.stringify({ token }) });
+    }
+    async resendVerification(email) {
+      return request("/api/auth/resend-verification", { method: "POST", body: JSON.stringify({ email }) });
+    }
+    async forgotPassword(email) {
+      return request("/api/auth/forgot-password", { method: "POST", body: JSON.stringify({ email }) });
+    }
+    async resetPassword(token, password) {
+      return request("/api/auth/reset-password", { method: "POST", body: JSON.stringify({ token, password }) });
+    }
     async logout() {
       try {
         return await request("/api/auth/logout", { method: "POST" });
@@ -212,9 +228,41 @@
         safeStorageRemove(storageArea("sessionStorage"), "openpt:csrf");
       }
     }
+    async listSessions() { return request("/api/sessions"); }
+    async revokeSession(id) {
+      const result = await request(`/api/sessions/${encodeURIComponent(id)}`, { method: "DELETE" });
+      if (result.currentRevoked) safeStorageRemove(storageArea("sessionStorage"), "openpt:csrf");
+      return result;
+    }
+    async revokeOtherSessions() { return request("/api/sessions", { method: "DELETE" }); }
+    async deleteAccount(password) {
+      try {
+        return await request("/api/account", { method: "DELETE", body: JSON.stringify({ password }) });
+      } finally {
+        safeStorageRemove(storageArea("sessionStorage"), "openpt:csrf");
+      }
+    }
+    async cancelAccountDeletion(email, password) {
+      return request("/api/account/deletion/cancel", { method: "POST", body: JSON.stringify({ email, password, clientLabel: this.clientLabel }) });
+    }
     async listProjects() { return request("/api/projects"); }
     async createProject(title, document) { return request("/api/projects", { method: "POST", body: JSON.stringify({ title, document }) }); }
     async loadProject(id) { return request(`/api/projects/${encodeURIComponent(id)}`); }
+    async renameProject(id, title) {
+      return request(`/api/projects/${encodeURIComponent(id)}`, {
+        method: "POST",
+        body: JSON.stringify({ title })
+      });
+    }
+    async duplicateProject(id, title) {
+      return request(`/api/projects/${encodeURIComponent(id)}/duplicate`, {
+        method: "POST",
+        body: JSON.stringify({ title })
+      });
+    }
+    async deleteProject(id) {
+      return request(`/api/projects/${encodeURIComponent(id)}`, { method: "DELETE" });
+    }
     async acquireLease(id, takeover = false) {
       return request(`/api/projects/${encodeURIComponent(id)}/lease`, {
         method: "POST",

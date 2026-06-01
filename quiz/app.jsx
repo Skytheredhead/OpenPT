@@ -77,7 +77,7 @@ const App = () => {
     setOutgoingRoute(route);
     setTransitionKind(kind);
     setRoute(next);
-    // exit transition is longer so the library can settle on top
+    // exit transition is longer so the outgoing route can fade cleanly.
     const dur = kind === 'exit' ? 620 : 460;
     outgoingTimerRef.current = setTimeout(() => {
       setOutgoingRoute(null);
@@ -87,9 +87,9 @@ const App = () => {
 
   function launchQuiz(mode, size, bankKey = 'ccna/sem-03/final') {
     const ids = (window.QUESTIONS || [])
-      .filter(q => q.bank === bankKey)
+      .filter(q => bankKey === 'ccna/all' || q.bank === bankKey)
       .map(q => q.id);
-    const fresh = QuizEngine.create({ poolIds: ids, size, mode });
+    const fresh = { ...QuizEngine.create({ poolIds: ids, size, mode }), bankKey };
     let seeded;
     if (mode === 'practice') {
       seeded = QuizEngine.advance(fresh);
@@ -108,7 +108,7 @@ const App = () => {
   function restartFromResults() {
     if (!state) return;
     const first = window.QUESTIONS[state.quizIds[0]];
-    launchQuiz(state.mode, state.quizIds.length, first?.bank || 'ccna/sem-03/final');
+    launchQuiz(state.mode, state.quizIds.length, state.bankKey || first?.bank || 'ccna/sem-03/final');
   }
 
   function renderRoute(r, ctx) {

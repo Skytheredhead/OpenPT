@@ -51,6 +51,12 @@
   filter: drop-shadow(0 0 4px color-mix(in oklab, var(--accent) 60%, transparent));
 }
 .node.selected .node-label { color: var(--accent); border-color: var(--accent-dim); }
+.node.logical-object .node-body { opacity: 0.72; }
+.node.logical-object .node-label {
+  color: var(--fg-2);
+  border-style: dashed;
+  background: color-mix(in oklab, var(--bg-1) 76%, transparent);
+}
 .node-body {
   width: 44px; height: 44px;
   display: flex; align-items: center; justify-content: center;
@@ -1030,6 +1036,44 @@ body.is-resizing-layout .apps-sidebar-resizer::before {
   outline: none;
   border-color: var(--accent-dim);
 }
+.endpoint-wireless-status {
+  margin-top: 14px;
+  padding-top: 12px;
+  border-top: 1px solid var(--line-soft);
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr)) auto auto;
+  gap: 8px;
+  align-items: end;
+}
+.endpoint-wireless-status div {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+.endpoint-wireless-status span {
+  font-size: 10.5px;
+  color: var(--fg-3);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+.endpoint-wireless-status strong {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12px;
+  color: var(--fg-0);
+}
+.endpoint-wireless-status button {
+  height: 30px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--bg-2);
+  color: var(--fg-1);
+}
+.endpoint-wireless-status button:hover {
+  background: var(--bg-3);
+  color: var(--fg-0);
+}
 .endpoint-toggle-label {
   display: inline-flex !important;
   grid-template-columns: none !important;
@@ -1145,6 +1189,19 @@ body.is-resizing-layout .apps-sidebar-resizer::before {
   color: var(--fg-0);
   font-size: 24px;
 }
+.endpoint-browser-page.error h3 { color: var(--err); }
+.endpoint-response-pre {
+  max-height: 420px;
+  overflow: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+  border: 1px solid var(--line-soft);
+  border-radius: 8px;
+  background: var(--bg-1);
+  color: var(--fg-0);
+  padding: 12px;
+  font: 12px/1.55 var(--font-mono);
+}
 .endpoint-browser-url {
   display: inline-flex;
   max-width: 100%;
@@ -1238,6 +1295,398 @@ body.is-resizing-layout .apps-sidebar-resizer::before {
 .event .s.err { color: var(--err); }
 .event .s.warn { color: var(--warn); }
 .event .m { color: var(--fg-1); }
+
+/* ── Packet inspector ─────────────────────────────────────── */
+.packet-inspector {
+  height: 100%;
+  display: grid;
+  grid-template-rows: 34px 1fr;
+  min-height: 0;
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+}
+.packet-filterbar {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 5px 8px;
+  border-bottom: 1px solid var(--line-soft);
+  background: var(--bg-1);
+  overflow-x: auto;
+}
+.packet-filterbar button {
+  appearance: none;
+  border: 1px solid var(--line-soft);
+  background: var(--bg-2);
+  color: var(--fg-2);
+  border-radius: 4px;
+  padding: 3px 7px;
+  font: 10.5px var(--font-mono);
+  white-space: nowrap;
+}
+.packet-filterbar button.active {
+  color: var(--accent);
+  border-color: var(--accent-dim);
+  background: var(--accent-soft);
+}
+.packet-inspector-body {
+  min-height: 0;
+  display: grid;
+  grid-template-columns: minmax(260px, 36%) minmax(0, 1fr);
+}
+.packet-trace-list,
+.packet-detail {
+  min-height: 0;
+  overflow: auto;
+}
+.packet-trace-list {
+  border-right: 1px solid var(--line);
+  background: var(--bg-0);
+}
+.packet-trace-row {
+  width: 100%;
+  display: grid;
+  grid-template-columns: 44px 58px minmax(0, 1fr) 54px;
+  gap: 8px;
+  align-items: center;
+  text-align: left;
+  appearance: none;
+  border: 0;
+  border-bottom: 1px solid var(--line-soft);
+  background: transparent;
+  color: var(--fg-1);
+  padding: 7px 10px;
+  font: 11.5px var(--font-mono);
+}
+.packet-trace-row:hover,
+.packet-trace-row.selected { background: var(--bg-2); }
+.packet-trace-row.drop { color: color-mix(in oklab, var(--err) 72%, var(--fg-1)); }
+.packet-trace-row .time { color: var(--fg-3); font-size: 10px; }
+.packet-trace-row .proto { color: var(--accent); text-transform: uppercase; font-size: 10px; }
+.packet-trace-row .summary {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.packet-trace-row .state,
+.packet-status {
+  justify-self: end;
+  color: var(--ok);
+  text-transform: uppercase;
+  font-size: 10px;
+}
+.packet-trace-row .state.drop,
+.packet-status.drop { color: var(--err); }
+.packet-detail { padding: 12px 14px 18px; }
+.packet-detail-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  align-items: flex-start;
+  margin-bottom: 12px;
+}
+.packet-title {
+  color: var(--fg-0);
+  font-weight: 700;
+  letter-spacing: 0;
+}
+.packet-subtitle {
+  color: var(--fg-3);
+  margin-top: 2px;
+}
+.packet-section {
+  border-top: 1px solid var(--line-soft);
+  padding-top: 10px;
+  margin-top: 10px;
+}
+.packet-section h4,
+.packet-section h5 {
+  margin: 0 0 8px;
+  color: var(--fg-2);
+  font-size: 10.5px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.packet-section h5 {
+  color: var(--fg-3);
+  margin-bottom: 5px;
+}
+.packet-frame-columns {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+}
+.packet-field-grid {
+  display: grid;
+  grid-template-columns: minmax(60px, auto) minmax(0, 1fr);
+  gap: 3px 8px;
+}
+.packet-field-grid .k { color: var(--fg-3); }
+.packet-field-grid .v {
+  color: var(--fg-1);
+  overflow-wrap: anywhere;
+}
+.packet-step-list,
+.packet-artifacts {
+  display: grid;
+  gap: 5px;
+}
+.packet-step {
+  display: grid;
+  grid-template-columns: 28px 82px minmax(0, 1fr) auto;
+  gap: 8px;
+  align-items: baseline;
+  padding: 5px 7px;
+  background: var(--bg-1);
+  border: 1px solid var(--line-soft);
+  border-radius: 5px;
+}
+.packet-step.drop { border-color: color-mix(in oklab, var(--err) 38%, var(--line)); }
+.packet-step .idx,
+.packet-step .iface { color: var(--fg-3); }
+.packet-step .phase { color: var(--accent); }
+.packet-step .note {
+  color: var(--fg-1);
+  overflow-wrap: anywhere;
+}
+.packet-artifact {
+  display: grid;
+  gap: 2px;
+  padding: 7px 8px;
+  background: var(--bg-1);
+  border: 1px solid var(--line-soft);
+  border-radius: 5px;
+  color: var(--fg-1);
+}
+.packet-artifact span { color: var(--fg-3); }
+.packet-artifact.drop {
+  border-color: color-mix(in oklab, var(--err) 42%, var(--line));
+  color: var(--err);
+}
+.packet-empty {
+  padding: 24px;
+  color: var(--fg-3);
+  text-align: center;
+}
+.packet-empty.small {
+  padding: 10px;
+  text-align: left;
+}
+
+@media (max-width: 860px) {
+  .packet-inspector-body {
+    grid-template-columns: 1fr;
+    grid-template-rows: minmax(120px, 38%) minmax(0, 1fr);
+  }
+  .packet-trace-list {
+    border-right: 0;
+    border-bottom: 1px solid var(--line);
+  }
+  .packet-frame-columns { grid-template-columns: 1fr; }
+}
+
+/* ── Topology validation panel ───────────────────────────── */
+.validation-panel {
+  height: 100%;
+  min-height: 0;
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  background: var(--bg-0);
+  color: var(--fg-1);
+}
+.validation-summary {
+  min-height: 42px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 7px 10px;
+  border-bottom: 1px solid var(--line);
+  background: color-mix(in oklab, var(--bg-1) 88%, transparent);
+  overflow-x: auto;
+}
+.validation-chip,
+.validation-filter {
+  appearance: none;
+  min-height: 26px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex: 0 0 auto;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--bg-2);
+  color: var(--fg-2);
+  padding: 3px 8px;
+  font: 11px var(--font-mono);
+  cursor: default;
+}
+.validation-chip:hover,
+.validation-filter:hover,
+.validation-chip.active,
+.validation-filter.active {
+  background: var(--accent-soft);
+  border-color: var(--accent-dim);
+  color: var(--fg-0);
+}
+.validation-chip b {
+  color: var(--fg-0);
+  font-weight: 700;
+}
+.validation-chip .dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 999px;
+  background: var(--fg-3);
+}
+.validation-chip.err .dot { background: var(--err); }
+.validation-chip.warn .dot { background: var(--warn); }
+.validation-chip.info .dot { background: var(--accent); }
+.validation-filter-spacer { flex: 1 0 14px; }
+.validation-list {
+  min-height: 0;
+  overflow: auto;
+  padding: 6px 0;
+}
+.validation-issue {
+  border-bottom: 1px solid var(--line-soft);
+}
+.validation-issue-main {
+  appearance: none;
+  width: 100%;
+  min-height: 42px;
+  display: grid;
+  grid-template-columns: 16px minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: center;
+  padding: 6px 14px;
+  border: 0;
+  background: transparent;
+  color: var(--fg-1);
+  text-align: left;
+  cursor: default;
+}
+.validation-issue-main:hover,
+.validation-issue.open .validation-issue-main {
+  background: var(--bg-2);
+}
+.validation-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 999px;
+  background: var(--fg-3);
+  box-shadow: 0 0 10px color-mix(in oklab, var(--fg-3) 50%, transparent);
+}
+.validation-issue.err .validation-dot {
+  background: var(--err);
+  box-shadow: 0 0 10px color-mix(in oklab, var(--err) 55%, transparent);
+}
+.validation-issue.warn .validation-dot {
+  background: var(--warn);
+  box-shadow: 0 0 10px color-mix(in oklab, var(--warn) 55%, transparent);
+}
+.validation-issue.info .validation-dot {
+  background: var(--accent);
+  box-shadow: 0 0 10px color-mix(in oklab, var(--accent) 55%, transparent);
+}
+.validation-issue-text {
+  min-width: 0;
+  display: grid;
+  gap: 2px;
+}
+.validation-title {
+  min-width: 0;
+  color: var(--fg-0);
+  font-size: 12px;
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.validation-meta {
+  min-width: 0;
+  color: var(--fg-3);
+  font: 10.5px var(--font-mono);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.validation-severity {
+  justify-self: end;
+  min-width: 38px;
+  text-align: center;
+  color: var(--fg-3);
+  background: var(--bg-2);
+  border: 1px solid var(--line-soft);
+  border-radius: 4px;
+  padding: 1px 5px;
+  font: 10px var(--font-mono);
+  text-transform: uppercase;
+}
+.validation-issue.err .validation-severity { color: var(--err); }
+.validation-issue.warn .validation-severity { color: var(--warn); }
+.validation-issue.info .validation-severity { color: var(--accent); }
+.validation-detail {
+  display: grid;
+  gap: 8px;
+  padding: 0 14px 10px 40px;
+}
+.validation-detail p {
+  margin: 0;
+  color: var(--fg-2);
+  font-size: 11.5px;
+  line-height: 1.45;
+}
+.validation-commands {
+  display: grid;
+  gap: 4px;
+  max-width: 520px;
+  padding: 8px;
+  border: 1px solid var(--line-soft);
+  border-radius: 6px;
+  background: var(--bg-1);
+}
+.validation-commands > div {
+  color: var(--fg-3);
+  font: 10px var(--font-mono);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+.validation-commands code {
+  color: var(--fg-0);
+  font: 11.5px var(--font-mono);
+  white-space: pre-wrap;
+}
+.validation-empty {
+  min-height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  padding: 20px;
+  color: var(--fg-1);
+  font-size: 12px;
+}
+.validation-empty.subtle {
+  min-height: 120px;
+  color: var(--fg-3);
+}
+.validation-empty-mark {
+  width: 28px;
+  height: 28px;
+  display: grid;
+  place-items: center;
+  border: 1px solid color-mix(in oklab, var(--ok) 45%, var(--line));
+  border-radius: 999px;
+  color: var(--ok);
+  background: color-mix(in oklab, var(--ok) 12%, transparent);
+  font: 700 14px var(--font-mono);
+}
+.validation-empty span {
+  display: block;
+  margin-top: 3px;
+  color: var(--fg-3);
+  line-height: 1.4;
+}
 
 /* ── Packet visuals ─────────────────────────────────── */
 .packet {
@@ -1458,16 +1907,25 @@ body.is-resizing-layout .apps-sidebar-resizer::before {
   right: 18px;
   bottom: 18px;
   z-index: 210;
-  max-width: min(560px, calc(100vw - 36px));
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto auto;
+  max-width: min(680px, calc(100vw - 36px));
+  display: flex;
   align-items: center;
   gap: 10px;
   padding: 10px 12px;
-  border: 1px solid color-mix(in oklab, var(--warn) 45%, var(--line));
+  border: 1px solid color-mix(in oklab, var(--ok) 34%, var(--line));
   border-radius: 8px;
   background: color-mix(in oklab, var(--bg-1) 97%, transparent);
   box-shadow: 0 18px 42px rgba(0,0,0,0.45);
+}
+.import-report-banner.has-warnings {
+  border-color: color-mix(in oklab, var(--warn) 45%, var(--line));
+}
+.import-report-banner.has-broken {
+  border-color: color-mix(in oklab, var(--err) 50%, var(--line));
+}
+.import-report-banner > div:first-child {
+  flex: 1;
+  min-width: 0;
 }
 .import-report-banner strong {
   display: block;
@@ -1482,6 +1940,25 @@ body.is-resizing-layout .apps-sidebar-resizer::before {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+.import-report-banner-counts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  margin-top: 7px;
+}
+.import-report-banner-counts span {
+  margin: 0;
+  padding: 2px 6px;
+  border: 1px solid var(--line-soft);
+  border-radius: 999px;
+  background: var(--bg-2);
+  color: var(--fg-2);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  white-space: nowrap;
+  overflow: visible;
+  text-overflow: clip;
 }
 .pt-check-actions {
   display: flex;
@@ -1750,6 +2227,127 @@ body.is-resizing-layout .pt-sidebar-resizer::before {
   overflow-y: auto;
 }
 .pt-sb-section { padding: 10px 12px 16px; }
+.pt-import-report {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.pt-import-summary {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 9px 10px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--bg-2);
+}
+.pt-import-kicker {
+  color: var(--fg-3);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+.pt-import-title {
+  color: var(--fg-0);
+  font-size: 12px;
+  font-weight: 600;
+  margin-top: 3px;
+  overflow-wrap: anywhere;
+}
+.pt-import-state {
+  flex-shrink: 0;
+  padding: 3px 7px;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--fg-2);
+}
+.pt-import-state.ok {
+  color: var(--ok);
+  border-color: color-mix(in oklab, var(--ok) 38%, var(--line));
+  background: color-mix(in oklab, var(--ok) 12%, var(--bg-2));
+}
+.pt-import-state.warn {
+  color: var(--warn);
+  border-color: color-mix(in oklab, var(--warn) 42%, var(--line));
+  background: color-mix(in oklab, var(--warn) 12%, var(--bg-2));
+}
+.pt-import-state.broken {
+  color: var(--err);
+  border-color: color-mix(in oklab, var(--err) 42%, var(--line));
+  background: color-mix(in oklab, var(--err) 12%, var(--bg-2));
+}
+.pt-import-counts {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 6px;
+}
+.pt-import-counts span {
+  padding: 5px 7px;
+  border: 1px solid var(--line-soft);
+  border-radius: 5px;
+  background: var(--bg-2);
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+}
+.pt-import-counts .ok { color: var(--ok); }
+.pt-import-counts .warn { color: var(--warn); }
+.pt-import-counts .err { color: var(--err); }
+.pt-import-counts .dim { color: var(--fg-3); }
+.pt-import-section {
+  border: 1px solid var(--line-soft);
+  border-radius: 6px;
+  overflow: hidden;
+  background: var(--bg-1);
+}
+.pt-import-section-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 7px 9px;
+  background: var(--bg-2);
+  border-bottom: 1px solid var(--line-soft);
+  color: var(--fg-2);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+.pt-import-section-head strong {
+  color: var(--fg-0);
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+}
+.pt-import-items {
+  display: flex;
+  flex-direction: column;
+}
+.pt-import-item {
+  padding: 7px 9px;
+  border-bottom: 1px solid var(--line-soft);
+}
+.pt-import-item:last-child {
+  border-bottom: 0;
+}
+.pt-import-item-label {
+  color: var(--fg-0);
+  font-size: 11.5px;
+  font-weight: 600;
+}
+.pt-import-item-detail {
+  color: var(--fg-2);
+  font-size: 11px;
+  line-height: 1.35;
+  margin-top: 2px;
+  overflow-wrap: anywhere;
+}
+.pt-import-section.imported .pt-import-section-head strong { color: var(--ok); }
+.pt-import-section.approximated .pt-import-section-head strong { color: var(--warn); }
+.pt-import-section.broken .pt-import-section-head strong { color: var(--err); }
 .pt-sb-h {
   font-size: 10px; letter-spacing: 0.08em; text-transform: uppercase;
   color: var(--fg-3); font-weight: 600;
@@ -2294,6 +2892,10 @@ body.is-resizing-layout .server-module-resizer::before {
   text-transform: uppercase;
 }
 .server-desktop-row {
+  appearance: none;
+  width: 100%;
+  border: 0;
+  text-align: left;
   min-height: 42px;
   padding: 0 12px;
   border-bottom: 1px solid var(--line-soft);
@@ -3034,5 +3636,1440 @@ body.is-resizing-layout .server-module-resizer::before {
   .node-pulse {
     animation-duration: 0.001s !important;
     animation-iteration-count: 1 !important;
+  }
+}
+
+/* ══════════════════════════════════════════════════════════════════════
+   Jeopardy — quiz-bank classroom game
+   ────────────────────────────────────────────────────────────────────── */
+.jeopardy-root {
+  position: fixed;
+  inset: 0;
+  z-index: 220;
+  display: grid;
+  grid-template-rows: auto 1fr;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+  color: var(--fg-0);
+  background-color: var(--bg-0);
+  background-image:
+    radial-gradient(circle at center, var(--grid-dot) 0.8px, transparent 1px),
+    radial-gradient(circle at 18% 0%, color-mix(in oklab, var(--accent) 18%, transparent), transparent 34%),
+    radial-gradient(circle at 92% 12%, color-mix(in oklab, var(--warn) 10%, transparent), transparent 30%);
+  background-size: 24px 24px, auto, auto;
+  font-family: var(--font-ui);
+  --jeopardy-gold: var(--warn);
+  --jeopardy-gold-soft: var(--warn-soft);
+  --jeopardy-board-blue: color-mix(in oklab, var(--accent-dim) 76%, #071229);
+  --jeopardy-board-blue-hi: color-mix(in oklab, var(--accent) 58%, #0b2b68);
+}
+
+.jeopardy-topbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18px;
+  min-height: 68px;
+  padding: 12px 22px;
+  border-bottom: 1px solid var(--line-soft);
+  background: color-mix(in oklab, var(--bg-1) 88%, transparent);
+  backdrop-filter: blur(14px);
+}
+
+.jeopardy-brand {
+  display: inline-flex;
+  align-items: center;
+  gap: 11px;
+  color: var(--fg-0);
+  text-decoration: none;
+  font-size: 14px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  white-space: nowrap;
+}
+
+.jeopardy-glyph {
+  width: 18px;
+  height: 18px;
+  position: relative;
+  background:
+    radial-gradient(circle at 50% 50%, var(--accent) 0 2.2px, transparent 2.5px),
+    radial-gradient(circle at 15% 20%, var(--fg-1) 0 1.2px, transparent 1.5px),
+    radial-gradient(circle at 85% 20%, var(--fg-1) 0 1.2px, transparent 1.5px),
+    radial-gradient(circle at 15% 80%, var(--fg-1) 0 1.2px, transparent 1.5px),
+    radial-gradient(circle at 85% 80%, var(--fg-1) 0 1.2px, transparent 1.5px);
+  opacity: 0.85;
+}
+
+.jeopardy-brand::after {
+  content: "Jeopardy";
+  margin-left: 2px;
+  padding-left: 12px;
+  border-left: 1px solid var(--line-soft);
+  color: var(--accent);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.jeopardy-controls,
+.jeopardy-reveal-row,
+.jeopardy-team-actions,
+.jeopardy-timer-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.jeopardy-header-stat {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  min-height: 34px;
+  padding: 0 11px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--bg-2);
+  color: var(--fg-2);
+  font-size: 12px;
+}
+
+.jeopardy-header-stat strong {
+  color: var(--fg-0);
+  font: 600 18px var(--font-mono);
+  letter-spacing: -0.01em;
+}
+
+.jeopardy-select-wrap {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  color: var(--fg-2);
+  font-size: 12px;
+}
+
+.jeopardy-select-wrap select,
+.jeopardy-final-team input,
+.jeopardy-team input {
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--bg-2);
+  color: var(--fg-0);
+  font: 500 12px var(--font-ui);
+  outline: none;
+}
+
+.jeopardy-select-wrap select {
+  max-width: min(280px, 38vw);
+  height: 34px;
+  padding: 0 30px 0 10px;
+}
+
+.jeopardy-btn,
+.jeopardy-close,
+.jeopardy-final-toggle,
+.jeopardy-add-team,
+.jeopardy-timer-row button,
+.jeopardy-awards button,
+.jeopardy-team-actions button,
+.jeopardy-final-team button {
+  appearance: none;
+  min-height: 34px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--bg-2);
+  color: var(--fg-1);
+  padding: 0 12px;
+  font: 500 12px var(--font-ui);
+  cursor: pointer;
+  transition: transform 120ms ease, border-color 120ms ease, background 120ms ease, color 120ms ease;
+}
+
+.jeopardy-btn:hover,
+.jeopardy-close:hover,
+.jeopardy-final-toggle:hover,
+.jeopardy-add-team:hover,
+.jeopardy-timer-row button:hover,
+.jeopardy-awards button:hover,
+.jeopardy-team-actions button:hover,
+.jeopardy-final-team button:hover {
+  transform: translateY(-1px);
+  border-color: var(--accent-dim);
+  background: var(--bg-3);
+  color: var(--fg-0);
+}
+
+.jeopardy-btn.primary {
+  border-color: var(--accent-dim);
+  background: var(--accent-soft);
+  color: var(--accent);
+  box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--accent-dim) 45%, transparent);
+}
+
+.jeopardy-btn.active {
+  border-color: color-mix(in oklab, var(--ok) 42%, transparent);
+  background: var(--ok-soft);
+  color: var(--ok);
+}
+
+.jeopardy-btn:disabled,
+.jeopardy-add-team:disabled,
+.jeopardy-team-actions button:disabled,
+.jeopardy-final-team input:disabled,
+.jeopardy-final-team button:disabled {
+  cursor: default;
+  opacity: 0.45;
+  transform: none;
+}
+
+.jeopardy-stage {
+  display: grid;
+  grid-template-columns: 280px minmax(0, 1fr);
+  gap: 18px;
+  min-height: 0;
+  padding: 18px;
+}
+
+.jeopardy-scoreboard {
+  min-width: 0;
+  overflow: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding-right: 2px;
+}
+
+.jeopardy-team {
+  display: grid;
+  gap: 9px;
+  padding: 13px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--bg-1);
+  box-shadow: inset 0 1px 0 color-mix(in oklab, var(--fg-0) 5%, transparent);
+}
+
+.jeopardy-team input {
+  width: 100%;
+  height: 34px;
+  padding: 0 9px;
+}
+
+.jeopardy-team strong {
+  color: var(--jeopardy-gold);
+  font: 600 32px/1 var(--font-mono);
+  letter-spacing: -0.01em;
+  text-shadow: 0 0 18px color-mix(in oklab, var(--warn) 18%, transparent);
+}
+
+.jeopardy-team-actions {
+  gap: 6px;
+}
+
+.jeopardy-team-actions button {
+  min-height: 29px;
+  padding: 0 8px;
+  font-size: 11px;
+  flex: 1;
+}
+
+.jeopardy-add-team {
+  width: 100%;
+  min-height: 42px;
+  border-style: dashed;
+  background: color-mix(in oklab, var(--bg-1) 70%, transparent);
+}
+
+.jeopardy-board-shell {
+  min-width: 0;
+  min-height: 0;
+  display: grid;
+  grid-template-rows: 1fr;
+}
+
+.jeopardy-board-status {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 10px;
+  flex-wrap: wrap;
+  min-height: 42px;
+}
+
+.jeopardy-board-status div {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 6px;
+  min-height: 34px;
+  padding: 0 11px;
+  border: 1px solid var(--line-soft);
+  border-radius: 6px;
+  background: var(--bg-1);
+  color: var(--fg-2);
+  font-size: 12px;
+}
+
+.jeopardy-board-status span {
+  color: var(--fg-0);
+  font: 600 17px var(--font-mono);
+}
+
+.jeopardy-final-toggle {
+  border-color: color-mix(in oklab, var(--warn) 45%, transparent);
+  background: var(--warn-soft);
+  color: var(--warn);
+}
+
+.jeopardy-board {
+  min-height: 0;
+  display: grid;
+  grid-template-columns: repeat(var(--jeopardy-columns), minmax(112px, 1fr));
+  gap: 10px;
+}
+
+.jeopardy-column {
+  min-width: 0;
+  display: grid;
+  grid-template-rows: minmax(68px, auto) repeat(5, minmax(78px, 1fr));
+  gap: 10px;
+}
+
+.jeopardy-category,
+.jeopardy-tile {
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  box-shadow:
+    inset 0 1px 0 color-mix(in oklab, var(--fg-0) 7%, transparent),
+    0 16px 30px rgba(0,0,0,0.22);
+}
+
+.jeopardy-category {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 0;
+  padding: 12px 10px;
+  background:
+    linear-gradient(180deg, color-mix(in oklab, var(--bg-3) 82%, var(--accent-soft)), var(--bg-2));
+  color: var(--fg-0);
+  text-align: center;
+  font-size: clamp(13px, 1.4vw, 18px);
+  font-weight: 700;
+  line-height: 1.15;
+  text-transform: uppercase;
+}
+
+.jeopardy-tile {
+  appearance: none;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background:
+    radial-gradient(circle at 50% 0%, color-mix(in oklab, var(--accent) 38%, transparent), transparent 58%),
+    linear-gradient(180deg, var(--jeopardy-board-blue-hi), var(--jeopardy-board-blue));
+  color: var(--jeopardy-gold);
+  font: 900 clamp(28px, 5vw, 58px)/1 var(--font-mono);
+  letter-spacing: 0;
+  text-shadow:
+    0 3px 0 color-mix(in oklab, black 56%, var(--warn)),
+    0 0 26px color-mix(in oklab, var(--warn) 28%, transparent);
+  cursor: pointer;
+  transition: transform 120ms ease, filter 120ms ease, opacity 120ms ease;
+}
+
+.jeopardy-tile:hover:not(:disabled) {
+  transform: translateY(-2px);
+  filter: brightness(1.12);
+}
+
+.jeopardy-tile.answered {
+  background: linear-gradient(180deg, var(--bg-2), var(--bg-1));
+  color: var(--fg-3);
+  font-size: clamp(18px, 2vw, 28px);
+  text-shadow: none;
+  cursor: default;
+}
+
+.jeopardy-modal-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 360;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 22px;
+  background: color-mix(in oklab, var(--bg-0) 78%, transparent);
+  backdrop-filter: blur(10px);
+}
+
+.jeopardy-modal {
+  width: min(980px, 100%);
+  max-height: min(760px, calc(100vh - 44px));
+  display: grid;
+  grid-template-rows: auto auto minmax(0, 1fr) auto;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background:
+    radial-gradient(circle at 50% 0%, color-mix(in oklab, var(--accent) 16%, transparent), transparent 40%),
+    var(--bg-1);
+  box-shadow: 0 28px 80px rgba(0,0,0,0.62);
+}
+
+.jeopardy-final-modal {
+  grid-template-rows: auto minmax(0, 1fr);
+}
+
+.jeopardy-modal-head {
+  display: flex;
+  align-items: start;
+  justify-content: space-between;
+  gap: 18px;
+  padding: 24px 26px 18px;
+  border-bottom: 1px solid var(--line-soft);
+}
+
+.jeopardy-modal-kicker {
+  margin-bottom: 10px;
+  color: var(--jeopardy-gold);
+  font: 600 12px var(--font-mono);
+  text-transform: uppercase;
+}
+
+.jeopardy-modal h2 {
+  margin: 0;
+  color: var(--fg-0);
+  font-size: clamp(24px, 4vw, 44px);
+  line-height: 1.12;
+  letter-spacing: -0.01em;
+}
+
+.jeopardy-close {
+  flex: 0 0 auto;
+}
+
+.jeopardy-timer-row {
+  padding: 13px 26px;
+  border-bottom: 1px solid var(--line-soft);
+}
+
+.jeopardy-timer {
+  flex: 1;
+  min-width: 160px;
+  height: 12px;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: 99px;
+  background: var(--bg-2);
+}
+
+.jeopardy-timer span {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, var(--accent-dim), var(--accent));
+  transition: width 220ms linear;
+}
+
+.jeopardy-timer.low span {
+  background: linear-gradient(90deg, var(--err), var(--warn));
+}
+
+.jeopardy-timer-row strong {
+  min-width: 42px;
+  color: var(--fg-0);
+  font: 600 18px var(--font-mono);
+}
+
+.jeopardy-modal-body {
+  min-height: 0;
+  overflow: auto;
+  padding: 20px 26px;
+}
+
+.jeopardy-note {
+  margin-bottom: 14px;
+  padding: 10px 12px;
+  border: 1px solid color-mix(in oklab, var(--warn) 34%, transparent);
+  border-radius: 7px;
+  background: var(--warn-soft);
+  color: var(--warn);
+  font-size: 13px;
+}
+
+.jeopardy-choice-list {
+  display: grid;
+  gap: 14px;
+  margin: 18px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.jeopardy-choice-list li {
+  display: grid;
+  grid-template-columns: 44px minmax(0, 1fr);
+  gap: 14px;
+  align-items: center;
+  min-height: 66px;
+  padding: 14px 18px 14px 14px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--bg-2);
+  color: var(--fg-0);
+  box-shadow:
+    inset 0 1px 0 color-mix(in oklab, var(--fg-0) 6%, transparent),
+    0 10px 22px rgba(0, 0, 0, 0.18);
+  font-size: 21px;
+  font-weight: 500;
+  line-height: 1.32;
+}
+
+.jeopardy-choice-list li.correct {
+  border-color: color-mix(in oklab, var(--ok) 65%, transparent);
+  background: var(--ok-soft);
+  color: var(--fg-0);
+}
+
+.jeopardy-choice-marker {
+  display: inline-flex;
+  width: 38px;
+  height: 38px;
+  align-items: center;
+  justify-content: center;
+  border-radius: 8px;
+  background: var(--jeopardy-gold);
+  color: var(--bg-0);
+  box-shadow: 0 0 18px color-mix(in oklab, var(--warn) 20%, transparent);
+  font-family: var(--font-mono);
+  font-size: 18px;
+  font-weight: 900;
+  line-height: 1;
+}
+
+.jeopardy-choice-list li.correct .jeopardy-choice-marker {
+  background: var(--ok);
+  box-shadow: 0 0 18px color-mix(in oklab, var(--ok) 24%, transparent);
+}
+
+.jeopardy-choice-text {
+  min-width: 0;
+  color: var(--fg-0);
+  text-shadow: 0 1px 0 rgba(0, 0, 0, 0.24);
+}
+
+.jeopardy-answer {
+  display: grid;
+  gap: 8px;
+  margin-top: 16px;
+  padding: 15px;
+  border: 1px solid color-mix(in oklab, var(--ok) 42%, transparent);
+  border-radius: 8px;
+  background: var(--ok-soft);
+}
+
+.jeopardy-answer span {
+  color: var(--ok);
+  font: 600 11px var(--font-mono);
+  text-transform: uppercase;
+}
+
+.jeopardy-answer strong {
+  color: var(--fg-0);
+  font-size: 20px;
+  line-height: 1.32;
+}
+
+.jeopardy-awards {
+  display: grid;
+  gap: 8px;
+  padding: 16px 26px 22px;
+  border-top: 1px solid var(--line-soft);
+}
+
+.jeopardy-award-team {
+  display: grid;
+  grid-template-columns: minmax(120px, 1fr) auto auto;
+  align-items: center;
+  gap: 8px;
+}
+
+.jeopardy-award-team span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: var(--fg-0);
+  font-weight: 600;
+}
+
+.jeopardy-award-team button:nth-child(2),
+.jeopardy-final-team button:nth-of-type(1) {
+  border-color: color-mix(in oklab, var(--ok) 42%, transparent);
+  color: var(--ok);
+}
+
+.jeopardy-award-team button:nth-child(3),
+.jeopardy-final-team button:nth-of-type(2) {
+  border-color: color-mix(in oklab, var(--err) 42%, transparent);
+  color: var(--err);
+}
+
+.jeopardy-final-prompt {
+  margin: 0 0 18px;
+  color: var(--fg-0);
+  font-size: clamp(22px, 3.5vw, 38px);
+  line-height: 1.16;
+}
+
+.jeopardy-final-grid {
+  display: grid;
+  gap: 9px;
+  margin-top: 18px;
+}
+
+.jeopardy-final-team {
+  display: grid;
+  grid-template-columns: minmax(110px, 1fr) 120px auto auto;
+  align-items: center;
+  gap: 8px;
+  padding: 9px;
+  border: 1px solid var(--line-soft);
+  border-radius: 7px;
+  background: var(--bg-2);
+}
+
+.jeopardy-final-team span {
+  color: var(--fg-0);
+  font-weight: 600;
+}
+
+.jeopardy-final-team input {
+  width: 100%;
+  height: 34px;
+  padding: 0 9px;
+}
+
+.jeopardy-empty {
+  place-self: center;
+  width: min(460px, calc(100vw - 32px));
+  padding: 24px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--bg-1);
+  text-align: center;
+}
+
+.jeopardy-empty h1 {
+  margin: 0 0 10px;
+  font-size: 32px;
+}
+
+.jeopardy-empty p {
+  margin: 0 0 18px;
+  color: var(--fg-2);
+}
+
+@media (max-width: 1080px) {
+  .jeopardy-stage {
+    grid-template-columns: 1fr;
+    grid-template-rows: auto minmax(0, 1fr);
+  }
+  .jeopardy-scoreboard {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+    overflow: visible;
+    padding-right: 0;
+  }
+  .jeopardy-add-team {
+    min-height: 100%;
+  }
+}
+
+@media (max-width: 760px) {
+  .jeopardy-root {
+    overflow: auto;
+  }
+  .jeopardy-topbar {
+    align-items: stretch;
+    flex-direction: column;
+    padding: 12px;
+  }
+  .jeopardy-brand {
+    align-self: flex-start;
+    margin-left: 0;
+  }
+  .jeopardy-controls {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+  }
+  .jeopardy-header-stat {
+    justify-content: center;
+  }
+  .jeopardy-select-wrap {
+    grid-column: 1 / -1;
+  }
+  .jeopardy-select-wrap select {
+    max-width: none;
+    flex: 1;
+  }
+  .jeopardy-stage {
+    padding: 12px;
+    overflow: visible;
+  }
+  .jeopardy-board-shell {
+    order: -1;
+  }
+  .jeopardy-board {
+    overflow-x: auto;
+    padding-bottom: 8px;
+    grid-template-columns: repeat(var(--jeopardy-columns), minmax(128px, 1fr));
+  }
+  .jeopardy-column {
+    grid-template-rows: minmax(62px, auto) repeat(5, 74px);
+  }
+  .jeopardy-tile {
+    font-size: 32px;
+  }
+  .jeopardy-modal-backdrop {
+    align-items: stretch;
+    padding: 10px;
+  }
+  .jeopardy-modal {
+    max-height: calc(100vh - 20px);
+  }
+  .jeopardy-modal-head {
+    padding: 18px 16px 14px;
+  }
+  .jeopardy-modal h2 {
+    font-size: 24px;
+  }
+  .jeopardy-timer-row,
+  .jeopardy-modal-body,
+  .jeopardy-awards {
+    padding-left: 16px;
+    padding-right: 16px;
+  }
+  .jeopardy-choice-list {
+    gap: 10px;
+  }
+  .jeopardy-choice-list li {
+    grid-template-columns: 36px minmax(0, 1fr);
+    gap: 10px;
+    min-height: 58px;
+    padding: 12px;
+    font-size: 16px;
+  }
+  .jeopardy-choice-marker {
+    width: 32px;
+    height: 32px;
+    border-radius: 7px;
+    font-size: 15px;
+  }
+  .jeopardy-award-team,
+  .jeopardy-final-team {
+    grid-template-columns: 1fr 1fr;
+  }
+  .jeopardy-award-team span,
+  .jeopardy-final-team span {
+    grid-column: 1 / -1;
+  }
+  .jeopardy-final-team input {
+    grid-column: 1 / -1;
+  }
+}
+
+@media (max-width: 460px) {
+  .jeopardy-scoreboard {
+    display: grid;
+    grid-auto-flow: column;
+    grid-auto-columns: minmax(148px, 1fr);
+    grid-template-columns: none;
+    overflow-x: auto;
+    padding-bottom: 8px;
+  }
+  .jeopardy-team {
+    align-content: start;
+  }
+  .jeopardy-team-actions {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+  }
+  .jeopardy-team-actions button:last-child {
+    grid-column: 1 / -1;
+  }
+  .jeopardy-add-team {
+    min-width: 148px;
+  }
+  .jeopardy-board-status {
+    justify-content: stretch;
+  }
+  .jeopardy-board-status div,
+  .jeopardy-final-toggle {
+    flex: 1;
+    justify-content: center;
+  }
+}
+
+/* Wordle page */
+.wordle-page {
+  height: 100vh;
+  width: 100vw;
+  overflow: auto;
+  display: grid;
+  place-items: center;
+  padding: 28px;
+  background-color: var(--bg-0);
+  background-image:
+    radial-gradient(circle at center, var(--grid-dot) 0.8px, transparent 1px),
+    linear-gradient(180deg, color-mix(in oklab, var(--accent) 5%, transparent), transparent 36%);
+  background-size: 24px 24px, auto;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.wordle-page * {
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.wordle-shell {
+  width: min(720px, 100%);
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 20px;
+  align-items: start;
+}
+
+.wordle-brand {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-wrap: wrap;
+  gap: 10px;
+  padding: 0 8px;
+}
+
+.wordle-glyph {
+  width: 32px;
+  height: 32px;
+  flex: 0 0 32px;
+  position: relative;
+  background:
+    radial-gradient(circle at 50% 50%, var(--accent) 0 3.6px, transparent 4px),
+    radial-gradient(circle at 22% 22%, var(--fg-1) 0 2px, transparent 2.4px),
+    radial-gradient(circle at 78% 22%, var(--fg-1) 0 2px, transparent 2.4px),
+    radial-gradient(circle at 22% 78%, var(--fg-1) 0 2px, transparent 2.4px),
+    radial-gradient(circle at 78% 78%, var(--fg-1) 0 2px, transparent 2.4px);
+  filter: drop-shadow(0 0 12px color-mix(in oklab, var(--accent) 35%, transparent));
+}
+
+.wordle-glyph::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background:
+    linear-gradient(45deg, transparent 47.5%, var(--fg-3) 47.5% 52.5%, transparent 52.5%),
+    linear-gradient(-45deg, transparent 47.5%, var(--fg-3) 47.5% 52.5%, transparent 52.5%);
+  opacity: .5;
+}
+
+.wordle-glyph::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: radial-gradient(circle at 50% 50%, var(--bg-0) 0 5px, transparent 5.5px);
+}
+
+.wordle-title-block h1 {
+  margin: 0;
+  color: var(--fg-0);
+  font-size: 26px;
+  line-height: 1.05;
+  font-weight: 600;
+  letter-spacing: -0.015em;
+}
+
+.wordle-title-block h1 span {
+  color: var(--accent);
+  font-weight: 500;
+}
+
+.wordle-sr-status {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+.wordle-panel {
+  background: color-mix(in oklab, var(--bg-1) 96%, transparent);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  box-shadow:
+    0 24px 64px rgba(0,0,0,0.42),
+    0 3px 12px rgba(0,0,0,0.28),
+    inset 0 1px 0 color-mix(in oklab, var(--accent) 16%, transparent);
+  backdrop-filter: blur(10px);
+  overflow: hidden;
+}
+
+.wordle-panel.reset-exiting {
+  pointer-events: none;
+}
+
+.wordle-panel.reset-exiting .wordle-tile.filled {
+  background-color: color-mix(in oklab, var(--bg-0) 82%, var(--bg-2));
+  border-color: var(--line-soft);
+  color: transparent;
+  outline-color: color-mix(in oklab, var(--line) 74%, transparent);
+  box-shadow:
+    inset 0 0 0 1px color-mix(in oklab, var(--line-soft) 86%, transparent),
+    inset 0 1px 0 rgba(255,255,255,0.03);
+  transition-duration: .5s;
+}
+
+.wordle-panel.reset-exiting .wordle-key.correct,
+.wordle-panel.reset-exiting .wordle-key.present,
+.wordle-panel.reset-exiting .wordle-key.absent {
+  background-color: var(--bg-2);
+  border-color: var(--line);
+  color: var(--fg-1);
+  box-shadow: none;
+  transition-duration: .5s;
+}
+
+.wordle-board-wrap {
+  display: grid;
+  justify-items: center;
+  padding: 28px 18px 17px;
+}
+
+.wordle-board {
+  display: grid;
+  gap: 8px;
+}
+
+.wordle-row {
+  display: grid;
+  grid-template-columns: repeat(var(--wordle-cols), 66px);
+  gap: 8px;
+}
+
+.wordle-row.shaking {
+  animation: wordle-row-shake .32s ease both;
+}
+
+@keyframes wordle-row-shake {
+  0%, 100% { transform: translateX(0); }
+  22% { transform: translateX(-6px); }
+  44% { transform: translateX(6px); }
+  66% { transform: translateX(-3px); }
+}
+
+.wordle-tile {
+  width: 66px;
+  height: 66px;
+  display: grid;
+  place-items: center;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  outline: 1px solid transparent;
+  outline-offset: -2px;
+  background-color: color-mix(in oklab, var(--bg-0) 78%, var(--bg-1));
+  color: var(--fg-0);
+  font: 700 30px/1 var(--font-mono);
+  text-transform: uppercase;
+  box-shadow: inset 0 1px 0 rgba(255,255,255,0.03);
+  transition:
+    background-color 260ms ease,
+    background 260ms ease,
+    border-color 260ms ease,
+    color 220ms ease,
+    outline-color 500ms ease,
+    box-shadow 500ms ease,
+    transform 120ms ease;
+}
+
+.wordle-tile.filled {
+  border-color: color-mix(in oklab, var(--fg-2) 62%, var(--line));
+  transform: translateY(-1px);
+}
+
+.wordle-tile.correct {
+  background-color: color-mix(in oklab, var(--ok) 76%, var(--bg-0));
+  border-color: var(--ok);
+  color: var(--bg-0);
+}
+
+.wordle-tile.present {
+  background-color: color-mix(in oklab, var(--warn) 78%, var(--bg-0));
+  border-color: var(--warn);
+  color: var(--bg-0);
+}
+
+.wordle-tile.absent {
+  background-color: color-mix(in oklab, var(--bg-hi) 88%, white);
+  border-color: color-mix(in oklab, var(--fg-3) 45%, var(--line));
+  color: var(--fg-0);
+}
+
+.wordle-keyboard {
+  display: grid;
+  gap: 8px;
+  justify-items: center;
+  padding: 7px 16px 26px;
+}
+
+.wordle-key-row {
+  display: flex;
+  justify-content: center;
+  gap: 7px;
+}
+
+.wordle-key {
+  appearance: none;
+  width: 54px;
+  height: 52px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: var(--bg-2);
+  color: var(--fg-0);
+  display: grid;
+  place-items: center;
+  font: 700 15px var(--font-mono);
+  text-transform: uppercase;
+  transition: background 120ms ease, border-color 120ms ease, transform 120ms ease;
+}
+
+.wordle-key:hover {
+  transform: translateY(-1px);
+  border-color: var(--accent-dim);
+}
+
+.wordle-key:focus {
+  outline: none;
+}
+
+.wordle-key:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.wordle-key.wide {
+  width: 84px;
+  font-size: 11.5px;
+}
+
+.wordle-delete-icon {
+  width: 23px;
+  height: 23px;
+  stroke: currentColor;
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  transform: translateX(1px);
+}
+
+.wordle-key[data-key="BACKSPACE"] {
+  padding-inline: 8px 10px;
+}
+
+.wordle-key.correct {
+  background-color: color-mix(in oklab, var(--ok) 76%, var(--bg-0));
+  border-color: var(--ok);
+  color: var(--bg-0);
+  animation: wordle-key-pop .28s cubic-bezier(.34,1.18,.5,1) both;
+}
+
+.wordle-key.present {
+  background-color: color-mix(in oklab, var(--warn) 78%, var(--bg-0));
+  border-color: var(--warn);
+  color: var(--bg-0);
+  animation: wordle-key-pop .28s cubic-bezier(.34,1.18,.5,1) both;
+}
+
+.wordle-key.absent {
+  background-color: color-mix(in oklab, var(--bg-hi) 88%, white);
+  border-color: color-mix(in oklab, var(--fg-3) 45%, var(--line));
+  color: var(--fg-0);
+  animation: wordle-key-pop .28s cubic-bezier(.34,1.18,.5,1) both;
+}
+
+@keyframes wordle-key-pop {
+  0% { transform: translateY(0) scale(.96); filter: blur(2px); }
+  100% { transform: translateY(0) scale(1); filter: blur(0); }
+}
+
+.wordle-stats-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 120;
+  display: grid;
+  place-items: center;
+  padding: 18px;
+  background: rgba(0, 0, 0, 0.56);
+  backdrop-filter: blur(5px);
+  animation: wordle-overlay-fade-in .28s ease both;
+}
+
+.wordle-stats-backdrop.closing {
+  animation: wordle-overlay-fade-out .17s ease both;
+}
+
+.wordle-stats-backdrop.closing .wordle-stats-card {
+  animation: wordle-card-out .17s ease both;
+}
+
+@keyframes wordle-overlay-fade-in {
+  from {
+    opacity: 0;
+    backdrop-filter: blur(0);
+  }
+  to {
+    opacity: 1;
+    backdrop-filter: blur(5px);
+  }
+}
+
+@keyframes wordle-overlay-fade-out {
+  from {
+    opacity: 1;
+    backdrop-filter: blur(5px);
+  }
+  to {
+    opacity: 0;
+    backdrop-filter: blur(0);
+  }
+}
+
+.wordle-stats-card {
+  position: relative;
+  width: min(430px, 100%);
+  padding: 24px 28px 26px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: color-mix(in oklab, var(--bg-1) 96%, black);
+  box-shadow:
+    0 28px 80px rgba(0,0,0,0.58),
+    inset 0 1px 0 color-mix(in oklab, var(--accent) 18%, transparent);
+  animation: wordle-card-in .38s cubic-bezier(.2,.9,.3,1.2) both;
+}
+
+@keyframes wordle-card-in {
+  from {
+    opacity: 0;
+    transform: translateY(16px) scale(.94);
+    filter: blur(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+    filter: blur(0);
+  }
+}
+
+@keyframes wordle-card-out {
+  from {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+  to {
+    opacity: 0;
+    transform: translateY(8px) scale(.98);
+  }
+}
+
+.wordle-stats-close {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  appearance: none;
+  width: 28px;
+  height: 28px;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--fg-2);
+  display: grid;
+  place-items: center;
+  font: 600 18px/1 var(--font-ui);
+}
+
+.wordle-stats-close:hover {
+  background: var(--bg-2);
+  color: var(--fg-0);
+}
+
+.wordle-stats-card h2,
+.wordle-stats-card h3 {
+  margin: 0;
+  color: var(--fg-0);
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+.wordle-stats-card h2 {
+  text-align: center;
+  font-size: 18px;
+  animation: wordle-stat-row-in .5s cubic-bezier(.22,.85,.2,1) 60ms both;
+}
+
+.wordle-stats-card h3 {
+  margin-top: 24px;
+  margin-bottom: 12px;
+  font-size: 13px;
+  animation: wordle-stat-row-in .5s cubic-bezier(.22,.85,.2,1) 210ms both;
+}
+
+.wordle-stats-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 10px;
+  margin-top: 18px;
+  perspective: 1400px;
+}
+
+.wordle-stats-grid div {
+  min-width: 0;
+  text-align: center;
+  animation: wordle-stat-row-in .5s cubic-bezier(.22,.85,.2,1) both;
+}
+
+.wordle-stats-grid div:nth-child(1) { animation-delay: 110ms; }
+.wordle-stats-grid div:nth-child(2) { animation-delay: 160ms; }
+.wordle-stats-grid div:nth-child(3) { animation-delay: 210ms; }
+.wordle-stats-grid div:nth-child(4) { animation-delay: 260ms; }
+
+.wordle-stats-grid b {
+  display: block;
+  color: var(--fg-0);
+  font: 500 36px/1 var(--font-ui);
+  letter-spacing: -0.03em;
+  transform-origin: 50% 0%;
+  backface-visibility: hidden;
+  animation: wordle-stat-number-flip .58s cubic-bezier(.34,1.18,.5,1) both;
+}
+
+.wordle-stats-grid span {
+  display: block;
+  margin-top: 5px;
+  color: var(--fg-2);
+  font: 10px var(--font-mono);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.wordle-distribution {
+  display: grid;
+  gap: 6px;
+  animation: wordle-stat-row-in .5s cubic-bezier(.22,.85,.2,1) 270ms both;
+}
+
+.wordle-dist-row {
+  display: grid;
+  grid-template-columns: 18px minmax(0, 1fr);
+  align-items: center;
+  gap: 8px;
+  color: var(--fg-1);
+  font: 600 12px var(--font-mono);
+}
+
+.wordle-dist-track {
+  min-width: 0;
+  height: 22px;
+}
+
+.wordle-dist-bar {
+  min-width: 24px;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  padding-right: 7px;
+  border-radius: 3px;
+  background: var(--bg-hi);
+  color: var(--fg-0);
+  transition: width 400ms cubic-bezier(.32,.72,.32,1);
+}
+
+.wordle-dist-bar.current {
+  background: color-mix(in oklab, var(--ok) 74%, var(--bg-0));
+  color: var(--bg-0);
+}
+
+.wordle-stats-footer {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  align-items: center;
+  gap: 18px;
+  margin-top: 24px;
+  padding-top: 18px;
+  border-top: 1px solid var(--line-soft);
+  animation: wordle-stat-row-in .5s cubic-bezier(.22,.85,.2,1) 330ms both;
+}
+
+.wordle-stats-footer span {
+  display: block;
+  color: var(--fg-3);
+  font: 10px var(--font-mono);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.wordle-stats-footer b {
+  display: block;
+  margin-top: 4px;
+  color: var(--accent);
+  font: 700 28px/1 var(--font-mono);
+  letter-spacing: 0.04em;
+}
+
+.wordle-stats-footer button {
+  appearance: none;
+  min-width: 112px;
+  height: 46px;
+  border: 1px solid color-mix(in oklab, var(--ok) 48%, transparent);
+  border-radius: 7px;
+  background: color-mix(in oklab, var(--ok) 76%, var(--bg-0));
+  color: var(--bg-0);
+  font: 700 11px var(--font-mono);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.wordle-stats-footer button:disabled {
+  opacity: 0.68;
+}
+
+@keyframes wordle-stat-row-in {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+    filter: blur(4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+    filter: blur(0);
+  }
+}
+
+@keyframes wordle-stat-number-flip {
+  0% {
+    transform: rotateX(82deg);
+    opacity: 0;
+  }
+  55% { opacity: 1; }
+  100% {
+    transform: rotateX(0deg);
+    opacity: 1;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .wordle-key.correct,
+  .wordle-key.present,
+  .wordle-key.absent,
+  .wordle-stats-backdrop,
+  .wordle-stats-backdrop.closing,
+  .wordle-stats-card,
+  .wordle-stats-backdrop.closing .wordle-stats-card,
+  .wordle-stats-card h2,
+  .wordle-stats-card h3,
+  .wordle-panel.reset-exiting,
+  .wordle-panel.reset-exiting .wordle-tile.filled,
+  .wordle-panel.reset-exiting .wordle-key.correct,
+  .wordle-panel.reset-exiting .wordle-key.present,
+  .wordle-panel.reset-exiting .wordle-key.absent,
+  .wordle-panel.resetting,
+  .wordle-row.shaking,
+  .wordle-stats-grid div,
+  .wordle-stats-grid b,
+  .wordle-distribution,
+  .wordle-stats-footer {
+    animation-duration: 0.001s !important;
+    animation-delay: 0s !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001s !important;
+  }
+}
+
+@media (max-width: 860px) {
+  .wordle-page {
+    place-items: start center;
+    padding: 18px 12px;
+  }
+
+  .wordle-shell {
+    grid-template-columns: 1fr;
+  }
+
+  .wordle-brand {
+    justify-content: center;
+  }
+}
+
+@media (max-width: 560px) {
+  .wordle-glyph {
+    width: 28px;
+    height: 28px;
+    flex-basis: 28px;
+  }
+
+  .wordle-title-block h1 {
+    font-size: 22px;
+  }
+
+  .wordle-board-wrap {
+    padding: 18px 8px 12px;
+  }
+
+  .wordle-row {
+    grid-template-columns: repeat(var(--wordle-cols), minmax(0, 1fr));
+    width: min(calc(100vw - 40px), 358px);
+  }
+
+  .wordle-tile {
+    width: 100%;
+    height: auto;
+    aspect-ratio: 1;
+    font-size: clamp(18px, 7vw, 23px);
+  }
+
+  .wordle-keyboard {
+    padding-left: 8px;
+    padding-right: 8px;
+  }
+
+  .wordle-key-row {
+    width: 100%;
+    gap: 4px;
+  }
+
+  .wordle-key {
+    flex: 1 1 0;
+    min-width: 0;
+    width: auto;
+    height: 39px;
+    font-size: 11.5px;
+    border-radius: 6px;
+  }
+
+  .wordle-key.wide {
+    flex: 1.35 1 0;
+    width: auto;
+    font-size: 9.5px;
   }
 }

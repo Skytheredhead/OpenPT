@@ -40,6 +40,22 @@ Check this file before deployment, server work, or Vercel verification.
 - Spam proofing is handled in-process by `server/abuse-guard.mjs`: Cloudflare-aware
   IP detection, auth/project/share/save throttles, retry-after responses, and a
   hidden signup honeypot field. Restarting the service resets in-memory counters.
+- Durable storage is local SQLite plus `.openpt-data/objects`. Use
+  `npm run storage:backup`, `npm run storage:cleanup:dry-run`,
+  `npm run storage:cleanup`, and `npm run storage:restore -- --backup <id>` for
+  production maintenance.
+- Optional storage env vars:
+  `OPENPT_USER_BYTES_LIMIT`, `OPENPT_PROJECT_BYTES_LIMIT`,
+  `OPENPT_MIN_SAVE_INTERVAL_MS`, `OPENPT_LEASE_TTL_MS`, and
+  `OPENPT_ADMIN_TOKEN`.
+- Account email links should set `OPENPT_PUBLIC_URL` to the public frontend
+  origin, for example `https://openpt.skylarenns.com`.
+- Account verification and password reset email use `OPENPT_ACCOUNT_SMTP_*`
+  first, then the feedback/report SMTP env names as fallbacks. Only set
+  `OPENPT_ACCOUNT_EMAIL_DEBUG=1` in local test/dev contexts; debug mode returns
+  account tokens in API responses.
+- `POST /api/admin/restore` only writes a pending restore request; the restore is
+  applied on the next server start before the live database is opened.
 
 ## Local Verification
 

@@ -77,6 +77,34 @@ function Inspector({ device, onTogglePower, onDelete, onRename, onConsole }) {
           </div>
         </div>
 
+        {(device.wireless || Object.values(device.interfaces || {}).some((ifc) => ifc.ssid || ifc.associationState)) && (
+          <div className="ins-section">
+            <h4>Wireless</h4>
+            {device.wireless ? (
+              <>
+                <div className="ins-row"><span className="k">radio</span><span className="v">{device.wireless.radioEnabled === false ? "down" : "up"}</span></div>
+                {(device.wireless.ssids || []).map((ssid) => (
+                  <div className="iface-row" key={ssid.name}>
+                    <div>
+                      <div className="nm">{ssid.name}</div>
+                      <div className="ip">{ssid.security || "open"} · VLAN {ssid.vlan || 1}</div>
+                    </div>
+                    <span className="st up">{(device.wireless.associations || []).filter((a) => a.ssid === ssid.name).length} STA</span>
+                  </div>
+                ))}
+              </>
+            ) : Object.entries(device.interfaces || {}).filter(([, ifc]) => ifc.ssid || ifc.associationState).map(([name, ifc]) => (
+              <div className="iface-row" key={name}>
+                <div>
+                  <div className="nm">{ifaceName(name)} {ifc.ssid || "-"}</div>
+                  <div className="ip">{ifc.associationState || "disconnected"} · {ifc.signalDbm != null ? `${ifc.signalDbm} dBm` : "no signal"}</div>
+                </div>
+                <span className={`st ${ifc.associationState === "associated" ? "up" : "down"}`}>{ifc.associationState === "associated" ? "ASSOC" : "DOWN"}</span>
+              </div>
+            ))}
+          </div>
+        )}
+
         {isRouterLike && (
           <div className="ins-section">
             <h4>Routing Table</h4>

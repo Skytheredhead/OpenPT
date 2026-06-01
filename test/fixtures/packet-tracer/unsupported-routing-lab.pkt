@@ -1,0 +1,9 @@
+OpenPT Packet Tracer fixture
+
+This small committed .pkt fixture intentionally exercises the importer
+fingerprint and unsupported-diagnostics path in Node. Replace or supplement it
+with a redistributable real Cisco Packet Tracer lab when one is available for
+the project repository.
+
+Devices: R1, SW1, PC1
+Activity: Configure addressing, DHCP, NAT, and verify reachability.

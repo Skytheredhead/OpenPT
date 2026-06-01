@@ -1,0 +1,14 @@
+node_modules/
+.git/
+.openpt-data/
+coverage/
+dist/
+build/
+tmp/
+test-results/
+uploads/
+quiz/uploads/
+screenshots/
+vendor/
+spacetime/
+OpenPT quiz.zip

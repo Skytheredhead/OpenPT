@@ -987,11 +987,12 @@
 }
 
 /* ── Exit-to-library transition ─────────────────────────────
-   When X is pressed inside a run/results, the outgoing page lingers
-   and settles back while the library (home) fades in on TOP of it. */
+   Keep the outgoing run visually on top until it has faded. Otherwise
+   the library/background flashes in before the close animation finishes. */
 @keyframes route-exit-recede {
-  from { opacity: 1; transform: scale(1); filter: blur(0); }
-  to   { opacity: 0; transform: scale(.97); filter: blur(8px); }
+  0%   { opacity: 1; transform: scale(1);    filter: blur(0); }
+  68%  { opacity: 1; transform: scale(.985); filter: blur(2px); }
+  100% { opacity: 0; transform: scale(.97);  filter: blur(8px); }
 }
 @keyframes route-library-fade-in {
   from { opacity: 0; }
@@ -999,12 +1000,11 @@
 }
 .transition-exit .route-exit {
   animation: route-exit-recede .58s cubic-bezier(.4,.1,.6,1) both;
-  z-index: 1;
+  z-index: 2;
 }
 .transition-exit .route-enter {
-  animation: route-library-fade-in .55s cubic-bezier(.2,.7,.2,1) .08s both;
-  z-index: 2;
-  /* let the receding page show through during the fade */
+  animation: route-library-fade-in .22s cubic-bezier(.2,.7,.2,1) .42s both;
+  z-index: 1;
   background: transparent;
 }
 /* The outgoing screen is a freshly-mounted React subtree (different key), so its
@@ -1014,8 +1014,8 @@
 .route-exit *,
 .route-exit *::before,
 .route-exit *::after {
-  animation-duration: 0.001s !important;
-  animation-delay: 0s !important;
+  animation: none !important;
+  transition-delay: 0s !important;
 }
 
 /* Lib overlay (shows over an active quiz) */
@@ -1397,9 +1397,10 @@
   width: 30px; height: 30px; position: relative;
   background:
     radial-gradient(circle at 50% 50%, var(--accent) 0 3.6px, transparent 4px),
-    radial-gradient(circle at 18% 22%, var(--fg-1) 0 2px, transparent 2.4px),
-    radial-gradient(circle at 82% 22%, var(--fg-1) 0 2px, transparent 2.4px),
-    radial-gradient(circle at 50% 88%, var(--fg-1) 0 2px, transparent 2.4px);
+    radial-gradient(circle at 22% 22%, var(--fg-1) 0 2px, transparent 2.4px),
+    radial-gradient(circle at 78% 22%, var(--fg-1) 0 2px, transparent 2.4px),
+    radial-gradient(circle at 22% 78%, var(--fg-1) 0 2px, transparent 2.4px),
+    radial-gradient(circle at 78% 78%, var(--fg-1) 0 2px, transparent 2.4px);
   filter: drop-shadow(0 0 12px color-mix(in oklab, var(--accent) 35%, transparent));
 }
 .home-brand-glyph::before {
@@ -1509,6 +1510,7 @@
 .tree-row.tree-course { padding-left: 12px; font-weight: 500; }
 .tree-row.tree-sem { padding-left: 28px; }
 .tree-row.tree-exam { padding-left: 60px; }
+.tree-row.tree-course-exam { padding-left: 28px; }
 .tree-row.tree-exam .icn { color: var(--fg-2); }
 .tree-row.tree-exam.selected {
   background: var(--accent-soft);

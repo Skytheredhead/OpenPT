@@ -70,7 +70,7 @@ End of document`;
 
   const etherchannelActivity = {
     format: "packet-tracer-activity",
-    importerVersion: 1,
+    importerVersion: 3,
     title: "15.2.7 Packet Tracer - EtherChannel Review",
     instructionsText: etherchannelText,
     instructionsHtml: `
@@ -831,6 +831,10 @@ ${report.notes.map((n) => `- ${n}`).join("\n")}`;
     const nameEl = directChild(node, "NAME");
     const children = directChildren(node, "NODE").map((child) => parseAssessmentNode(child, variables)).filter(Boolean);
     if (!nameEl && children.length === 0) return null;
+    const fields = Object.fromEntries(Array.from(node.children || []).filter((child) => child.tagName !== "NODE").map((child) => [
+      child.tagName,
+      resolvePacketTracerTokens(child.textContent?.trim() || "", variables),
+    ]));
     return {
       name: resolvePacketTracerTokens(nameEl?.textContent?.trim() || childText(node, "ID") || "Assessment Item", variables),
       id: resolvePacketTracerTokens(childText(node, "ID"), variables),
@@ -840,6 +844,9 @@ ${report.notes.map((n) => `- ${n}`).join("\n")}`;
       checkType: resolvePacketTracerTokens(nameEl?.getAttribute("checkType") || "", variables),
       eclass: resolvePacketTracerTokens(nameEl?.getAttribute("eclass") || "", variables),
       attrs: resolveAttrsObject(nameEl, variables),
+      nodeAttrs: resolveAttrsObject(node, variables),
+      fields,
+      rawXml: elementOuterXml(node),
       children,
     };
   }
@@ -874,6 +881,9 @@ ${report.notes.map((n) => `- ${n}`).join("\n")}`;
           checkTypes,
           eclass: node.eclass,
           attrs: node.attrs,
+          nodeAttrs: node.nodeAttrs,
+          fields: node.fields,
+          rawXml: node.rawXml,
         });
       } else {
         out.push(...flattenAssessment(node.children, path, nextInherited));
@@ -882,7 +892,478 @@ ${report.notes.map((n) => `- ${n}`).join("\n")}`;
     return out;
   }
 
-  function parsePacketTracerXml(file, decoded, sha256, head, report) {
+  function packetTracerIfaceKey(value) {
+    return String(value || "").trim().toLowerCase()
+      .replace(/\bfastethernet\b/g, "fa")
+      .replace(/\bgigabitethernet\b/g, "gi")
+      .replace(/\bserial\b/g, "se")
+      .replace(/\bport-channel\b/g, "po")
+      .replace(/\bethernet\b/g, "eth")
+      .replace(/\s+/g, "");
+  }
+
+  function assessmentSearchValues(item) {
+    return [
+      item?.name,
+      item?.path,
+      item?.value,
+      item?.checkType,
+      item?.rootCheckType,
+      item?.eclass,
+      ...Object.values(item?.attrs || {}),
+      ...Object.values(item?.nodeAttrs || {}),
+      ...Object.values(item?.fields || {}),
+    ].filter(Boolean).map((value) => String(value));
+  }
+
+  function compileAssessmentTarget(item, devices = []) {
+    const parts = Array.isArray(item?.pathParts) ? item.pathParts : [];
+    const text = assessmentSearchValues(item).join(" / ");
+    const device = devices.find((candidate) => {
+      const names = [candidate.name, candidate.rawName, candidate.saveRefId, candidate.memAddr].filter(Boolean).map((value) => String(value).toLowerCase());
+      return parts.some((part) => names.includes(String(part).toLowerCase())) ||
+        names.some((name) => name && new RegExp(`(^|[^a-z0-9_-])${name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}([^a-z0-9_-]|$)`, "i").test(text));
+    }) || null;
+    const ifacePattern = /\b(?:FastEthernet|GigabitEthernet|Serial|Ethernet|Port-channel|Fa|Gi|Se|Eth|Po)\s*\d+(?:\/\d+){0,3}\b/i;
+    const ifaceText = parts.find((part) => ifacePattern.test(part)) || (text.match(ifacePattern) || [])[0] || "";
+    return {
+      deviceName: device?.name || "",
+      packetTracerDeviceName: device?.rawName || device?.name || "",
+      saveRefId: device?.saveRefId || "",
+      memAddr: device?.memAddr || "",
+      interfaceName: ifaceText,
+      interfaceKey: packetTracerIfaceKey(ifaceText),
+    };
+  }
+
+  function compileAssessmentExpected(item) {
+    const attrs = { ...(item?.attrs || {}), ...(item?.nodeAttrs || {}), ...(item?.fields || {}) };
+    const expectedKeys = ["expected", "value", "nodeValue", "VALUE", "EXPECTED", "answer", "ANSWER", "checkValue", "targetValue"];
+    const values = [];
+    for (const key of expectedKeys) {
+      if (attrs[key]) values.push({ source: key, value: attrs[key] });
+    }
+    if (item?.value) values.push({ source: "nodeValue", value: item.value });
+    const ip = values.map((entry) => String(entry.value).match(/\b\d{1,3}(?:\.\d{1,3}){3}\b/)?.[0]).find(Boolean);
+    const number = values.map((entry) => String(entry.value).match(/\b\d+\b/)?.[0]).find(Boolean);
+    const command = values.find((entry) => /^(?:ip|switchport|channel-group|router|line|transport|access-list|interface|hostname|vlan)\b/i.test(String(entry.value).trim()))?.value || "";
+    return {
+      primary: values[0]?.value || "",
+      values,
+      ip: ip || "",
+      number: number || "",
+      command,
+    };
+  }
+
+  function compileAssessmentTree(nodes, visibleSet, devices = [], prefix = []) {
+    return (nodes || []).map((node) => {
+      const pathParts = [...prefix, node.name].filter(Boolean);
+      const leaf = !node.children?.length;
+      const base = {
+        id: node.id,
+        name: node.name,
+        path: pathParts.join(" / "),
+        pathParts,
+        components: node.components,
+        points: node.points,
+        checkType: node.checkType,
+        eclass: node.eclass,
+        attrs: node.attrs,
+        nodeAttrs: node.nodeAttrs,
+        fields: node.fields,
+        rawXml: node.rawXml,
+        visible: leaf ? visibleSet.has(node.rawXml || pathParts.join(" / ")) : true,
+      };
+      return {
+        ...base,
+        target: leaf ? compileAssessmentTarget(base, devices) : null,
+        expected: leaf ? compileAssessmentExpected(base) : null,
+        children: compileAssessmentTree(node.children || [], visibleSet, devices, pathParts),
+      };
+    });
+  }
+
+  function buildAssessmentModel(rootNodes, allLeaves, visibleLeaves, devices = []) {
+    const visibleKeys = new Set((visibleLeaves || []).map((item) => item.rawXml || item.path));
+    const leaves = (allLeaves || []).map((item) => ({
+      ...item,
+      visible: visibleKeys.has(item.rawXml || item.path),
+      target: compileAssessmentTarget(item, devices),
+      expected: compileAssessmentExpected(item),
+    }));
+    const supportedHints = leaves.filter((item) => {
+      const text = assessmentSearchText(item);
+      return /host ?name|display name|link type|cable|connect|port mode|switchport|vlan|channel|ospf|exec-timeout|transport input|ssh|ip address|subnet mask|default gateway|route|acl|access-list|nat|dhcp|spanning-tree|port-security|startup|save config/.test(text);
+    }).length;
+    return {
+      version: 1,
+      source: "decoded-packet-tracer-xml",
+      roots: compileAssessmentTree(rootNodes, visibleKeys, devices),
+      leaves,
+      summary: {
+        totalLeaves: leaves.length,
+        visibleLeaves: leaves.filter((item) => item.visible).length,
+        hiddenLeaves: leaves.filter((item) => !item.visible).length,
+        supportedHintLeaves: supportedHints,
+      },
+    };
+  }
+
+  function classifyPacketTracerAssessmentLeaf(item) {
+    const text = assessmentSearchText(item);
+    const path = String(item?.path || "").toLowerCase();
+    if (isConnectivityAssessmentItem(item)) return "connectivity";
+    if (/instruction|user note|resource|wattage|cost|physical location|logical shape|physical shape|device model|device type|power/.test(path)) return "metadata";
+    if (/ports?\s*\//.test(path) || /port type|bandwidth|duplex|bia|mac address|keepalive|mtu|lldp|cdp|link to|connects to|managed in wiring closet/.test(text)) return "packet-tracer-internal-state";
+    if (/wireless|wlan|ssid|wlc|ap|radio|wpa|radius|authentication server/.test(text)) return "packet-tracer-internal-state";
+    if (/ospf|eigrp|rip|route|routing|vlan|switchport|trunk|stp|spanning|etherchannel|channel|port-security|dhcp|dns|ntp|nat|acl|access-list|startup|save config|flash|nvram/.test(text)) return "authored-rubric";
+    return "packet-tracer-internal-state";
+  }
+
+  function packetTracerStateKey(value) {
+    return String(value || "").trim().toLowerCase().replace(/\s+/g, " ");
+  }
+
+  function packetTracerLeafValue(item) {
+    return item?.value || item?.expected?.primary || item?.fields?.VALUE || item?.attrs?.nodeValue || item?.name || "";
+  }
+
+  function buildPacketTracerState({ devices, logicalObjects, links, assessmentModel }) {
+    const deviceNames = new Set((devices || []).map((device) => device.name));
+    const state = {
+      version: 1,
+      source: "decoded-packet-tracer-xml",
+      devices: {},
+      logicalObjects: {},
+      links: {},
+      assessmentByPath: {},
+      assessmentById: {},
+      assessmentByRawXml: {},
+      summary: {
+        devices: (devices || []).length,
+        logicalObjects: (logicalObjects || []).length,
+        links: (links || []).length,
+        assessmentLeaves: 0,
+        visibleScoredLeaves: 0,
+      },
+    };
+
+    for (const device of devices || []) {
+      state.devices[device.name] = {
+        name: device.name,
+        kind: device.kind,
+        model: device.model,
+        customModel: device.customModel,
+        power: device.power,
+        x: device.x,
+        y: device.y,
+        rawName: device.rawName,
+        saveRefId: device.saveRefId,
+        memAddr: device.memAddr,
+        interfaces: {},
+        metadata: {},
+        provenance: { xmlPath: "/PACKETTRACER/NETWORK/DEVICES/DEVICE", objectId: device.saveRefId || device.memAddr || device.name },
+      };
+    }
+
+    for (const object of logicalObjects || []) {
+      state.logicalObjects[object.name] = {
+        name: object.name,
+        kind: object.kind,
+        model: object.model,
+        power: object.power,
+        x: object.x,
+        y: object.y,
+        rawName: object.rawName,
+        saveRefId: object.saveRefId,
+        memAddr: object.memAddr,
+        provenance: { xmlPath: "/PACKETTRACER/NETWORK/DEVICES/DEVICE", objectId: object.saveRefId || object.memAddr || object.name },
+      };
+    }
+
+    for (const [index, link] of (links || []).entries()) {
+      const id = `${link.fromRef || link.from}-${link.toRef || link.to}-${index}`;
+      state.links[id] = {
+        ...link,
+        sourceIndex: index,
+        provenance: { xmlPath: `/PACKETTRACER/NETWORK/LINKS/LINK[${index + 1}]`, objectId: id },
+      };
+    }
+
+    for (const leaf of assessmentModel?.leaves || []) {
+      const visibleScored = leaf.visible !== false && (Number(leaf.points) || 0) > 0;
+      state.summary.assessmentLeaves += 1;
+      if (visibleScored) state.summary.visibleScoredLeaves += 1;
+      const path = leaf.path || leaf.name || "";
+      const entry = {
+        path,
+        id: leaf.id || "",
+        label: leaf.name || "",
+        value: packetTracerLeafValue(leaf),
+        points: Number(leaf.points) || 0,
+        visible: leaf.visible !== false,
+        classification: classifyPacketTracerAssessmentLeaf(leaf),
+        checkType: leaf.checkType || "",
+        rootCheckType: leaf.rootCheckType || "",
+        eclass: leaf.eclass || "",
+        components: leaf.components || "",
+        target: leaf.target || null,
+        expected: leaf.expected || null,
+        source: {
+          assessmentPath: path,
+          xmlPath: "/ACTIVITY/ASSESSMENTITEMS",
+          checkType: leaf.checkType || "",
+          eclass: leaf.eclass || "",
+          objectId: leaf.id || "",
+          sourceValue: packetTracerLeafValue(leaf),
+        },
+      };
+      if (path) state.assessmentByPath[path] = entry;
+      if (leaf.id) state.assessmentById[leaf.id] = entry;
+      if (leaf.rawXml) state.assessmentByRawXml[leaf.rawXml] = entry;
+
+      const parts = Array.isArray(leaf.pathParts) ? leaf.pathParts : String(path).split(/\s*\/\s*/);
+      const deviceName = parts.find((part) => deviceNames.has(part));
+      if (!deviceName || !state.devices[deviceName]) continue;
+      const portsIndex = parts.findIndex((part) => packetTracerStateKey(part) === "ports");
+      if (portsIndex >= 0 && parts[portsIndex + 1]) {
+        const ifaceName = parts[portsIndex + 1];
+        state.devices[deviceName].interfaces[ifaceName] = state.devices[deviceName].interfaces[ifaceName] || { name: ifaceName, checks: {} };
+        state.devices[deviceName].interfaces[ifaceName].checks[path] = entry;
+      } else {
+        state.devices[deviceName].metadata[path] = entry;
+      }
+    }
+
+    return state;
+  }
+
+  function coverageItem({ id, status = "exact", category, label, detail, source = {}, evidence = {} }) {
+    return {
+      id,
+      status,
+      category,
+      label,
+      detail,
+      source,
+      evidence,
+    };
+  }
+
+  function packetTracerDeviceSource(device, index, logicalOnly = false) {
+    return {
+      xmlPath: `/PACKETTRACER/NETWORK/DEVICES/DEVICE[${index + 1}]`,
+      objectId: device.saveRefId || device.memAddr || device.name || `device-${index + 1}`,
+      deviceName: device.name,
+      model: device.model || "",
+      kind: device.kind || "",
+      logicalOnly,
+    };
+  }
+
+  function packetTracerLinkSource(link, index) {
+    return {
+      xmlPath: `/PACKETTRACER/NETWORK/LINKS/LINK[${index + 1}]`,
+      objectId: `${link.fromRef || link.from || "from"}-${link.toRef || link.to || "to"}-${index + 1}`,
+      from: link.from,
+      to: link.to,
+      cableType: link.type || "",
+      medium: link.medium || "",
+    };
+  }
+
+  function buildPacketTracerCoverage({ decoded, devices, logicalObjects, links, instructionsHtml, assessmentModel, answerCommands, packetTracerState, rawFilePreserved = false, rawFileReason = "" }) {
+    const items = [];
+    const decodedXmlLength = decoded?.xmlLength || decoded?.xmlText?.length || 0;
+    if (decodedXmlLength) {
+      items.push(coverageItem({
+        id: "decoded.xml",
+        category: "decoded",
+        label: "Decoded XML",
+        detail: `Packet Tracer XML preserved exactly (${decodedXmlLength} characters).`,
+        source: { xmlPath: "/", profile: decoded.profile || "" },
+      }));
+    }
+
+    if (rawFilePreserved) {
+      items.push(coverageItem({
+        id: "raw-file",
+        category: "raw-file",
+        label: "Original file",
+        detail: "Raw PKA/PKT bytes were preserved for round-trip export and follow-up analysis.",
+        source: { storage: "indexeddb" },
+      }));
+    } else if (rawFileReason) {
+      items.push(coverageItem({
+        id: "raw-file",
+        status: "broken",
+        category: "raw-file",
+        label: "Original file",
+        detail: `Raw file preservation failed: ${rawFileReason}`,
+        source: { storage: "indexeddb" },
+      }));
+    }
+
+    if (instructionsHtml) {
+      items.push(coverageItem({
+        id: "instructions.html",
+        category: "instructions",
+        label: "Instructions",
+        detail: "Assignment instructions were imported into the sidebar.",
+        source: { xmlPath: "/ACTIVITY/INSTRUCTIONS" },
+      }));
+      if (/<(?:img|audio|video|object|embed|source)\b/i.test(instructionsHtml)) {
+        items.push(coverageItem({
+          id: "instructions.assets",
+          category: "instructions",
+          label: "Instruction media references",
+          detail: "Embedded instruction media references were preserved in the imported instruction HTML.",
+          source: { xmlPath: "/ACTIVITY/INSTRUCTIONS" },
+        }));
+      }
+    } else {
+      items.push(coverageItem({
+        id: "instructions.html",
+        status: "missing",
+        category: "instructions",
+        label: "Instructions",
+        detail: "No readable instruction HTML/text was found in the decoded activity.",
+        source: { xmlPath: "/ACTIVITY/INSTRUCTIONS" },
+      }));
+    }
+
+    for (const [index, device] of (devices || []).entries()) {
+      const source = packetTracerDeviceSource(device, index, false);
+      items.push(coverageItem({
+        id: `topology.device.${source.objectId}`,
+        category: "topology",
+        label: `Device: ${device.name}`,
+        detail: `${device.kind || "Device"} ${device.model || ""}`.trim() || "Packet Tracer device imported.",
+        source,
+      }));
+      items.push(coverageItem({
+        id: `topology.coordinates.${source.objectId}`,
+        category: "layout",
+        label: `Coordinates: ${device.name}`,
+        detail: `Workspace coordinates preserved exactly at (${device.x}, ${device.y}).`,
+        source: { ...source, x: device.x, y: device.y },
+      }));
+      if (Array.isArray(device.runningConfig) && device.runningConfig.length) {
+        items.push(coverageItem({
+          id: `device.config.${source.objectId}`,
+          category: "device-state",
+          label: `Running config: ${device.name}`,
+          detail: `${device.runningConfig.length} running-config lines captured as native OpenPT command evidence.`,
+          source,
+        }));
+      }
+    }
+
+    for (const [index, object] of (logicalObjects || []).entries()) {
+      const source = packetTracerDeviceSource(object, index, true);
+      items.push(coverageItem({
+        id: `topology.logical-object.${source.objectId}`,
+        category: "topology",
+        label: `Logical object: ${object.name}`,
+        detail: `${object.kind || "Packet Tracer object"} preserved as a first-class logical annotation.`,
+        source,
+      }));
+      items.push(coverageItem({
+        id: `topology.logical-object.coordinates.${source.objectId}`,
+        category: "layout",
+        label: `Coordinates: ${object.name}`,
+        detail: `Logical object coordinates preserved exactly at (${object.x}, ${object.y}).`,
+        source: { ...source, x: object.x, y: object.y },
+      }));
+    }
+
+    for (const [index, link] of (links || []).entries()) {
+      const source = packetTracerLinkSource(link, index);
+      items.push(coverageItem({
+        id: `topology.link.${source.objectId}`,
+        category: "topology",
+        label: `Link: ${link.from} to ${link.to}`,
+        detail: "Endpoint references and port names were imported exactly from Packet Tracer XML.",
+        source,
+      }));
+      items.push(coverageItem({
+        id: `topology.cable.${source.objectId}`,
+        category: "cable",
+        label: `Cable: ${link.type || link.medium || "Packet Tracer Link"}`,
+        detail: `Cable type, medium, endpoint refs, and functional status preserved (${link.functional || "unknown status"}).`,
+        source,
+        evidence: {
+          fromRef: link.fromRef || "",
+          toRef: link.toRef || "",
+          functional: link.functional || "",
+          ports: link.ports || [],
+        },
+      }));
+    }
+
+    const visibleLeaves = (assessmentModel?.leaves || []).filter((leaf) => leaf.visible !== false && (Number(leaf.points) || 0) > 0);
+    if (visibleLeaves.length) {
+      items.push(coverageItem({
+        id: "assessment.model",
+        category: "assessment",
+        label: "Assessment model",
+        detail: `${visibleLeaves.length} visible scored assessment leaves decoded from assessmentModel.leaves.`,
+        source: { xmlPath: "/ACTIVITY/ASSESSMENTITEMS", source: assessmentModel.source || "" },
+      }));
+      for (const [index, leaf] of visibleLeaves.entries()) {
+        items.push(coverageItem({
+          id: `assessment.leaf.${leaf.id || index}`,
+          category: "assessment",
+          label: `Assessment leaf: ${leaf.name || leaf.path || `#${index + 1}`}`,
+          detail: `${Number(leaf.points) || 0} point${Number(leaf.points) === 1 ? "" : "s"} · ${leaf.checkType || leaf.eclass || "decoded check"}`,
+          source: {
+            xmlPath: `/ACTIVITY/ASSESSMENTITEMS/NODE[${index + 1}]`,
+            objectId: leaf.id || "",
+            checkType: leaf.checkType || "",
+            eclass: leaf.eclass || "",
+            component: leaf.components || "",
+            target: leaf.target || null,
+            expected: leaf.expected || null,
+          },
+        }));
+      }
+    } else {
+      items.push(coverageItem({
+        id: "assessment.model",
+        status: "missing",
+        category: "assessment",
+        label: "Assessment model",
+        detail: "No visible scored assessment leaves were decoded.",
+        source: { xmlPath: "/ACTIVITY/ASSESSMENTITEMS" },
+      }));
+    }
+
+    const configuredDevices = Object.entries(answerCommands || {}).filter(([, lines]) => Array.isArray(lines) && lines.length);
+    if (configuredDevices.length) {
+      items.push(coverageItem({
+        id: "device-state.running-configs",
+        category: "device-state",
+        label: "Device configs",
+        detail: `Running configuration evidence captured for ${configuredDevices.length} device${configuredDevices.length === 1 ? "" : "s"}.`,
+        source: { xmlPath: "/PACKETTRACER/NETWORK/DEVICES/DEVICE/ENGINE/RUNNINGCONFIG" },
+      }));
+    }
+
+    if (packetTracerState?.summary?.visibleScoredLeaves) {
+      items.push(coverageItem({
+        id: "packet-tracer.native-state",
+        category: "state",
+        label: "Native Packet Tracer state",
+        detail: `${packetTracerState.summary.visibleScoredLeaves} visible scored Packet Tracer leaves transferred into native read-only state.`,
+        source: { xmlPath: "/ACTIVITY/ASSESSMENTITEMS" },
+      }));
+    }
+
+    return items;
+  }
+
+  function parsePacketTracerXml(file, decoded, sha256, head, report, rawStorage = {}) {
     const parsedXml = parseXmlDocument(decoded.xmlText);
     const doc = parsedXml.doc;
     const root = doc.documentElement;
@@ -924,14 +1405,17 @@ ${report.notes.map((n) => `- ${n}`).join("\n")}`;
       };
     });
 
-    const devices = allDevices.filter((device) => !/^Power Distribution Device$/i.test(device.kind || device.model || device.name || ""));
+    const logicalObjects = allDevices.filter((device) => /^Power Distribution Device$/i.test(device.kind || device.model || device.name || ""));
+    const devices = allDevices.filter((device) => !logicalObjects.includes(device));
     const links = directChildren(linksRoot, "LINK").map((linkEl) => {
       const cable = directChild(linkEl, "CABLE");
       const ports = directChildren(cable, "PORT").map((port) => port.textContent.trim());
       const fromRef = childText(cable, "FROM");
       const toRef = childText(cable, "TO");
-      const fromDevice = saveRefToName[fromRef] || memAddrToName[childText(cable, "FROM_DEVICE_MEM_ADDR")] || fromRef;
-      const toDevice = saveRefToName[toRef] || memAddrToName[childText(cable, "TO_DEVICE_MEM_ADDR")] || toRef;
+      const fromMemAddr = childText(cable, "FROM_DEVICE_MEM_ADDR");
+      const toMemAddr = childText(cable, "TO_DEVICE_MEM_ADDR");
+      const fromDevice = saveRefToName[fromRef] || memAddrToName[fromMemAddr] || fromRef;
+      const toDevice = saveRefToName[toRef] || memAddrToName[toMemAddr] || toRef;
       return {
         type: childText(cable, "TYPE") || childText(linkEl, "TYPE") || "Packet Tracer Link",
         medium: childText(linkEl, "TYPE"),
@@ -939,7 +1423,10 @@ ${report.notes.map((n) => `- ${n}`).join("\n")}`;
         to: `${toDevice}:${ports[1] || "Port"}`,
         fromRef,
         toRef,
+        fromMemAddr,
+        toMemAddr,
         functional: childText(cable, "FUNCTIONAL"),
+        ports,
         xml: elementOuterXml(linkEl),
       };
     }).filter((link) => link.from && link.to);
@@ -961,6 +1448,8 @@ ${report.notes.map((n) => `- ${n}`).join("\n")}`;
     const visibleComponents = customAssessmentComponents(root);
     const assessmentItems = selectPacketTracerVisibleAssessmentItems(rawAssessmentItems, visibleComponents);
     const assessmentSections = buildAssessmentSections(assessmentItems);
+    const assessmentModel = buildAssessmentModel(assessmentRootNodes, rawAssessmentItems, assessmentItems, devices);
+    const packetTracerState = buildPacketTracerState({ devices, logicalObjects, links, assessmentModel });
     const totalPoints = assessmentItems.reduce((sum, item) => sum + (Number(item.points) || 0), 0);
     const answerCommands = Object.fromEntries(devices.map((device) => [
       device.name,
@@ -979,7 +1468,7 @@ ${report.notes.map((n) => `- ${n}`).join("\n")}`;
 
     return {
       format: "packet-tracer-activity",
-      importerVersion: 2,
+      importerVersion: 3,
       title,
       instructionsText: htmlToPlainText(resolvedInstructionsHtml),
       instructionsHtml: resolvedInstructionsHtml,
@@ -996,10 +1485,35 @@ ${report.notes.map((n) => `- ${n}`).join("\n")}`;
         }, {})).map(([, value]) => ({ name: value.name, items: `0/${value.items}`, score: `0/${value.points}` })),
       },
       devices,
+      logicalObjects: logicalObjects.map((device) => ({
+        name: device.name,
+        kind: device.kind,
+        model: device.model,
+        customModel: device.customModel,
+        power: device.power,
+        x: device.x,
+        y: device.y,
+        rawName: device.rawName,
+        saveRefId: device.saveRefId,
+        memAddr: device.memAddr,
+        logicalOnly: true,
+        xml: device.xml,
+      })),
       links,
       answerCommands,
       rubricPattern: assessmentRootNodes,
+      assessmentModel,
+      packetTracerState,
       assessmentItems,
+      gradingProfile: {
+        version: 1,
+        runtime: "browser-native",
+        mode: "structured-checker-registry",
+        importedItems: assessmentItems.length,
+        decodedItems: rawAssessmentItems.length,
+        visibleItems: assessmentModel.summary.visibleLeaves,
+      },
+      gradingRun: null,
       decoded: {
         profile: decoded.profile,
         rootTag: root.tagName,
@@ -1014,7 +1528,7 @@ ${report.notes.map((n) => `- ${n}`).join("\n")}`;
         visibleAssessmentComponents: Array.from(visibleComponents),
         assessmentClassification: assessmentSections.counts,
         rawAssessmentClassification: buildAssessmentSections(rawAssessmentItems).counts,
-        hiddenObjects: allDevices.filter((device) => !devices.includes(device)).map((device) => ({
+        hiddenObjects: logicalObjects.map((device) => ({
           name: device.name,
           kind: device.kind,
           model: device.model,
@@ -1026,13 +1540,22 @@ ${report.notes.map((n) => `- ${n}`).join("\n")}`;
       reverseReport: report,
       assessmentSections,
       featureCoverage: {
-        rawFilePreserved: false,
+        rawFilePreserved: !!rawStorage.stored,
         semanticExtraction: "decoded-xml",
         profileMatched: true,
-        preservedButUnsupported: [
-          "Full decoded Packet Tracer XML is preserved on the imported activity.",
-          "Packet Tracer-only UI, simulation, assessment, media, and device internals are retained in decoded.xmlText even when OpenPT does not render them yet.",
-        ],
+        coverageItems: buildPacketTracerCoverage({
+          decoded: { ...decoded, xmlLength: decoded.xmlText.length },
+          devices,
+          logicalObjects,
+          links,
+          instructionsHtml: resolvedInstructionsHtml,
+          assessmentModel,
+          answerCommands,
+          packetTracerState,
+          rawFilePreserved: !!rawStorage.stored,
+          rawFileReason: rawStorage.reason || "",
+        }),
+        preservedButUnsupported: [],
       },
       diagnostics: {
         sha256,
@@ -1060,6 +1583,40 @@ ${report.notes.map((n) => `- ${n}`).join("\n")}`;
       featureCoverage: {
         rawFilePreserved: false,
         semanticExtraction: "not-decoded",
+        coverageItems: [
+          coverageItem({
+            id: "decoded.xml",
+            status: "broken",
+            category: "decoded",
+            label: "Decoded XML",
+            detail: report.decoder?.error || "No packaged extractor profile can decode this file yet.",
+            source: { attemptedProfile: report.decoder?.attemptedProfile || "ptsave-eax-twofish-v1" },
+          }),
+          coverageItem({
+            id: "topology",
+            status: "missing",
+            category: "topology",
+            label: "Topology",
+            detail: "Devices, links, configs, assessments, and workspace objects were not extracted.",
+            source: { xmlPath: "/PACKETTRACER/NETWORK" },
+          }),
+          coverageItem({
+            id: "assessment.model",
+            status: "missing",
+            category: "assessment",
+            label: "Assessment model",
+            detail: "Assessment tree is hidden inside the unsupported activity payload.",
+            source: { xmlPath: "/ACTIVITY/ASSESSMENTITEMS" },
+          }),
+          coverageItem({
+            id: "instructions.html",
+            status: "missing",
+            category: "instructions",
+            label: "Instructions",
+            detail: "Instruction assets are hidden inside the unsupported activity payload.",
+            source: { xmlPath: "/ACTIVITY/INSTRUCTIONS" },
+          }),
+        ],
         preservedButUnsupported: [
           "Packet Tracer encrypted/proprietary activity payload",
           "Device configurations hidden inside the activity payload",
@@ -1102,7 +1659,7 @@ ${report.notes.map((n) => `- ${n}`).join("\n")}`;
     let activity = null;
     try {
       const decoded = await decodePacketTracerXml(bytes);
-      activity = parsePacketTracerXml(file, decoded, sha256, head, report);
+      activity = parsePacketTracerXml(file, decoded, sha256, head, report, rawStorage);
     } catch (err) {
       report.decoder = {
         status: "not-decoded",
@@ -1125,10 +1682,25 @@ ${report.notes.map((n) => `- ${n}`).join("\n")}`;
       sha256,
       storage: rawStorage,
     };
+    const coverageItems = [...(activity.featureCoverage?.coverageItems || [])];
+    if (!coverageItems.some((item) => item.id === "raw-file")) {
+      coverageItems.push(coverageItem({
+        id: "raw-file",
+        status: rawStorage.stored ? "exact" : "broken",
+        category: "raw-file",
+        label: "Original file",
+        detail: rawStorage.stored
+          ? `Raw PKA/PKT bytes were preserved in ${rawStorage.backend || "browser storage"}.`
+          : `Raw file preservation failed${rawStorage.reason ? `: ${rawStorage.reason}` : "."}`,
+        source: { storage: rawStorage.backend || "indexeddb" },
+      }));
+    }
     activity.featureCoverage = {
+      ...(activity.featureCoverage || {}),
       rawFilePreserved: !!rawStorage.stored,
       semanticExtraction: activity.featureCoverage?.semanticExtraction || (activity.unsupported ? "not-decoded" : "profile-derived"),
       profileMatched: !activity.unsupported,
+      coverageItems,
       preservedButUnsupported: activity.featureCoverage?.preservedButUnsupported || (activity.unsupported ? [
         "Packet Tracer encrypted/proprietary activity payload",
         "Device configurations hidden inside the activity payload",
