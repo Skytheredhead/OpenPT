@@ -1,0 +1,49 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "rewrites": [
+    {
+      "source": "/",
+      "destination": "/index.html"
+    },
+    {
+      "source": "/wordle",
+      "destination": "/wordle.html"
+    },
+    {
+      "source": "/wordle/",
+      "destination": "/wordle.html"
+    },
+    {
+      "source": "/jeopardy",
+      "destination": "/jeopardy.html"
+    },
+    {
+      "source": "/jeopardy/",
+      "destination": "/jeopardy.html"
+    },
+    {
+      "source": "/jeopardy-theme.m4a",
+      "destination": "/01%20Jeopardy%20%28Main%20Theme%29.m4a"
+    },
+    {
+      "source": "/jeopardy-sfx/:file",
+      "destination": "/public/audio/jeopardy-sfx/:file"
+    },
+    {
+      "source": "/lab",
+      "destination": "/index.html"
+    },
+    {
+      "source": "/lab/",
+      "destination": "/index.html"
+    },
+    {
+      "source": "/share/:token",
+      "destination": "/index.html"
+    },
+    {
+      "source": "/:path*",
+      "destination": "/index.html"
+    }
+  ]
+}

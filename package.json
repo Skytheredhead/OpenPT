@@ -4,6 +4,7 @@
   "private": true,
   "type": "module",
   "scripts": {
+    "build": "node scripts/build-static.mjs",
     "ci": "npm run lint && npm run format:check && npm run typecheck && npm run test:unit && npm run test:import-corpus && npm run test:browser",
     "start": "node server/index.mjs",
     "dev": "node server/index.mjs",
