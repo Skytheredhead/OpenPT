@@ -154,6 +154,12 @@ const Glyph = {
       <path d="M17 16.5h4M9 23.5h12" stroke="currentColor" strokeWidth="1.1" strokeLinecap="round" opacity="0.65"/>
     </svg>
   ),
+  annotation: ({ size = 30 }) => (
+    <svg width={size} height={size} viewBox="0 0 30 30" fill="none">
+      <rect x="7" y="7" width="16" height="16" rx="2" stroke="currentColor" strokeWidth="1.3" fill="rgba(255,255,255,0.04)"/>
+      <path d="M11 12h8M11 16h6M11 20h4" stroke="currentColor" strokeWidth="1.1" strokeLinecap="round"/>
+    </svg>
+  ),
 };
 window.Glyph = Glyph;
 
@@ -179,4 +185,5 @@ window.DeviceCatalog = [
   { id: "internet", kind: "internet", platform: "internet", short: "Internet", label: "Internet", ifaces: ["wan"], pwr: true, color: "var(--accent)" },
   { id: "dslmodem", kind: "dslmodem", platform: "dslmodem", label: "DSL Modem", short: "DSL", ifaces: ["Ethernet0", "DSL0"], pwr: true, color: "var(--violet)" },
   { id: "cablemodem", kind: "cablemodem", platform: "cablemodem", label: "Cable Modem", short: "Cable", ifaces: ["Ethernet0", "Coax0"], pwr: true, color: "var(--magenta)" },
+  { id: "pt-logical-object", kind: "annotation", platform: "pt-logical-object", label: "Packet Tracer Logical Object", short: "PT Obj", ifaces: [], pwr: false, color: "var(--fg-2)" },
 ];

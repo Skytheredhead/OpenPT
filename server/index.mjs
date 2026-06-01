@@ -6,10 +6,12 @@ import argon2 from "argon2";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { ObjectStore } from "./object-store.mjs";
-import { OpenPTStore, LIMITS } from "./storage.mjs";
+import { OpenPTStore } from "./storage.mjs";
+import { applyPendingRestore, cleanupObjects, createBackup, writePendingRestore } from "./storage-admin.mjs";
 import { AbuseGuard, clientIp } from "./abuse-guard.mjs";
 import { reportFingerprint, sanitizeErrorReport, sendErrorReportEmail } from "./error-report.mjs";
 import { sanitizeFeedback, sendFeedbackEmail } from "./feedback.mjs";
+import { publicBaseUrl, sendPasswordResetEmail, sendVerificationEmail } from "./account-email.mjs";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const root = resolve(__dirname, "..");
@@ -33,14 +35,23 @@ const allowedOrigins = (process.env.OPENPT_ALLOWED_ORIGINS || defaultAllowedOrig
   .map((origin) => origin.trim())
   .filter(Boolean);
 const backendOnly = process.env.OPENPT_BACKEND_ONLY === "1";
+const adminToken = process.env.OPENPT_ADMIN_TOKEN || "";
 
 const app = Fastify({ logger: true, bodyLimit: 520 * 1024 * 1024 });
+const pendingRestore = await applyPendingRestore({ dataDir });
+if (pendingRestore) {
+  app.log.info({ backupId: pendingRestore.backupId, preRestoreBackupId: pendingRestore.preRestoreBackupId }, "applied pending storage restore");
+}
 const store = new OpenPTStore({
   dbPath: join(dataDir, "openpt.sqlite"),
   objectStore: new ObjectStore(join(dataDir, "objects"))
 });
+await store.purgeScheduledAccounts().catch((err) => app.log?.warn?.({ err }, "scheduled account purge failed"));
 const abuse = new AbuseGuard();
 setInterval(() => abuse.sweep(), 10 * 60_000).unref();
+setInterval(() => {
+  store.purgeScheduledAccounts().catch((err) => app.log.warn({ err }, "scheduled account purge failed"));
+}, 60 * 60_000).unref();
 
 await app.register(cookie, {
   secret: process.env.OPENPT_COOKIE_SECRET || "openpt-dev-cookie-secret-change-me"
@@ -66,7 +77,12 @@ app.addHook("preHandler", async (req) => {
 
 function publicUser(user) {
   if (!user) return null;
-  return { id: user.id, email: user.email };
+  return {
+    id: user.id,
+    email: user.email,
+    emailVerifiedAt: user.email_verified_at || user.emailVerifiedAt || null,
+    deletionScheduledAt: user.deletion_scheduled_at || user.deletionScheduledAt || null
+  };
 }
 
 function requireUser(req) {
@@ -88,6 +104,19 @@ function requireCsrf(req) {
   }
 }
 
+function requireAdmin(req) {
+  if (!adminToken) {
+    const err = new Error("Not found");
+    err.statusCode = 404;
+    throw err;
+  }
+  if (req.headers.authorization !== `Bearer ${adminToken}`) {
+    const err = new Error("Admin authorization required.");
+    err.statusCode = 401;
+    throw err;
+  }
+}
+
 function setSessionCookie(reply, session) {
   const secureCookies = process.env.OPENPT_SECURE_COOKIES === "1";
   reply
@@ -100,6 +129,37 @@ function setSessionCookie(reply, session) {
       signed: false
     })
     .header("x-openpt-csrf", session.csrf);
+}
+
+function clearSessionCookie(reply) {
+  reply.clearCookie("openpt_session", { path: "/" });
+}
+
+function sessionMeta(req) {
+  return {
+    clientLabel: req.body?.clientLabel,
+    userAgent: req.headers["user-agent"],
+    ip: clientIp(req)
+  };
+}
+
+function authError(reply, statusCode, code, message, extra = {}) {
+  reply.status(statusCode);
+  return { error: message, code, statusCode, ...extra };
+}
+
+async function issueVerification(user, req, log = console) {
+  const token = store.createAccountToken(user.id, "email_verify", 24 * 60 * 60_000);
+  const result = await sendVerificationEmail(user.email, token.token, { baseUrl: publicBaseUrl(req, process.env, allowedOrigins) });
+  if (result.token) log.info?.({ email: user.email, link: result.link }, "verification email debug link");
+  return { expiresAt: token.expiresAt, link: result.sent ? undefined : result.link, token: result.sent ? undefined : result.token };
+}
+
+async function issuePasswordReset(user, req, log = console) {
+  const token = store.createAccountToken(user.id, "password_reset", 60 * 60_000);
+  const result = await sendPasswordResetEmail(user.email, token.token, { baseUrl: publicBaseUrl(req, process.env, allowedOrigins) });
+  if (result.token) log.info?.({ email: user.email, link: result.link }, "password reset email debug link");
+  return { expiresAt: token.expiresAt, link: result.sent ? undefined : result.link, token: result.sent ? undefined : result.token };
 }
 
 function projectSummary(row, extra = {}) {
@@ -130,6 +190,7 @@ app.setErrorHandler((err, req, reply) => {
   if (err.retryAfter) reply.header("retry-after", String(err.retryAfter));
   reply.status(status).send({
     error: err.message || "Server error",
+    code: err.code,
     statusCode: status,
     lease: err.lease ? {
       clientId: err.lease.client_id,
@@ -140,7 +201,34 @@ app.setErrorHandler((err, req, reply) => {
   });
 });
 
-app.get("/api/health", async () => ({ ok: true, limits: LIMITS }));
+app.get("/api/health", async () => ({ ok: true, limits: store.limits }));
+
+app.post("/api/admin/backups", async (req) => {
+  requireAdmin(req);
+  const result = await createBackup({ dataDir, store, reason: "http-admin" });
+  return { backup: { id: result.id, createdAt: result.manifest.createdAt, path: result.path, referencedObjectCount: result.manifest.referencedObjectCount } };
+});
+
+app.post("/api/admin/storage/cleanup", async (req) => {
+  requireAdmin(req);
+  return cleanupObjects({
+    store,
+    objectStore: store.objects,
+    dryRun: !!req.body?.dryRun,
+    olderThanDays: req.body?.olderThanDays
+  });
+});
+
+app.post("/api/admin/restore", async (req, reply) => {
+  requireAdmin(req);
+  const pending = await writePendingRestore({
+    dataDir,
+    backupId: req.body?.backupId,
+    confirm: req.body?.confirm
+  });
+  reply.status(202);
+  return { restore: pending, applyOnRestart: true };
+});
 
 app.post("/api/error-reports", { bodyLimit: 256 * 1024 }, async (req, reply) => {
   if (req.user) requireCsrf(req);
@@ -198,9 +286,9 @@ app.post("/api/auth/register", async (req, reply) => {
     if (isUniqueUserError(err)) throw accountExistsError();
     throw err;
   }
-  const session = store.createSession(user.id);
-  setSessionCookie(reply, session);
-  return { user: publicUser(user), csrf: session.csrf };
+  const verification = await issueVerification(user, req, req.log);
+  reply.status(202);
+  return { ok: true, needsVerification: true, email: user.email, verification };
 });
 
 app.post("/api/auth/login", async (req, reply) => {
@@ -213,27 +301,130 @@ app.post("/api/auth/login", async (req, reply) => {
     reply.status(401);
     return { error: "Invalid email or password." };
   }
+  if (privateUser.deletion_scheduled_at) {
+    return authError(reply, 403, "ACCOUNT_DELETION_PENDING", "This account is scheduled for deletion.", {
+      email,
+      deletionScheduledAt: privateUser.deletion_scheduled_at
+    });
+  }
+  if (!privateUser.email_verified_at) {
+    return authError(reply, 403, "EMAIL_NOT_VERIFIED", "Verify your email before signing in.", { email });
+  }
   const user = store.getUserById(privateUser.id);
-  const session = store.createSession(user.id);
+  const session = store.createSession(user.id, sessionMeta(req));
   setSessionCookie(reply, session);
   return { user: publicUser(user), csrf: session.csrf };
+});
+
+app.post("/api/auth/verify-email", async (req, reply) => {
+  abuse.check("verifyEmailIp", clientIp(req));
+  const consumed = store.consumeAccountToken("email_verify", req.body?.token);
+  if (!consumed) return authError(reply, 400, "INVALID_TOKEN", "Verification link is invalid or expired.");
+  const user = store.verifyUserEmail(consumed.userId);
+  return { ok: true, user: publicUser(user) };
+});
+
+app.post("/api/auth/resend-verification", async (req) => {
+  const email = String(req.body?.email || "").trim().toLowerCase();
+  abuse.check("resendVerificationIp", clientIp(req));
+  abuse.check("resendVerificationEmail", email || "missing");
+  const user = store.getUserByEmail(email);
+  if (!user || user.email_verified_at || user.deletion_scheduled_at) return { ok: true };
+  const verification = await issueVerification(user, req, req.log);
+  return { ok: true, email, verification };
+});
+
+app.post("/api/auth/forgot-password", async (req) => {
+  const email = String(req.body?.email || "").trim().toLowerCase();
+  abuse.check("forgotPasswordIp", clientIp(req));
+  abuse.check("forgotPasswordEmail", email || "missing");
+  const user = store.getUserByEmail(email);
+  if (!user || user.deletion_scheduled_at) return { ok: true };
+  const reset = await issuePasswordReset(user, req, req.log);
+  return { ok: true, reset };
+});
+
+app.post("/api/auth/reset-password", async (req, reply) => {
+  abuse.check("resetPasswordIp", clientIp(req));
+  const password = String(req.body?.password || "");
+  if (password.length < 8) {
+    reply.status(400);
+    return { error: "Password must be at least 8 characters." };
+  }
+  const consumed = store.consumeAccountToken("password_reset", req.body?.token);
+  if (!consumed) return authError(reply, 400, "INVALID_TOKEN", "Password reset link is invalid or expired.");
+  const hash = await argon2.hash(password, { type: argon2.argon2id });
+  store.setPasswordHash(consumed.userId, hash);
+  store.verifyUserEmail(consumed.userId);
+  store.deleteUserSessions(consumed.userId);
+  return { ok: true };
 });
 
 app.post("/api/auth/logout", async (req, reply) => {
   if (req.user) requireCsrf(req);
   if (req.cookies.openpt_session) store.deleteSession(req.cookies.openpt_session);
-  reply.clearCookie("openpt_session", { path: "/" });
+  clearSessionCookie(reply);
   return { ok: true };
 });
 
 app.get("/api/me", async (req) => {
   if (!req.user) return { user: null };
-  return { user: publicUser(req.user), csrf: req.user.csrf, usageBytes: store.userUsage(req.user.id), limits: LIMITS };
+  return { user: publicUser(req.user), csrf: req.user.csrf, usageBytes: store.userUsage(req.user.id), limits: store.limits };
+});
+
+app.get("/api/sessions", async (req) => {
+  const user = requireUser(req);
+  return { sessions: store.listSessions(user.id, user.sessionId) };
+});
+
+app.delete("/api/sessions/:publicId", async (req, reply) => {
+  const user = requireUser(req);
+  requireCsrf(req);
+  const currentRevoked = req.params.publicId === user.sessionPublicId;
+  store.deleteSessionByPublicId(user.id, req.params.publicId);
+  if (currentRevoked) clearSessionCookie(reply);
+  return { ok: true, currentRevoked };
+});
+
+app.delete("/api/sessions", async (req) => {
+  const user = requireUser(req);
+  requireCsrf(req);
+  const revoked = store.deleteOtherSessions(user.id, user.sessionId);
+  return { ok: true, revoked };
+});
+
+app.delete("/api/account", async (req, reply) => {
+  const user = requireUser(req);
+  requireCsrf(req);
+  abuse.check("accountDeleteUser", user.id);
+  const privateUser = store.getUserByEmail(user.email);
+  const password = String(req.body?.password || "");
+  if (!password || !privateUser || !(await argon2.verify(privateUser.password_hash, password))) {
+    return authError(reply, 401, "INVALID_PASSWORD", "Password confirmation failed.");
+  }
+  const deletion = store.scheduleAccountDeletion(user.id);
+  clearSessionCookie(reply);
+  return { ok: true, ...deletion };
+});
+
+app.post("/api/account/deletion/cancel", async (req, reply) => {
+  const email = String(req.body?.email || "").trim().toLowerCase();
+  const password = String(req.body?.password || "");
+  abuse.check("accountDeletionCancelIp", clientIp(req));
+  abuse.check("accountDeletionCancelEmail", email || "missing");
+  const privateUser = store.getUserByEmail(email);
+  if (!privateUser || !privateUser.deletion_scheduled_at || !(await argon2.verify(privateUser.password_hash, password))) {
+    return authError(reply, 401, "INVALID_EMAIL_OR_PASSWORD", "Invalid email or password.");
+  }
+  const user = store.cancelAccountDeletion(privateUser.id);
+  const session = store.createSession(user.id, sessionMeta(req));
+  setSessionCookie(reply, session);
+  return { ok: true, user: publicUser(user), csrf: session.csrf };
 });
 
 app.get("/api/projects", async (req) => {
   const user = requireUser(req);
-  return { projects: store.listProjects(user.id), usageBytes: store.userUsage(user.id), limits: LIMITS };
+  return { projects: store.listProjects(user.id), usageBytes: store.userUsage(user.id), limits: store.limits };
 });
 
 app.post("/api/projects", async (req) => {
@@ -260,6 +451,42 @@ app.get("/api/projects/:id", async (req) => {
     document,
     lease: lease ? { clientId: lease.client_id, clientLabel: lease.client_label, expiresAt: lease.expires_at } : null
   };
+});
+
+app.post("/api/projects/:id", async (req) => {
+  const user = requireUser(req);
+  requireCsrf(req);
+  const project = store.getProject(req.params.id, user.id);
+  if (!project) {
+    const err = new Error("Project not found.");
+    err.statusCode = 404;
+    throw err;
+  }
+  const renamed = store.renameProject(project, req.body?.title);
+  return { project: projectSummary(renamed) };
+});
+
+app.post("/api/projects/:id/duplicate", async (req) => {
+  const user = requireUser(req);
+  requireCsrf(req);
+  abuse.check("projectCreateUser", user.id);
+  const project = store.getProject(req.params.id, user.id);
+  if (!project) {
+    const err = new Error("Project not found.");
+    err.statusCode = 404;
+    throw err;
+  }
+  const duplicate = await store.duplicateProject(user.id, project, req.body?.title);
+  const document = await store.loadProjectDocument(duplicate);
+  return { project: projectSummary(duplicate), document };
+});
+
+app.delete("/api/projects/:id", async (req) => {
+  const user = requireUser(req);
+  requireCsrf(req);
+  const project = store.getProject(req.params.id, user.id);
+  if (!project) return { ok: true };
+  return store.deleteProject(project);
 });
 
 app.post("/api/projects/:id/lease", async (req) => {
@@ -394,6 +621,26 @@ if (!backendOnly) {
     wildcard: false
   });
 
+  app.get("/jeopardy-theme.m4a", async (req, reply) => {
+    return reply.sendFile("01 Jeopardy (Main Theme).m4a");
+  });
+
+  app.get("/jeopardy-sfx/:file", async (req, reply) => {
+    const allowed = new Set([
+      "answer-reveal.mp3",
+      "correct.mp3",
+      "final-sting.mp3",
+      "incorrect.mp3",
+      "score-change.mp3",
+      "tile-open.mp3",
+      "timer-warning.mp3",
+    ]);
+    if (!allowed.has(req.params.file)) {
+      return reply.status(404).send({ error: "Sound effect not found." });
+    }
+    return reply.sendFile(`public/audio/jeopardy-sfx/${req.params.file}`);
+  });
+
   app.get("/lab", async (req, reply) => {
     return reply.redirect("/lab/", 308);
   });
@@ -403,7 +650,23 @@ if (!backendOnly) {
   });
 
   app.get("/quiz", async (req, reply) => {
-    return reply.redirect("/quiz/", 308);
+    return reply.redirect("/quiz/?view=library", 308);
+  });
+
+  app.get("/jeopardy", async (req, reply) => {
+    return reply.sendFile("jeopardy.html");
+  });
+
+  app.get("/jeopardy/", async (req, reply) => {
+    return reply.sendFile("jeopardy.html");
+  });
+
+  app.get("/wordle", async (req, reply) => {
+    return reply.sendFile("wordle.html");
+  });
+
+  app.get("/wordle/", async (req, reply) => {
+    return reply.sendFile("wordle.html");
   });
 
   app.get("/share/:token", async (req, reply) => {

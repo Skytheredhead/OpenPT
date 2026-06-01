@@ -1,0 +1,95 @@
+import js from "@eslint/js";
+import globals from "globals";
+
+const browserGlobals = {
+  ...globals.browser,
+  Babel: "readonly",
+  DeviceCatalog: "writable",
+  Glyph: "writable",
+  Icon: "writable",
+  Inspector: "writable",
+  OpenPTFormat: "writable",
+  PacketTracerImporter: "writable",
+  Palette: "writable",
+  React: "readonly",
+  ReactDOM: "readonly",
+  Topology: "writable",
+  CLI: "writable",
+  TweakButton: "writable",
+  TweakColor: "writable",
+  TweakNumber: "writable",
+  TweakRadio: "writable",
+  TweakSection: "writable",
+  TweakSelect: "writable",
+  TweakSlider: "writable",
+  TweakText: "writable",
+  TweakToggle: "writable",
+  TweaksPanel: "writable",
+  useTweaks: "writable",
+  OPT_Engine: "writable",
+  OPT_ProtocolRuntime: "writable",
+  OPT_Services: "writable",
+  QuizEngine: "writable",
+  HomePage: "writable",
+  PracticeRunner: "writable",
+  QuizRunner: "writable",
+  ResultsPage: "writable",
+};
+
+export default [
+  {
+    ignores: [
+      "node_modules/**",
+      ".git/**",
+      ".claude/**",
+      ".openpt-data/**",
+      "coverage/**",
+      "dist/**",
+      "build/**",
+      "tmp/**",
+      "test-results/**",
+      "uploads/**",
+      "quiz/uploads/**",
+      "screenshots/**",
+      "vendor/**",
+      "spacetime/**",
+      "*.zip",
+    ],
+  },
+  js.configs.recommended,
+  {
+    files: ["**/*.{js,jsx}"],
+    languageOptions: {
+      ecmaVersion: "latest",
+      sourceType: "script",
+      globals: browserGlobals,
+      parserOptions: {
+        ecmaFeatures: { jsx: true },
+      },
+    },
+    rules: {
+      "no-empty": ["error", { allowEmptyCatch: true }],
+      "no-control-regex": "off",
+      "no-constant-binary-expression": "off",
+      "no-redeclare": "off",
+      "no-unused-vars": "off",
+      "no-useless-assignment": "off",
+      "no-useless-escape": "off",
+    },
+  },
+  {
+    files: ["server/**/*.mjs", "scripts/**/*.mjs", "test/**/*.mjs", "playwright.config.mjs", "eslint.config.js"],
+    languageOptions: {
+      ecmaVersion: "latest",
+      sourceType: "module",
+      globals: {
+        ...globals.node,
+        ...globals.es2024,
+      },
+    },
+    rules: {
+      "no-empty": ["error", { allowEmptyCatch: true }],
+      "no-unused-vars": ["warn", { argsIgnorePattern: "^_", caughtErrorsIgnorePattern: "^(err|_)" }],
+    },
+  },
+];

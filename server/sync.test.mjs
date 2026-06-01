@@ -97,6 +97,63 @@ test("share links load the latest saved project document", async () => {
   }
 });
 
+test("account tokens are hashed, single-use, and expire", async () => {
+  const { dir, store } = await makeStore();
+  try {
+    const user = store.createUser("token@example.com", "hash");
+    const issued = store.createAccountToken(user.id, "email_verify", 60_000);
+    const raw = store.db.prepare("SELECT token_hash FROM account_tokens WHERE user_id=?").get(user.id);
+    assert.notEqual(raw.token_hash, issued.token);
+    assert.equal(store.consumeAccountToken("email_verify", issued.token).userId, user.id);
+    assert.equal(store.consumeAccountToken("email_verify", issued.token), null);
+
+    const expired = store.createAccountToken(user.id, "password_reset", 1);
+    await new Promise((resolve) => setTimeout(resolve, 5));
+    assert.equal(store.consumeAccountToken("password_reset", expired.token), null);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test("scheduled account purge removes user rows and unreferenced objects", async () => {
+  const { dir, store } = await makeStore();
+  try {
+    const user = store.createUser("purge@example.com", "hash", { verified: true });
+    const project = await store.createProject(user.id, "Purge Lab", { schemaVersion: 1, title: "Purge Lab", devices: {}, links: [], uiState: {} });
+    const objectKey = project.head_object_key;
+    store.db.prepare("UPDATE users SET deletion_requested_at=?, deletion_scheduled_at=? WHERE id=?")
+      .run(new Date(Date.now() - 2_000).toISOString(), new Date(Date.now() - 1_000).toISOString(), user.id);
+    const result = await store.purgeScheduledAccounts();
+    assert.equal(result.purged, 1);
+    assert.equal(store.getUserByEmail("purge@example.com"), undefined);
+    assert.equal(store.objectKeyStillReferenced(objectKey), false);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test("renames, duplicates, and soft-deletes projects", async () => {
+  const { dir, store } = await makeStore();
+  try {
+    const user = store.createUser("browser@example.com", "hash");
+    const project = await store.createProject(user.id, "Lab", { schemaVersion: 1, title: "Lab", devices: { d1: { hostname: "R1" } }, links: [], uiState: {} });
+    const renamed = store.renameProject(project, "Renamed Lab");
+    assert.equal(renamed.title, "Renamed Lab");
+
+    const copy = await store.duplicateProject(user.id, renamed, "Renamed Lab copy");
+    const copyDoc = await store.loadProjectDocument(copy);
+    assert.equal(copy.title, "Renamed Lab copy");
+    assert.equal(copyDoc.title, "Renamed Lab copy");
+    assert.equal(copyDoc.devices.d1.hostname, "R1");
+
+    store.deleteProject(renamed);
+    assert.equal(store.getProject(renamed.id, user.id), undefined);
+    assert.equal(store.listProjects(user.id).some((item) => item.id === copy.id), true);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
 test("blocks a second client unless takeover is requested", async () => {
   const { dir, store } = await makeStore();
   try {

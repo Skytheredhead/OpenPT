@@ -1,0 +1,107 @@
+{
+  "devices": {
+    "r1": {
+      "id": "r1",
+      "kind": "router",
+      "name": "R1",
+      "hostname": "R1",
+      "platform": "isr4321",
+      "x": 260,
+      "y": 180,
+      "startupConfig": "hostname R1\ninterface GigabitEthernet0/0/0\n ip address 10.0.0.1 255.255.255.252\nend",
+      "domainName": "lab.example",
+      "services": { "passwordEncryption": true, "ssh": true, "cdp": true, "lldp": false },
+      "ssh": { "version": 2 },
+      "users": { "admin": { "secret": "class123" } },
+      "secrets": { "enable": "enable123" },
+      "interfaces": {
+        "GigabitEthernet0/0/0": { "ip": "10.0.0.1", "mask": "255.255.255.252", "up": true, "admUp": true, "desc": "WAN to R2", "natRole": "outside" },
+        "GigabitEthernet0/0/1": { "ip": "192.168.10.1", "mask": "255.255.255.0", "up": true, "admUp": true, "desc": "LAN trunk", "natRole": "inside" }
+      },
+      "routes": [
+        { "dst": "0.0.0.0", "mask": "0.0.0.0", "via": "10.0.0.2", "type": "S" }
+      ],
+      "dhcp": {
+        "excluded": [{ "start": "192.168.10.1", "end": "192.168.10.20" }],
+        "pools": {
+          "USERS": {
+            "network": "192.168.10.0",
+            "mask": "255.255.255.0",
+            "defaultRouter": "192.168.10.1",
+            "dnsServer": "192.168.10.10",
+            "domainName": "lab.example"
+          }
+        },
+        "bindings": []
+      },
+      "acls": {
+        "WEB": {
+          "type": "extended",
+          "entries": [
+            { "action": "permit", "proto": "tcp", "src": "192.168.10.0 0.0.0.255", "dst": "any eq 80" }
+          ]
+        }
+      },
+      "nat": {
+        "pools": {},
+        "rules": [
+          { "type": "pat-interface", "acl": "WEB", "iface": "GigabitEthernet0/0/0", "config": "ip nat inside source list WEB interface GigabitEthernet0/0/0 overload" }
+        ],
+        "translations": []
+      },
+      "lines": {
+        "console": { "password": "console123", "login": true, "loggingSync": true },
+        "vty": { "password": "vty123", "login": true, "transport": ["ssh"] }
+      },
+      "files": {
+        "flash:packages.conf": "IOS XE package manifest",
+        "flash:site-notes.txt": "OpenPT fixture file"
+      }
+    },
+    "sw1": {
+      "id": "sw1",
+      "kind": "l2switch",
+      "name": "SW1",
+      "hostname": "SW1",
+      "platform": "2960-24tt",
+      "x": 520,
+      "y": 310,
+      "startupConfig": "hostname SW1\nvlan 10\n name USERS\nend",
+      "vlans": { "1": "default", "10": "USERS", "20": "VOICE" },
+      "interfaces": {
+        "FastEthernet0/1": { "up": true, "admUp": true, "mode": "trunk", "nativeVlan": 1, "allowedVlans": "10,20", "desc": "uplink to R1" },
+        "FastEthernet0/2": { "up": true, "admUp": true, "mode": "access", "vlan": 10, "voiceVlan": 20, "desc": "PC1 access" }
+      },
+      "dhcpSnooping": { "enabled": true, "vlans": [10], "trusted": ["FastEthernet0/1"] },
+      "dai": { "vlans": [10], "trusted": ["FastEthernet0/1"] },
+      "files": {
+        "flash:packages.conf": "IOS XE package manifest",
+        "flash:vlan.dat": "fixture vlan database"
+      },
+      "packetTracer": {
+        "name": "Switch0",
+        "model": "2960",
+        "saveRefId": "sw1-save"
+      }
+    },
+    "pc1": {
+      "id": "pc1",
+      "kind": "pc",
+      "name": "PC1",
+      "hostname": "PC1",
+      "platform": "genericPc",
+      "x": 700,
+      "y": 480,
+      "interfaces": {
+        "eth0": { "ip": "192.168.10.50", "mask": "255.255.255.0", "gw": "192.168.10.1", "up": true, "admUp": true }
+      },
+      "files": {
+        "desktop:notes.txt": "Round-trip fixture endpoint"
+      }
+    }
+  },
+  "links": [
+    { "id": "l-r1-sw1", "a": "r1", "ai": "GigabitEthernet0/0/1", "b": "sw1", "bi": "FastEthernet0/1", "type": "copper", "up": true, "packetTracer": { "type": "Copper Straight-Through" } },
+    { "id": "l-sw1-pc1", "a": "sw1", "ai": "FastEthernet0/2", "b": "pc1", "bi": "eth0", "type": "copper", "up": true }
+  ]
+}

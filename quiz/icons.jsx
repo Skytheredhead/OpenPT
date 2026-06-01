@@ -55,7 +55,7 @@ const Icon = ({ name, size = 16, strokeWidth = 1.6, className = '' }) => {
     case 'help':
       return <svg {...common}><circle cx="12" cy="12" r="9" /><path d="M9.5 9a2.5 2.5 0 1 1 4 2c-1.5 1-2 2-2 3" /><circle cx="11.5" cy="17" r="0.6" fill="currentColor" stroke="none" /></svg>;
     case 'quiz':
-      return <svg {...common}><rect x="3" y="4" width="18" height="16" rx="2.5" /><path d="M9.2 10.2a2.4 2.4 0 1 1 4 1.8c-1.2.7-1.8 1.3-1.8 2.4" /><circle cx="11.4" cy="17" r="0.7" fill="currentColor" stroke="none" /></svg>;
+      return <svg {...common}><path d="M8 4h8" /><path d="M9 3h6v3H9z" /><rect x="5" y="5" width="14" height="16" rx="2" /><path d="M8.5 11l1.5 1.5 3-3" /><path d="M14.5 12h1.8" /><path d="M8.5 16l1.5 1.5 3-3" /><path d="M14.5 17h1.8" /></svg>;
     case 'chev-right':
       return <svg {...common}><polyline points="9 6 15 12 9 18" /></svg>;
     case 'chev-down':

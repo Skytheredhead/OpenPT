@@ -1,0 +1,103 @@
+{
+  "format": "openpt-otp",
+  "otpVersion": 1,
+  "title": "Fixture Rich Topology",
+  "createdAt": "2026-05-27T18:00:00.000Z",
+  "generator": {
+    "app": "OpenPT",
+    "version": "fixture"
+  },
+  "summary": {
+    "devices": 3,
+    "links": 2,
+    "assignment": "Fixture Packet Tracer Activity"
+  },
+  "project": {
+    "schemaVersion": 1,
+    "title": "Fixture Rich Topology",
+    "devices": {
+      "r1": {
+        "id": "r1",
+        "kind": "router",
+        "name": "R1",
+        "hostname": "R1",
+        "platform": "isr4321",
+        "x": 260,
+        "y": 180,
+        "interfaces": {
+          "GigabitEthernet0/0/0": { "ip": "10.0.0.1", "mask": "255.255.255.252", "up": true, "admUp": true, "desc": "WAN to R2", "natRole": "outside" },
+          "GigabitEthernet0/0/1": { "ip": "192.168.10.1", "mask": "255.255.255.0", "up": true, "admUp": true, "desc": "LAN trunk", "natRole": "inside" }
+        }
+      },
+      "sw1": {
+        "id": "sw1",
+        "kind": "l2switch",
+        "name": "SW1",
+        "hostname": "SW1",
+        "platform": "2960-24tt",
+        "x": 520,
+        "y": 310,
+        "interfaces": {
+          "FastEthernet0/1": { "up": true, "admUp": true, "mode": "trunk", "nativeVlan": 1, "allowedVlans": "10,20", "desc": "uplink to R1" },
+          "FastEthernet0/2": { "up": true, "admUp": true, "mode": "access", "vlan": 10, "voiceVlan": 20, "desc": "PC1 access" }
+        },
+        "packetTracer": {
+          "name": "Switch0",
+          "model": "2960",
+          "saveRefId": "sw1-save"
+        }
+      },
+      "pc1": {
+        "id": "pc1",
+        "kind": "pc",
+        "name": "PC1",
+        "hostname": "PC1",
+        "platform": "genericPc",
+        "x": 700,
+        "y": 480,
+        "interfaces": {
+          "eth0": { "ip": "192.168.10.50", "mask": "255.255.255.0", "gw": "192.168.10.1", "up": true, "admUp": true }
+        }
+      }
+    },
+    "links": [
+      { "id": "l-r1-sw1", "a": "r1", "ai": "GigabitEthernet0/0/1", "b": "sw1", "bi": "FastEthernet0/1", "type": "copper", "up": true, "packetTracer": { "type": "Copper Straight-Through" } },
+      { "id": "l-sw1-pc1", "a": "sw1", "ai": "FastEthernet0/2", "b": "pc1", "bi": "eth0", "type": "copper", "up": true }
+    ],
+    "uiState": {
+      "selectedIds": ["r1"],
+      "openConsoles": ["r1"],
+      "activeBottom": "events",
+      "ptActivity": null,
+      "ptSidebarOpen": true
+    },
+    "metadata": {
+      "app": "OpenPT",
+      "format": "openpt-otp",
+      "otpVersion": 1,
+      "exportedAt": "2026-05-27T18:00:00.000Z"
+    }
+  },
+  "assignment": {
+    "format": "packet-tracer-activity",
+    "title": "Fixture Packet Tracer Activity",
+    "sourceName": "fixture-lab.pka",
+    "devices": [],
+    "links": [],
+    "assessmentItems": []
+  },
+  "generated": {
+    "deviceConfigs": {}
+  },
+  "session": {
+    "events": [{ "t": 1, "kind": "fixture", "msg": "created" }],
+    "packets": [],
+    "cliHistory": [{ "deviceId": "r1", "command": "show running-config" }]
+  },
+  "provenance": {
+    "cloudProjectId": null,
+    "cloudVersion": 0,
+    "packetTracerRawFile": null,
+    "packetTracerDecodedXml": false
+  }
+}

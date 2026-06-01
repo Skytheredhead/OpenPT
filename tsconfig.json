@@ -1,0 +1,25 @@
+{
+  "compilerOptions": {
+    "allowJs": true,
+    "checkJs": false,
+    "noEmit": true,
+    "target": "ES2022",
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
+    "skipLibCheck": true,
+    "strict": false,
+    "jsx": "preserve",
+    "types": ["node"]
+  },
+  "include": [
+    "*.js",
+    "quiz/*.js",
+    "server/**/*.mjs",
+    "server/**/*.test.mjs",
+    "scripts/**/*.mjs",
+    "test/**/*.mjs",
+    "playwright.config.mjs",
+    "eslint.config.js"
+  ],
+  "exclude": ["node_modules", ".openpt-data", "tmp", "uploads", "quiz/uploads", "screenshots", "vendor", "spacetime"]
+}

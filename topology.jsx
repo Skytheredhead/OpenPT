@@ -387,6 +387,16 @@ function Topology(props) {
     });
     return positions;
   }, [devices, links]);
+  const wirelessAssociations = React.useMemo(() => {
+    const rows = [];
+    Object.values(devices || {}).forEach((ap) => {
+      (ap.wireless?.associations || []).forEach((assoc) => {
+        const client = devices[assoc.clientId];
+        if (client) rows.push({ ap, client, assoc });
+      });
+    });
+    return rows;
+  }, [devices]);
 
   const fit = () => {
     const wrap = wrapRef.current;
@@ -564,6 +574,29 @@ function Topology(props) {
                 </g>
               );
             })}
+            {wirelessAssociations.map(({ ap, client, assoc }) => {
+              const dx = client.x - ap.x, dy = client.y - ap.y;
+              const len = Math.hypot(dx, dy) || 1;
+              const r = 26;
+              const sx = ap.x + (dx / len) * r;
+              const sy = ap.y + (dy / len) * r;
+              const ex = client.x - (dx / len) * r;
+              const ey = client.y - (dy / len) * r;
+              return (
+                <line
+                  key={`wl-${ap.id}-${client.id}-${assoc.clientIface}`}
+                  x1={sx}
+                  y1={sy}
+                  x2={ex}
+                  y2={ey}
+                  stroke="var(--accent)"
+                  strokeWidth={1.2}
+                  strokeDasharray="3,5"
+                  opacity={0.52}
+                  strokeLinecap="round"
+                />
+              );
+            })}
           </g>
         </svg>
 
@@ -627,7 +660,7 @@ function Topology(props) {
           return (
             <div
               key={d.id}
-              className={`node ${selSet.has(d.id) ? "selected" : ""}`}
+              className={`node ${d.logicalOnly || d.packetTracer?.logicalOnly ? "logical-object" : ""} ${selSet.has(d.id) ? "selected" : ""}`}
               style={{ left: d.x, top: d.y }}
               onMouseDown={(e) => onNodeMouseDown(e, d)}
               onDoubleClick={() => onSelect && onSelect(d.id)}

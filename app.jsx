@@ -17,8 +17,18 @@ const TweakToggle = window.TweakToggle;
 const TweakColor = window.TweakColor;
 const TweakButton = window.TweakButton;
 const QUIZ_LIBRARY_URL = "/quiz/?view=library";
+const JEOPARDY_URL = "/jeopardy";
+const WORDLE_URL = "/wordle";
+const INTERNAL_APP_ROUTES = new Set(["/", JEOPARDY_URL, WORDLE_URL]);
 const ifaceName = (name) => OPT_Engine.shortIfaceName ? OPT_Engine.shortIfaceName(name) : name;
 const ifaceText = (text) => OPT_Engine.shortIfaceNamesInText ? OPT_Engine.shortIfaceNamesInText(text) : text;
+
+function appRoutePath(pathname = "/") {
+  if (/^\/jeopardy\/?$/.test(pathname)) return JEOPARDY_URL;
+  if (/^\/wordle\/?$/.test(pathname)) return WORDLE_URL;
+  if (pathname === "" || pathname === "/") return "/";
+  return pathname;
+}
 
 function deviceLabel(device, fallback = "device") {
   return device?.hostname || device?.name || device?.model || device?.id || fallback;
@@ -44,6 +54,21 @@ function sameJson(a, b) {
 
 function plural(count, one, many = `${one}s`) {
   return `${count} ${count === 1 ? one : many}`;
+}
+
+function formatSavedTime(value = Date.now()) {
+  const date = new Date(value);
+  const safeDate = Number.isNaN(date.getTime()) ? new Date() : date;
+  return safeDate.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+}
+
+function savedAtMessage(value = Date.now()) {
+  return `Saved at ${formatSavedTime(value)}`;
+}
+
+function projectSavedAt(project, fallback = Date.now()) {
+  const parsed = Date.parse(project?.updatedAt || project?.updated_at || "");
+  return Number.isNaN(parsed) ? fallback : parsed;
 }
 
 function describeTopologyChange(before = {}, after = {}) {
@@ -265,6 +290,7 @@ function improvePacketTracerImportLayout(devices, links) {
 }
 
 function buildTopologyFromPacketTracer(activity) {
+  return window.OpenPTFormat.buildTopologyFromPacketTracer(activity, OPT_Engine);
   const deviceMap = {};
   const devices = {};
   for (const src of activity?.devices || []) {
@@ -275,6 +301,10 @@ function buildTopologyFromPacketTracer(activity) {
       packetTracer: {
         model: src.model || null,
         power: src.power || null,
+        name: src.name || null,
+        rawName: src.rawName || null,
+        saveRefId: src.saveRefId || null,
+        memAddr: src.memAddr || null,
       },
     });
     dev.model = src.model && !/hidden/i.test(src.model) ? src.model : dev.model;
@@ -353,6 +383,7 @@ const SYNC_AUTOSAVE_CHANGES = 20;
 const SYNC_AUTOSAVE_MS = 60_000;
 const SYNC_MIN_SAVE_MS = 10_000;
 const CLI_REVEAL_MIN_HEIGHT = 360;
+const LOCAL_PROJECTS_KEY = "openpt:local-projects:v1";
 
 const SERVER_CONFIG_SECTIONS = [
   ["http", "HTTP"],
@@ -442,12 +473,24 @@ function isEndpointAppsDevice(device) {
   return device?.kind === "pc" || device?.kind === "mac" || device?.kind === "laptop";
 }
 
+function isDesktopAppsDevice(device) {
+  return isEndpointAppsDevice(device) || device?.kind === "server";
+}
+
 function endpointAppByKey(key) {
   return ENDPOINT_DESKTOP_APPS.find((app) => app.key === key) || null;
 }
 
+function serverAppByKey(key) {
+  return SERVER_DESKTOP_APPS.find((app) => app.key === key) || null;
+}
+
 function endpointAppTabId(wid, deviceId, appKey) {
   return `app:${wid}:${deviceId}:${appKey}`;
+}
+
+function serverAppTabId(wid, deviceId, appKey) {
+  return `server-app:${wid}:${deviceId}:${appKey}`;
 }
 
 function defaultServerConfig(device = {}) {
@@ -474,7 +517,15 @@ function defaultServerConfig(device = {}) {
         wlcAddress: pool.wlcAddress || "0.0.0.0",
       })),
     },
-    dhcpv6: { service: services.dhcpv6 ?? false, pools: [], prefixes: [], delegations: [], localPools: [] },
+    dhcpv6: {
+      service: services.dhcpv6 ?? false,
+      selectedPool: Object.keys(device.dhcpv6?.pools || {})[0] || "IPv6Pool",
+      pools: Object.entries(device.dhcpv6?.pools || {}).map(([name, pool]) => ({ poolName: name, ...pool })),
+      prefixes: [],
+      delegations: [],
+      localPools: [],
+      bindings: device.dhcpv6?.bindings || [],
+    },
     tftp: { service: services.tftp ?? true, files: SERVER_FILE_LIBRARY },
     dns: { service: services.dns ?? true, records: [] },
     syslog: { service: services.syslog ?? true, logs: [] },
@@ -519,14 +570,7 @@ function cloneState(value) {
 }
 
 function projectDocFromState({ title, devices, links, uiState, metadata = {} }) {
-  return {
-    schemaVersion: 1,
-    title: title || "Untitled OpenPT project",
-    devices: OPT_Engine.normalizeTopology(devices || {}, links || []).devices,
-    links: OPT_Engine.normalizeTopology(devices || {}, links || []).links,
-    uiState: uiState || {},
-    metadata: { app: "OpenPT", ...metadata },
-  };
+  return window.OpenPTFormat.projectDocFromState({ title, devices, links, uiState, metadata }, OPT_Engine);
 }
 
 function terminalScrollPayload(scrolls) {
@@ -542,6 +586,106 @@ function cloneJson(value) {
   return JSON.parse(JSON.stringify(value));
 }
 
+function packetEventTime() {
+  return new Date().toLocaleTimeString("en-GB", { hour12: false }).slice(3);
+}
+
+function packetDeviceName(devices, id) {
+  const d = devices?.[id];
+  return d?.hostname || d?.name || id || "unknown";
+}
+
+function packetPrimaryIp(device) {
+  return Object.values(device?.interfaces || {}).find((ifc) => ifc.ip)?.ip || "";
+}
+
+function packetEventStatus(ok, fallback = "ok") {
+  if (ok === false) return "drop";
+  if (ok === true) return "ok";
+  return fallback;
+}
+
+function packetTraceFromPlan(plan, devices, srcId, target, options = {}) {
+  const src = devices?.[srcId] || plan?.devices?.[srcId];
+  const protocol = options.protocol || (plan?.family === "ipv6" ? "icmpv6" : "icmp");
+  const events = plan?.events || [];
+  const firstPacket = events.find((ev) => ev.packet)?.packet || plan?.hops?.find((h) => h.meta)?.meta || {};
+  const steps = events.length
+    ? events.map((ev, index) => ({
+      index,
+      phase: ev.kind || ev.proto || "event",
+      status: ev.kind === "drop" || ev.decision === "deny" ? "drop" : ev.decision || "ok",
+      deviceId: ev.srcDevice || ev.dstDevice,
+      device: packetDeviceName(devices, ev.srcDevice || ev.dstDevice),
+      iface: ev.egress || ev.ingress || "",
+      note: ifaceText(ev.note || ev.kind || ""),
+      metadata: {
+        vlan: ev.vlan,
+        decision: ev.decision,
+        packet: ev.packet,
+        frame: ev.frame,
+        aclHit: ev.aclHit,
+      },
+    }))
+    : (plan?.hops || []).map((hop, index) => ({
+      index,
+      phase: hop.action || "hop",
+      status: hop.ok === false ? "drop" : hop.ok === true ? "ok" : "decision",
+      deviceId: hop.devId,
+      device: packetDeviceName(devices, hop.devId),
+      iface: hop.iface || "",
+      note: ifaceText(hop.note || ""),
+      metadata: hop.meta || {},
+    }));
+  const artifacts = plan?.artifacts || {};
+  return {
+    kind: options.kind || (options.trace ? "traceroute" : "icmp"),
+    protocol,
+    sourceDeviceId: srcId,
+    source: packetDeviceName(devices, srcId),
+    target,
+    status: packetEventStatus(plan?.ok),
+    summary: `${packetDeviceName(devices, srcId)} -> ${target}: ${plan?.ok ? "delivered" : (plan?.error || "failed")}`,
+    frame: {
+      l2: { ingress: steps[0]?.iface || "", vlan: firstPacket.vlan || "" },
+      l3: { src: firstPacket.srcIp || packetPrimaryIp(src), dst: firstPacket.dstIp || target, ttl: firstPacket.ttl || "" },
+      l4: { protocol, srcPort: firstPacket.srcPort || "", dstPort: firstPacket.dstPort || "" },
+      app: options.app || {},
+    },
+    steps,
+    artifacts: {
+      aclHits: artifacts.aclHits || [],
+      natTranslations: artifacts.natTranslations || [],
+      dhcpLease: artifacts.dhcpLease || null,
+      dnsLookup: artifacts.dnsLookup || null,
+      drop: artifacts.drop || null,
+    },
+  };
+}
+
+function packetTraceFromRuntimeResult(result, devices, srcId, target, options = {}) {
+  return packetTraceFromPlan(window.OPT_ProtocolRuntime?.toLegacyPlan?.(result) || result, result?.devices || devices, srcId, target, options);
+}
+
+function completePacketTrace(trace, devices) {
+  const sourceId = trace?.sourceDeviceId || trace?.srcDevice || "";
+  const protocol = String(trace?.protocol || trace?.kind || "ip").toLowerCase();
+  return {
+    id: trace?.id || OPT_Engine.uid("pe"),
+    time: trace?.time || packetEventTime(),
+    kind: trace?.kind || protocol,
+    protocol,
+    sourceDeviceId: sourceId,
+    source: trace?.source || packetDeviceName(devices, sourceId),
+    target: trace?.target || trace?.destination || "",
+    status: trace?.status || "ok",
+    summary: ifaceText(trace?.summary || trace?.note || `${protocol.toUpperCase()} event`),
+    frame: trace?.frame || { l2: {}, l3: {}, l4: {}, app: {} },
+    steps: trace?.steps || [],
+    artifacts: trace?.artifacts || { aclHits: [], natTranslations: [], dhcpLease: null, dnsLookup: null, drop: null },
+  };
+}
+
 function stripProjectExtension(name) {
   return (name || "Untitled OpenPT project").replace(/\.(json|opt|otp|pka|pkt)$/i, "");
 }
@@ -554,82 +698,67 @@ function safeExportName(name, ext) {
   return `${base}.${ext}`;
 }
 
-function buildOtpPackage({ title, devices, links, uiState, ptActivity, events, packets, cliHistory, cloudProjectId, cloudVersion }) {
-  const normalized = OPT_Engine.normalizeTopology(devices || {}, links || []);
-  const assignment = cloneJson(ptActivity || null);
-  const project = projectDocFromState({
+function buildOtpPackage({ title, devices, links, uiState, ptActivity, events, packets, packetEvents, cliHistory, cloudProjectId, cloudVersion }) {
+  return window.OpenPTFormat.buildOtpPackage({
     title,
-    devices: normalized.devices,
-    links: normalized.links,
-    uiState: { ...(uiState || {}), ptActivity: null },
-    metadata: {
-      format: "openpt-otp",
-      otpVersion: 1,
-      exportedAt: new Date().toISOString(),
-    },
-  });
-  const deviceConfigs = Object.fromEntries(Object.entries(normalized.devices || {}).map(([id, device]) => [id, {
-    hostname: device.hostname || device.name || id,
-    kind: device.kind,
-    platform: device.platform || null,
-    model: device.model || null,
-    osVersion: device.osVersion || null,
-    runningConfig: OPT_Engine.serializeConfig(device),
-    startupConfig: device.startupConfig || "",
-    files: cloneJson(device.files || {}),
-  }]));
-
-  return {
-    format: "openpt-otp",
-    otpVersion: 1,
-    title: project.title,
-    createdAt: project.metadata.exportedAt,
-    generator: {
-      app: "OpenPT",
-      version: OPENPT_VERSION,
-    },
-    summary: {
-      devices: Object.keys(normalized.devices || {}).length,
-      links: (normalized.links || []).length,
-      assignment: assignment ? assignment.title || assignment.sourceName || "Packet Tracer activity" : null,
-    },
-    project,
-    assignment,
-    generated: {
-      deviceConfigs,
-    },
-    session: {
-      events: cloneJson(events || []),
-      packets: cloneJson(packets || []),
-      cliHistory: cloneJson(cliHistory || []),
-    },
-    provenance: {
-      cloudProjectId: cloudProjectId || null,
-      cloudVersion: cloudVersion || 0,
-      packetTracerRawFile: cloneJson(assignment?.rawFile || null),
-      packetTracerDecodedXml: !!assignment?.decoded?.xmlText,
-    },
-  };
+    devices,
+    links,
+    uiState,
+    ptActivity,
+    events,
+    packets,
+    packetEvents,
+    cliHistory,
+    cloudProjectId,
+    cloudVersion,
+    appVersion: OPENPT_VERSION,
+  }, OPT_Engine);
 }
 
 function projectDocumentFromOtpPackage(pkg) {
-  if (!pkg || typeof pkg !== "object") return null;
-  const project = pkg.project || pkg.document || null;
-  if (!project || typeof project !== "object" || !project.devices || !Array.isArray(project.links)) return null;
-  const assignment = pkg.assignment || project.uiState?.ptActivity || null;
-  return {
-    ...project,
-    uiState: {
-      ...(project.uiState || {}),
-      ptActivity: assignment,
-      ptSidebarOpen: project.uiState?.ptSidebarOpen ?? !!assignment,
-    },
-  };
+  return window.OpenPTFormat.projectDocumentFromOtpPackage(pkg);
 }
 
 function mergeProjectIntoTabs(tabs, activeWid, project) {
   const title = project?.title || "Synced project";
   return tabs.map((tab) => tab.id === activeWid ? { ...tab, name: `${title}.opt`, cloudProjectId: project?.id || tab.cloudProjectId } : tab);
+}
+
+function projectByteSize(document) {
+  try { return new Blob([JSON.stringify(document || {})]).size; }
+  catch (e) { return JSON.stringify(document || {}).length; }
+}
+
+function readLocalProjectRecords() {
+  try {
+    const data = JSON.parse(localStorage.getItem(LOCAL_PROJECTS_KEY) || "[]");
+    return Array.isArray(data) ? data.filter((item) => item?.id && item?.document) : [];
+  } catch (e) {
+    return [];
+  }
+}
+
+function writeLocalProjectRecords(records) {
+  try { localStorage.setItem(LOCAL_PROJECTS_KEY, JSON.stringify(records.slice(0, 80))); } catch (e) {}
+}
+
+function localProjectRecord({ id, title, document, source = "local", cloudProjectId = null, cloudVersion = 0, existing = null }) {
+  const devices = Object.keys(document?.devices || {}).length;
+  const links = (document?.links || []).length;
+  const now = new Date().toISOString();
+  return {
+    id,
+    title: stripProjectExtension(title || document?.title || "Untitled OpenPT project"),
+    document: { ...(document || {}), title: stripProjectExtension(title || document?.title || "Untitled OpenPT project") },
+    source,
+    cloudProjectId,
+    cloudVersion: cloudVersion || 0,
+    createdAt: existing?.createdAt || now,
+    updatedAt: now,
+    bytes: projectByteSize(document),
+    devices,
+    links,
+  };
 }
 
 const OPENPT_PRACTICE_LABS = [
@@ -1019,6 +1148,42 @@ function App() {
     try { return localStorage.getItem("openpt:viewMode") || "home"; }
     catch (e) { return "home"; }
   });
+  const [routePath, setRoutePath] = useState(() => appRoutePath(location.pathname));
+  const navigateAppRoute = React.useCallback((to, options = {}) => {
+    const url = new URL(to, location.origin);
+    const nextPath = appRoutePath(url.pathname);
+    const nextUrl = `${nextPath}${url.search}${url.hash}`;
+    const currentUrl = `${location.pathname}${location.search}${location.hash}`;
+    if (nextPath === "/") setViewMode("home");
+    if (currentUrl !== nextUrl) {
+      history[options.replace ? "replaceState" : "pushState"](null, "", nextUrl);
+    }
+    setRoutePath(nextPath);
+  }, []);
+  useEffect(() => {
+    const onPopState = () => {
+      const nextPath = appRoutePath(location.pathname);
+      if (nextPath === "/") setViewMode("home");
+      setRoutePath(nextPath);
+    };
+    window.addEventListener("popstate", onPopState);
+    return () => window.removeEventListener("popstate", onPopState);
+  }, []);
+  useEffect(() => {
+    const onDocumentClick = (event) => {
+      if (event.defaultPrevented || event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+      const anchor = event.target?.closest?.("a[href]");
+      if (!anchor || (anchor.target && anchor.target !== "_self")) return;
+      const url = new URL(anchor.href, location.href);
+      if (url.origin !== location.origin) return;
+      const nextPath = appRoutePath(url.pathname);
+      if (!INTERNAL_APP_ROUTES.has(nextPath)) return;
+      event.preventDefault();
+      navigateAppRoute(`${nextPath}${url.search}${url.hash}`);
+    };
+    document.addEventListener("click", onDocumentClick);
+    return () => document.removeEventListener("click", onDocumentClick);
+  }, [navigateAppRoute]);
   useEffect(() => {
     try { localStorage.setItem("openpt:viewMode", viewMode); } catch (e) {}
   }, [viewMode]);
@@ -1042,6 +1207,7 @@ function App() {
   const [tabs, setTabs] = useState(initial.tabs);
   const [activeWid, setActiveWid] = useState(initial.activeWid);
   const snapshotsRef = useRef(initial.snapshots);
+  const [localProjects, setLocalProjects] = useState(() => readLocalProjectRecords());
   const [dirtyTabs, setDirtyTabs] = useState({});
   const [selectedLinkId, setSelectedLinkId] = useState(null);
   const [eventFilter, setEventFilter] = useState("all");
@@ -1052,6 +1218,7 @@ function App() {
   const [confirmDialog, setConfirmDialog] = useState(null);
   const [lastShareUrl, setLastShareUrl] = useState("");
   const [lastImportReport, setLastImportReport] = useState(null);
+  const [ptSidebarRequestedTab, setPtSidebarRequestedTab] = useState(null);
   const [serverModuleOpen, setServerModuleOpen] = useState(false);
   const [serverModuleTab, setServerModuleTab] = useState("config");
   const [serverConfigSection, setServerConfigSection] = useState("http");
@@ -1269,6 +1436,7 @@ function App() {
     setSelectedLinkId(null);
     setEvents([]);
     setPackets([]);
+    setPacketEvents([]);
     setPtActivity(lab.activity);
     setPtSidebarOpen(true);
     setActiveCenterTab("topology");
@@ -1390,6 +1558,7 @@ function App() {
   const [cliHistory, setCliHistory] = useState([]);
   const [events, setEvents] = useState([]);
   const [packets, setPackets] = useState([]);
+  const [packetEvents, setPacketEvents] = useState([]);
   const [packetsCounter, setPacketsCounter] = useState(0);
   const [linkMode, setLinkMode] = useState(false);
   const [forceLinkType, setForceLinkType] = useState(null);
@@ -1418,7 +1587,8 @@ function App() {
   const [shareToken, setShareToken] = useState(null);
   const [shareMode, setShareMode] = useState(null);
   const [syncStatus, setSyncStatus] = useState({ state: "local", message: "Local only" });
-  const [authOpen, setAuthOpen] = useState(false);
+  const [accountOpen, setAccountOpen] = useState(false);
+  const [accountInitial, setAccountInitial] = useState(null);
   const [projectsOpen, setProjectsOpen] = useState(false);
   const [shareOpen, setShareOpen] = useState(false);
   const [feedbackOpen, setFeedbackOpen] = useState(false);
@@ -1477,6 +1647,34 @@ function App() {
       terminalScrolls: terminalScrollPayload(terminalScrolls),
     },
   }), [currentProjectTitle, devices, links, selectedIds, openConsoles, activeBottom, ptActivity, ptSidebarOpen, topologyViewState, terminalScrolls]);
+
+  const updateLocalProjectRecords = (updater) => {
+    setLocalProjects((records) => {
+      const next = typeof updater === "function" ? updater(records) : updater;
+      const sorted = [...next].sort((a, b) => new Date(b.updatedAt || 0) - new Date(a.updatedAt || 0));
+      writeLocalProjectRecords(sorted);
+      return sorted;
+    });
+  };
+
+  useEffect(() => {
+    if (viewMode === "home") return;
+    const handle = setTimeout(() => {
+      const existing = localProjects.find((item) => item.id === activeWid);
+      const record = localProjectRecord({
+        id: activeWid,
+        title: currentProjectTitle,
+        document: currentProjectDoc,
+        source: tabs.find((tab) => tab.id === activeWid)?.source || "local",
+        cloudProjectId,
+        cloudVersion,
+        existing,
+      });
+      updateLocalProjectRecords((records) => [record, ...records.filter((item) => item.id !== activeWid)]);
+    }, 350);
+    return () => clearTimeout(handle);
+  }, [viewMode, activeWid, currentProjectTitle, currentProjectDoc, cloudProjectId, cloudVersion, tabs]);
+
   latestSaveStateRef.current = {
     activeWid,
     currentProjectDoc,
@@ -1488,6 +1686,15 @@ function App() {
     meaningfulChanges,
   };
   const gradedPtActivity = useMemo(() => gradePacketTracerActivity(ptActivity, devices, links), [ptActivity, devices, links]);
+  const displayedImportReport = useMemo(() => {
+    if (!lastImportReport) return null;
+    const samePacketTracerImport = gradedPtActivity && (
+      (lastImportReport.sourceSha256 && gradedPtActivity.sourceSha256 === lastImportReport.sourceSha256) ||
+      (lastImportReport.sourceName && gradedPtActivity.sourceName === lastImportReport.sourceName)
+    );
+    return samePacketTracerImport ? gradedPtActivity : lastImportReport;
+  }, [lastImportReport, gradedPtActivity]);
+  const validationIssues = useMemo(() => OPT_Engine.validateTopology?.(devices, links) || [], [devices, links]);
 
   const exportOtpPackage = () => {
     const pkg = buildOtpPackage({
@@ -1505,6 +1712,7 @@ function App() {
       ptActivity: gradedPtActivity || ptActivity,
       events,
       packets,
+      packetEvents,
       cliHistory,
       cloudProjectId,
       cloudVersion,
@@ -1563,6 +1771,165 @@ function App() {
     setCloudProjects(data.projects || []);
   };
 
+  const applyLocalProjectRecord = async (record) => {
+    if (!record?.document) return;
+    if ((dirtyTabs[activeWid] || meaningfulChanges > 0) && record.id !== activeWid) {
+      const ok = await requestConfirm({
+        title: "Open local project?",
+        message: "This tab has unsaved changes. Opening a local project will switch away from the current tab.",
+        confirmLabel: "Open project",
+        danger: true,
+      });
+      if (!ok) return;
+    }
+    await releaseCurrentLease();
+    snapshotsRef.current[activeWid] = { devices, links, selectedIds, openConsoles, activeBottom, ptActivity, ptSidebarOpen };
+    const doc = record.document;
+    const norm = OPT_Engine.normalizeTopology(doc.devices || {}, doc.links || []);
+    snapshotsRef.current[record.id] = {
+      devices: norm.devices,
+      links: norm.links,
+      selectedIds: doc.uiState?.selectedIds || [],
+      openConsoles: doc.uiState?.openConsoles || [],
+      activeBottom: (doc.uiState?.activeBottom && doc.uiState.activeBottom !== "pka-report") ? doc.uiState.activeBottom : "events",
+      ptActivity: doc.uiState?.ptActivity || null,
+      ptSidebarOpen: doc.uiState?.ptSidebarOpen ?? !!doc.uiState?.ptActivity,
+    };
+    setTabs((items) => {
+      const nextTab = { id: record.id, name: `${record.title || doc.title || "Untitled OpenPT project"}.opt`, source: record.source || "local", cloudProjectId: record.cloudProjectId || null };
+      return items.some((tab) => tab.id === record.id)
+        ? items.map((tab) => tab.id === record.id ? { ...tab, ...nextTab } : tab)
+        : [...items, nextTab];
+    });
+    setActiveWid(record.id);
+    skipNextSnapshot.current = true;
+    applyProjectDocument(doc);
+    setCloudProjectId(record.cloudProjectId || null);
+    setCloudVersion(record.cloudVersion || 0);
+    setCloudBaseDoc(record.cloudProjectId ? doc : null);
+    setCloudLease(null);
+    setShareToken(null);
+    setShareMode(null);
+    setDirtyTabs((m) => ({ ...m, [record.id]: false }));
+    setMeaningfulChanges(0);
+    setFirstDirtyAt(null);
+    setSyncStatus(record.cloudProjectId ? { state: "readonly", message: "Cloud-backed local copy. Acquire edit lease before saving." } : { state: "local", message: "Local only" });
+    setProjectsOpen(false);
+  };
+
+  const renameLocalProject = (id, title) => {
+    const clean = stripProjectExtension(title || "").trim();
+    if (!clean) return;
+    updateLocalProjectRecords((records) => records.map((item) => {
+      if (item.id !== id) return item;
+      const document = { ...(item.document || {}), title: clean };
+      return localProjectRecord({ ...item, title: clean, document, existing: item });
+    }));
+    setTabs((items) => items.map((tab) => tab.id === id ? { ...tab, name: `${clean}.opt` } : tab));
+  };
+
+  const duplicateLocalProject = (record) => {
+    const source = record?.document || (record?.id === activeWid ? currentProjectDoc : null);
+    if (!source) return;
+    const id = `w-${Date.now()}`;
+    const title = `${stripProjectExtension(record.title || source.title || currentProjectTitle)} copy`;
+    const document = { ...cloneState(source), title };
+    const norm = OPT_Engine.normalizeTopology(document.devices || {}, document.links || []);
+    snapshotsRef.current[id] = {
+      devices: norm.devices,
+      links: norm.links,
+      selectedIds: document.uiState?.selectedIds || [],
+      openConsoles: document.uiState?.openConsoles || [],
+      activeBottom: (document.uiState?.activeBottom && document.uiState.activeBottom !== "pka-report") ? document.uiState.activeBottom : "events",
+      ptActivity: document.uiState?.ptActivity || null,
+      ptSidebarOpen: document.uiState?.ptSidebarOpen ?? !!document.uiState?.ptActivity,
+    };
+    const nextRecord = localProjectRecord({ id, title, document, source: "local" });
+    updateLocalProjectRecords((records) => [nextRecord, ...records]);
+    setTabs((items) => [...items, { id, name: `${title}.opt`, source: "local" }]);
+    setToast({ kind: "ok", msg: `Duplicated ${title}` });
+  };
+
+  const deleteLocalProject = async (record) => {
+    if (!record) return;
+    const ok = await requestConfirm({
+      title: `Delete ${record.title}?`,
+      message: "This removes the local copy from the project browser. Cloud projects are not deleted unless you delete the cloud copy too.",
+      confirmLabel: "Delete local",
+      danger: true,
+    });
+    if (!ok) return;
+    updateLocalProjectRecords((records) => records.filter((item) => item.id !== record.id));
+    delete snapshotsRef.current[record.id];
+    setDirtyTabs((m) => {
+      const next = { ...m };
+      delete next[record.id];
+      return next;
+    });
+    setTabs((items) => {
+      if (!items.some((tab) => tab.id === record.id)) return items;
+      const remaining = items.filter((tab) => tab.id !== record.id);
+      if (remaining.length) {
+        if (activeWid === record.id) setTimeout(() => switchTab(remaining[remaining.length - 1].id), 0);
+        return remaining;
+      }
+      const id = `w-${Date.now()}`;
+      snapshotsRef.current[id] = { devices: {}, links: [], selectedIds: [], openConsoles: [], activeBottom: "events", ptActivity: null, ptSidebarOpen: false };
+      setActiveWid(id);
+      setDevices({});
+      setLinks([]);
+      setSelectedIds([]);
+      setOpenConsoles([]);
+      setActiveBottom("events");
+      resetSyncState({ clearProject: true, clearShare: true, clearSaveCounters: true, status: { state: "local", message: "Local only" } });
+      return [{ id, name: "untitled-0.opt" }];
+    });
+  };
+
+  const renameCloudProject = async (project, title) => {
+    if (!syncClient || !project) return;
+    const clean = stripProjectExtension(title || "").trim();
+    if (!clean) return;
+    try {
+      const data = await syncClient.renameProject(project.id, clean);
+      setCloudProjects((items) => items.map((item) => item.id === project.id ? data.project : item));
+      if (project.id === cloudProjectId) setTabs((items) => mergeProjectIntoTabs(items, activeWid, data.project));
+      setToast({ kind: "ok", msg: "Cloud project renamed" });
+    } catch (err) {
+      setToast({ kind: "err", msg: err.message || "Could not rename project" });
+    }
+  };
+
+  const duplicateCloudProject = async (project) => {
+    if (!syncClient || !project) return;
+    try {
+      const data = await syncClient.duplicateProject(project.id, `${project.title || "Project"} copy`);
+      setCloudProjects((items) => [data.project, ...items]);
+      setToast({ kind: "ok", msg: "Cloud project duplicated" });
+    } catch (err) {
+      setToast({ kind: "err", msg: err.message || "Could not duplicate project" });
+    }
+  };
+
+  const deleteCloudProject = async (project) => {
+    if (!syncClient || !project) return;
+    const ok = await requestConfirm({
+      title: `Delete ${project.title}?`,
+      message: "This removes the cloud project and revokes its share links. Local copies stay available in the browser.",
+      confirmLabel: "Delete cloud",
+      danger: true,
+    });
+    if (!ok) return;
+    try {
+      await syncClient.deleteProject(project.id);
+      setCloudProjects((items) => items.filter((item) => item.id !== project.id));
+      if (project.id === cloudProjectId) resetSyncState({ clearProject: true, clearShare: true, clearSaveCounters: true, status: { state: "local", message: "Cloud project deleted; local copy kept" } });
+      setToast({ kind: "ok", msg: "Cloud project deleted" });
+    } catch (err) {
+      setToast({ kind: "err", msg: err.message || "Could not delete project" });
+    }
+  };
+
   const saveCloudNow = async ({ force = false, queueOffline = true } = {}) => {
     if (!syncClient) return { ok: false, reason: "sync-unavailable" };
     if (savePromiseRef.current) {
@@ -1616,7 +1983,7 @@ function App() {
         setMeaningfulChanges(0);
         setFirstDirtyAt(null);
         setDirtyTabs((m) => ({ ...m, [state.activeWid]: false }));
-        setSyncStatus({ state: "synced", message: `Saved v${data.project.version}` });
+        setSyncStatus({ state: "synced", message: savedAtMessage(lastSaveAtRef.current) });
         await Sync.saveLocalDocument(state.shareToken ? `share:${state.shareToken}` : `project:${state.cloudProjectId}`, data.document, { version: data.project.version });
         return { ok: true, saved: true, project: data.project, document: data.document };
       } catch (err) {
@@ -1682,7 +2049,8 @@ function App() {
             setMeaningfulChanges(0);
             setFirstDirtyAt(null);
             setDirtyTabs((m) => ({ ...m, [active.activeWid]: false }));
-            setSyncStatus({ state: "synced", message: `Queued save synced v${data.project.version}` });
+            lastSaveAtRef.current = Date.now();
+            setSyncStatus({ state: "synced", message: savedAtMessage(lastSaveAtRef.current) });
           }
         } catch (err) {
           if (err.status === 409) {
@@ -1704,7 +2072,11 @@ function App() {
   }, [syncClient]);
 
   const createSyncedProject = async () => {
-    if (!syncClient || !cloudUser) return setAuthOpen(true);
+    if (!syncClient || !cloudUser) {
+      setAccountInitial({ mode: "login" });
+      setAccountOpen(true);
+      return;
+    }
     if (createProjectInFlightRef.current) return;
     createProjectInFlightRef.current = true;
     try {
@@ -1721,12 +2093,52 @@ function App() {
       setCloudLease(lease.lease);
       setTabs((ts) => mergeProjectIntoTabs(ts, activeWid, data.project));
       setDirtyTabs((m) => ({ ...m, [activeWid]: false }));
-      setSyncStatus({ state: "synced", message: `Cloud project saved v${data.project.version}` });
+      setSyncStatus({ state: "synced", message: savedAtMessage(lastSaveAtRef.current) });
       await refreshProjects();
     } catch (err) {
       setSyncStatus({ state: "err", message: err.message || "Could not create project" });
     } finally {
       createProjectInFlightRef.current = false;
+    }
+  };
+
+  const uploadLocalProjectToCloud = async (record) => {
+    if (!syncClient || !cloudUser) {
+      setAccountInitial({ mode: "login" });
+      setAccountOpen(true);
+      return;
+    }
+    if (!record?.document || record.cloudProjectId) return;
+    const isActive = record.id === activeWid;
+    try {
+      if (isActive) setSyncStatus({ state: "saving", message: "Saving..." });
+      const data = await syncClient.createProject(record.title, record.document);
+      setCloudProjects((items) => [data.project, ...items.filter((item) => item.id !== data.project.id)]);
+      updateLocalProjectRecords((records) => records.map((item) => item.id === record.id ? {
+        ...item,
+        cloudProjectId: data.project.id,
+        cloudVersion: data.project.version,
+        updatedAt: data.project.updatedAt || new Date().toISOString(),
+      } : item));
+      if (isActive) {
+        setCloudProjectId(data.project.id);
+        setCloudVersion(data.project.version);
+        setCloudBaseDoc(data.document);
+        lastSaveAtRef.current = projectSavedAt(data.project);
+        setMeaningfulChanges(0);
+        setFirstDirtyAt(null);
+        const lease = await syncClient.acquireLease(data.project.id, true);
+        setCloudLease(lease.lease);
+        setTabs((ts) => mergeProjectIntoTabs(ts, activeWid, data.project));
+        setDirtyTabs((m) => ({ ...m, [activeWid]: false }));
+        setSyncStatus({ state: "synced", message: savedAtMessage(lastSaveAtRef.current) });
+      }
+      await refreshProjects();
+      setToast({ kind: "ok", msg: "Project uploaded to cloud" });
+    } catch (err) {
+      if (isActive) setSyncStatus({ state: "err", message: err.message || "Could not upload project" });
+      setToast({ kind: "err", msg: err.message || "Could not upload project" });
+      throw err;
     }
   };
 
@@ -1752,7 +2164,8 @@ function App() {
       try {
         const lease = await syncClient.acquireLease(projectId, false);
         setCloudLease(lease.lease);
-        setSyncStatus({ state: "synced", message: `Opened v${data.project.version}` });
+        lastSaveAtRef.current = projectSavedAt(data.project);
+        setSyncStatus({ state: "synced", message: savedAtMessage(lastSaveAtRef.current) });
       } catch (err) {
         setCloudLease(null);
         setSyncStatus({ state: "readonly", message: err.data?.lease?.clientLabel ? `Read-only: editing on ${err.data.lease.clientLabel}` : "Read-only: lease unavailable" });
@@ -1805,6 +2218,7 @@ function App() {
       status: { state: "local", message: "Local only" },
     });
     setProjectsOpen(false);
+    setAccountOpen(false);
   };
 
   const restoreRollback = async (target) => {
@@ -1823,7 +2237,8 @@ function App() {
       applyProjectDocument(data.document, data.project);
       setMeaningfulChanges(0);
       setFirstDirtyAt(null);
-      setSyncStatus({ state: "synced", message: `Restored ${target} rollback` });
+      lastSaveAtRef.current = Date.now();
+      setSyncStatus({ state: "synced", message: savedAtMessage(lastSaveAtRef.current) });
     } catch (err) {
       setToast({ kind: "err", msg: err.message || "Rollback failed" });
     }
@@ -1852,6 +2267,37 @@ function App() {
       if (data.user) setSyncStatus({ state: "local", message: "Signed in" });
     }).catch(() => setSyncStatus({ state: "local", message: "Local only" }));
   }, [syncClient]);
+
+  useEffect(() => {
+    if (!syncClient) return;
+    const params = new URLSearchParams(location.search);
+    const verifyToken = params.get("verifyEmail");
+    const resetToken = params.get("resetPassword");
+    if (!verifyToken && !resetToken) return;
+    setAccountInitial(verifyToken ? { mode: "verify", token: verifyToken } : { mode: "reset", token: resetToken });
+    setAccountOpen(true);
+    params.delete("verifyEmail");
+    params.delete("resetPassword");
+    const nextQuery = params.toString();
+    history.replaceState(null, "", `${location.pathname}${nextQuery ? `?${nextQuery}` : ""}${location.hash || ""}`);
+  }, [syncClient]);
+
+  useEffect(() => {
+    if (!syncClient || !cloudUser) return;
+    const check = () => {
+      syncClient.me().then((data) => {
+        if (data.user) {
+          setCloudUser(data.user);
+          return;
+        }
+        setCloudUser(null);
+        setCloudProjects([]);
+        resetSyncState({ clearProject: true, clearShare: true, clearSaveCounters: true, status: { state: "local", message: "Signed out" } });
+      }).catch(() => {});
+    };
+    const timer = setInterval(check, 60_000);
+    return () => clearInterval(timer);
+  }, [syncClient, cloudUser?.id]);
 
   useEffect(() => {
     if (!syncClient || !cloudUser) return;
@@ -1911,6 +2357,14 @@ function App() {
     ]);
   };
 
+  const recordPacketEvent = (trace, deviceSnapshot = devices) => {
+    if (!trace) return;
+    setPacketEvents((items) => [
+      ...items.slice(-299),
+      completePacketTrace(trace, deviceSnapshot),
+    ]);
+  };
+
   const beginResize = (kind, event) => {
     event.preventDefault();
     const startX = event.clientX;
@@ -1953,7 +2407,7 @@ function App() {
   const createEmptyProjectFromStarterScreen = () => {
     const blank = {
       devices: {},
-      links: [],
+      links,
       selectedIds: [],
       openConsoles: [],
       activeBottom: "events",
@@ -1972,6 +2426,7 @@ function App() {
     setTerminalScrolls({});
     setEvents([]);
     setPackets([]);
+    setPacketEvents([]);
     setStarterScreenVisible(false);
     setCloudProjectId(null); setCloudVersion(0); setCloudBaseDoc(null); setCloudLease(null); setShareToken(null); setShareMode(null);
     setSyncStatus({ state: cloudUser ? "local" : "local", message: cloudUser ? "Signed in" : "Local only" });
@@ -2007,7 +2462,10 @@ function App() {
     setCloudProjectId(null); setCloudVersion(0); setCloudBaseDoc(null); setCloudLease(null); setShareToken(null); setShareMode(null);
     setEvents([]);
     setPackets([]);
+    setPacketEvents([]);
     setDirtyTabs((m) => ({ ...m, [id]: true }));
+    setLastImportReport(null);
+    setPtSidebarRequestedTab(null);
     setToast({ kind: "ok", msg: `Imported ${filename}` });
     log("ok", "import", `loaded ${filename}`);
     pushAppUndo(`imported ${filename}`, before);
@@ -2047,8 +2505,11 @@ function App() {
     setCloudProjectId(null); setCloudVersion(0); setCloudBaseDoc(null); setCloudLease(null); setShareToken(null); setShareMode(null);
     setEvents(pkg.session?.events || []);
     setPackets(pkg.session?.packets || []);
+    setPacketEvents(pkg.session?.packetEvents || []);
     setCliHistory(pkg.session?.cliHistory || []);
     setDirtyTabs((m) => ({ ...m, [id]: true }));
+    setLastImportReport(restoredUi.ptActivity || null);
+    setPtSidebarRequestedTab(restoredUi.ptActivity ? "import-report" : null);
     setToast({ kind: "ok", msg: `Imported ${filename}` });
     log("ok", "import", `loaded OpenPT package ${filename}`);
     pushAppUndo(`imported ${filename}`, before);
@@ -2086,8 +2547,10 @@ function App() {
     setCloudProjectId(null); setCloudVersion(0); setCloudBaseDoc(null); setCloudLease(null); setShareToken(null); setShareMode(null);
     setEvents([]);
     setPackets([]);
+    setPacketEvents([]);
     setDirtyTabs((m) => ({ ...m, [id]: true }));
     setLastImportReport(activity);
+    setPtSidebarRequestedTab("import-report");
     pushAppUndo(`imported ${filename}`, before);
     if (activity?.unsupported) {
       const shortHash = activity.sourceSha256 ? activity.sourceSha256.slice(0, 12) : activity.sourceHeadHex;
@@ -2283,6 +2746,17 @@ function App() {
     });
   };
 
+  const reloadDevice = (id) => {
+    if (!markProjectChanged("reload")) return;
+    setDevices((m) => {
+      const d = m[id];
+      if (!d) return m;
+      const reloaded = OPT_Engine.reloadFromStartupConfig?.(d) || d;
+      log(reloaded.startupConfigState ? "ok" : "warn", reloaded.hostname, reloaded.startupConfigState ? "reloaded from startup-config" : "reloaded with default configuration");
+      return OPT_Engine.recomputeDynamicRoutes({ ...m, [id]: reloaded }, links);
+    });
+  };
+
   const renameDevice = (id, name) => {
     if (!markProjectChanged("rename-device")) return;
     setDevices((m) => ({ ...m, [id]: { ...m[id], hostname: name || m[id].hostname } }));
@@ -2345,7 +2819,22 @@ function App() {
     if (!markProjectChanged("cli-command")) return;
     setDevices((m) => {
       if (cmd.kind === "host-dhcp") {
-        const result = OPT_Engine.allocateDhcp(m, links, devId);
+        const result = window.OPT_ProtocolRuntime?.simulate
+          ? window.OPT_ProtocolRuntime.simulate(m, links, { type: "dhcpClient", srcId: devId })
+          : OPT_Engine.allocateDhcp(m, links, devId);
+        const message = result.message || result.error || "DHCP request complete";
+        (result.events || []).forEach((ev) => log(ev.kind === "drop" ? "err" : "ok", ev.proto || "dhcp", ev.note || ev.kind));
+        log(result.ok === false || message.startsWith("No ") ? "err" : "ok", m[devId].hostname, message);
+        recordPacketEvent(packetTraceFromRuntimeResult(result, m, devId, "DHCP", { kind: "dhcp", protocol: "dhcp", app: { message } }), result.devices || m);
+        return OPT_Engine.recomputeDynamicRoutes(result.devices || m, links);
+      }
+      if (cmd.kind === "host-dhcpv6") {
+        const result = OPT_Engine.allocateDhcpv6(m, links, devId, cmd.iface);
+        log(result.message.startsWith("No ") ? "err" : "ok", m[devId].hostname, result.message);
+        return OPT_Engine.recomputeDynamicRoutes(result.devices, links);
+      }
+      if (cmd.kind === "host-slaac") {
+        const result = OPT_Engine.applySlaac(m, links, devId, cmd.iface);
         log(result.message.startsWith("No ") ? "err" : "ok", m[devId].hostname, result.message);
         return OPT_Engine.recomputeDynamicRoutes(result.devices, links);
       }
@@ -2360,6 +2849,11 @@ function App() {
         services: { ...(m[devId].services || {}) },
         lines: JSON.parse(JSON.stringify(m[devId].lines || {})),
         dhcp: JSON.parse(JSON.stringify(m[devId].dhcp || { excluded: [], pools: {}, bindings: [] })),
+        dhcpv6: JSON.parse(JSON.stringify(m[devId].dhcpv6 || { pools: {}, bindings: [] })),
+        ipv6Routes: [...(m[devId].ipv6Routes || [])],
+        ipv6Nd: JSON.parse(JSON.stringify(m[devId].ipv6Nd || {})),
+        ospfv3: JSON.parse(JSON.stringify(m[devId].ospfv3 || {})),
+        eigrpIpv6: JSON.parse(JSON.stringify(m[devId].eigrpIpv6 || {})),
         ospf: JSON.parse(JSON.stringify(m[devId].ospf || {})),
         rip: JSON.parse(JSON.stringify(m[devId].rip || {})),
         eigrp: JSON.parse(JSON.stringify(m[devId].eigrp || {})),
@@ -2384,6 +2878,7 @@ function App() {
         dai: JSON.parse(JSON.stringify(m[devId].dai || { vlans: [], trusted: [] })),
         wireless: JSON.parse(JSON.stringify(m[devId].wireless || null)),
         firewall: JSON.parse(JSON.stringify(m[devId].firewall || null)),
+        runtime: JSON.parse(JSON.stringify(m[devId].runtime || null)),
         loggingHosts: [...(m[devId].loggingHosts || [])],
         files: { ...(m[devId].files || {}) },
       };
@@ -2391,15 +2886,29 @@ function App() {
       switch (cmd.kind) {
         case "save-startup":
           d.startupConfig = cmd.config || OPT_Engine.serializeConfig(d);
+          d.startupConfigState = cmd.state || OPT_Engine.startupConfigSnapshot?.(d) || null;
           log("ok", d.hostname, "startup-config updated");
           break;
         case "erase-startup":
           d.startupConfig = "";
+          d.startupConfigState = null;
           log("warn", d.hostname, "startup-config erased");
           break;
         case "file-delete":
-          delete d.files[cmd.path.startsWith("flash:") ? cmd.path : `flash:${cmd.path}`];
+          if (/^(nvram:\/?)?startup-config$/.test(cmd.path) || cmd.path === "nvram:startup-config") {
+            d.startupConfig = "";
+            d.startupConfigState = null;
+            log("warn", d.hostname, "startup-config deleted");
+          } else {
+            delete d.files[cmd.path.startsWith("flash:") ? cmd.path.replace(/^flash:\//, "flash:") : `flash:${cmd.path}`];
+          }
           break;
+        case "reload": {
+          const reloaded = OPT_Engine.reloadFromStartupConfig?.(d) || d;
+          Object.assign(d, reloaded);
+          log(d.startupConfigState ? "ok" : "warn", d.hostname, d.startupConfigState ? "reloaded from startup-config" : "reloaded with default configuration");
+          break;
+        }
         case "hostname":
           d.hostname = cmd.value;
           log("ok", d.hostname, `hostname changed`);
@@ -2419,6 +2928,15 @@ function App() {
         case "wireless":
           d.wireless = d.wireless || {};
           d.wireless[cmd.field] = cmd.value;
+          d.wireless.ssids = d.wireless.ssids?.length ? d.wireless.ssids : [{ name: d.wireless.ssid || "OpenPT", security: d.wireless.security || "open", passphrase: d.wireless.passphrase || "", vlan: d.wireless.vlan || 1, enabled: true }];
+          d.wireless.ssids[0] = {
+            ...(d.wireless.ssids[0] || {}),
+            name: cmd.field === "ssid" ? cmd.value : (d.wireless.ssid || d.wireless.ssids[0]?.name || "OpenPT"),
+            security: OPT_Engine.normalizeWirelessSecurity?.(cmd.field === "security" ? cmd.value : (d.wireless.security || d.wireless.ssids[0]?.security || "open")) || (cmd.field === "security" ? cmd.value : (d.wireless.security || "open")),
+            passphrase: cmd.field === "passphrase" ? cmd.value : (d.wireless.passphrase || d.wireless.ssids[0]?.passphrase || ""),
+            vlan: cmd.field === "vlan" ? cmd.value : (d.wireless.vlan || d.wireless.ssids[0]?.vlan || 1),
+            enabled: true,
+          };
           log("ok", d.hostname, `wireless ${cmd.field} ${cmd.value}`);
           break;
         case "username":
@@ -2462,10 +2980,46 @@ function App() {
             log("ok", d.hostname, `${ifaceName(hostIface)} address ${cmd.ip} ${cmd.mask} gateway ${cmd.gw}`);
           }
           break;
+        case "host-ipv6":
+          {
+            const hostIface = cmd.iface || (ifaces.eth0 ? "eth0" : (ifaces.en0 ? "en0" : Object.keys(ifaces)[0]));
+            const normalized = OPT_Engine.normalizeIpv6?.(cmd.ip) || cmd.ip;
+            ifaces[hostIface] = { ...ifaces[hostIface], ipv6: normalized, ipv6PrefixLength: cmd.prefixLength || 64, ipv6Gw: cmd.gw || null, ipv6Source: cmd.source || "static", ipv6Enabled: true, linkLocal: ifaces[hostIface].linkLocal || OPT_Engine.ipv6LinkLocal?.(ifaces[hostIface]), up: true, admUp: true };
+            log("ok", d.hostname, `${ifaceName(hostIface)} IPv6 address ${normalized}/${cmd.prefixLength || 64}`);
+          }
+          break;
         case "ip-address":
           ifaces[cmd.iface] = { ...ifaces[cmd.iface], ip: cmd.ip, mask: cmd.mask };
           log("ok", d.hostname, `${ifaceName(cmd.iface)} address ${cmd.ip} ${cmd.mask}`);
           break;
+        case "ip-helper":
+          ifaces[cmd.iface] = { ...ifaces[cmd.iface], helperAddress: cmd.value };
+          log(cmd.value ? "ok" : "warn", d.hostname, `${ifaceName(cmd.iface)} helper-address ${cmd.value || "removed"}`);
+          break;
+        case "ipv6-address":
+          {
+            const normalized = cmd.ip ? (OPT_Engine.normalizeIpv6?.(cmd.ip) || cmd.ip) : null;
+            ifaces[cmd.iface] = { ...ifaces[cmd.iface], ipv6: normalized, ipv6PrefixLength: cmd.prefixLength, ipv6Source: cmd.source, ipv6Enabled: !!normalized || ifaces[cmd.iface].ipv6Enabled, linkLocal: normalized ? (ifaces[cmd.iface].linkLocal || OPT_Engine.ipv6LinkLocal?.(ifaces[cmd.iface])) : ifaces[cmd.iface].linkLocal };
+            log(normalized ? "ok" : "warn", d.hostname, normalized ? `${ifaceName(cmd.iface)} IPv6 address ${normalized}/${cmd.prefixLength}` : `${ifaceName(cmd.iface)} IPv6 address removed`);
+          }
+          break;
+        case "ipv6-autoconfig":
+          ifaces[cmd.iface] = { ...ifaces[cmd.iface], ipv6Autoconfig: cmd.value, ipv6Source: cmd.value ? "slaac" : ifaces[cmd.iface].ipv6Source, ipv6Enabled: cmd.value || ifaces[cmd.iface].ipv6Enabled, linkLocal: ifaces[cmd.iface].linkLocal || OPT_Engine.ipv6LinkLocal?.(ifaces[cmd.iface]) };
+          break;
+        case "ipv6-enable":
+          ifaces[cmd.iface] = { ...ifaces[cmd.iface], ipv6Enabled: cmd.value, linkLocal: cmd.value ? (ifaces[cmd.iface].linkLocal || OPT_Engine.ipv6LinkLocal?.(ifaces[cmd.iface])) : ifaces[cmd.iface].linkLocal };
+          break;
+        case "ipv6-nd":
+          ifaces[cmd.iface] = { ...ifaces[cmd.iface], [cmd.field === "managed" ? "ipv6NdManaged" : "ipv6NdOther"]: cmd.value };
+          break;
+        case "ipv6-routing-interface": {
+          const db = cmd.proto === "ospfv3" ? d.ospfv3 : d.eigrpIpv6;
+          db[cmd.id] = db[cmd.id] || { interfaces: [], passive: [] };
+          db[cmd.id].interfaces = [...new Set([...(db[cmd.id].interfaces || []), cmd.iface])];
+          if (cmd.area != null) db[cmd.id].areas = { ...(db[cmd.id].areas || {}), [cmd.iface]: cmd.area };
+          log("ok", d.hostname, `${ifaceName(cmd.iface)} IPv6 ${cmd.proto === "ospfv3" ? "OSPFv3" : "EIGRP"} enabled`);
+          break;
+        }
         case "admin":
           ifaces[cmd.iface] = { ...ifaces[cmd.iface], admUp: cmd.up, up: cmd.up && hasLink(devId, cmd.iface, links) };
           log(cmd.up ? "ok" : "warn", d.hostname, `${ifaceName(cmd.iface)} ${cmd.up ? "no shutdown" : "shutdown"}`);
@@ -2610,12 +3164,36 @@ function App() {
           d.ipRouting = cmd.value;
           log(cmd.value ? "ok" : "warn", d.hostname, `${cmd.value ? "" : "no "}ip routing`);
           break;
+        case "ipv6-routing":
+          d.ipv6Routing = cmd.value;
+          log(cmd.value ? "ok" : "warn", d.hostname, `${cmd.value ? "" : "no "}ipv6 unicast-routing`);
+          break;
+        case "ipv6-route": {
+          const prefix = OPT_Engine.ipv6NetworkAddress?.(cmd.prefix, cmd.prefixLength) || cmd.prefix;
+          const via = OPT_Engine.normalizeIpv6?.(cmd.via) || cmd.via;
+          d.ipv6Routes = [...(d.ipv6Routes || []).filter(r => !(r.type === "S" && r.prefix === prefix && r.prefixLength === cmd.prefixLength && r.via === via)), { prefix, prefixLength: cmd.prefixLength, via, iface: OPT_Engine.ifaceForIpv6Via?.(d, via) || Object.keys(ifaces)[0], type: "S" }];
+          log("ok", d.hostname, `ipv6 route ${prefix}/${cmd.prefixLength} ${via}`);
+          break;
+        }
+        case "no-ipv6-route": {
+          const prefix = OPT_Engine.ipv6NetworkAddress?.(cmd.prefix, cmd.prefixLength) || cmd.prefix;
+          const via = OPT_Engine.normalizeIpv6?.(cmd.via) || cmd.via;
+          d.ipv6Routes = (d.ipv6Routes || []).filter(r => !(r.type === "S" && r.prefix === prefix && r.prefixLength === cmd.prefixLength && r.via === via));
+          log("warn", d.hostname, `removed ipv6 route ${prefix}/${cmd.prefixLength} ${via}`);
+          break;
+        }
         case "ospf-create":
           d.ospf[cmd.pid] = d.ospf[cmd.pid] || { networks: [], passive: [] };
           break;
         case "routing-create": {
           const db = cmd.proto === "eigrp" ? d.eigrp : cmd.proto === "rip" ? d.rip : d.bgp;
           db[cmd.id] = db[cmd.id] || { networks: [], passive: [], neighbors: [] };
+          break;
+        }
+        case "ipv6-routing-create": {
+          const db = cmd.proto === "ospfv3" ? d.ospfv3 : d.eigrpIpv6;
+          db[cmd.id] = db[cmd.id] || { interfaces: [], passive: [] };
+          d.ipv6Routing = true;
           break;
         }
         case "routing-router-id": {
@@ -2839,6 +3417,7 @@ function App() {
         ...base,
         services: { ...(base.services || {}) },
         dhcp: cloneState(base.dhcp || { excluded: [], pools: {}, bindings: [] }),
+        dhcpv6: cloneState(base.dhcpv6 || { pools: {}, bindings: [] }),
         users: { ...(base.users || {}) },
         files: { ...(base.files || {}) },
         serverConfig: ensureServerConfig(base),
@@ -2932,7 +3511,8 @@ function App() {
           const u = Math.min(1, (now - start) / segMs);
           const x = from.x + (to.x - from.x) * u;
           const y = from.y + (to.y - from.y) * u;
-          placePacket(pid, x, y, "icmp");
+          const proto = plan.hops.find((h) => h.devId === to.id && h.proto)?.proto || plan.packets?.[0]?.proto || "icmp";
+          placePacket(pid, x, y, proto);
           if (u < 1) requestAnimationFrame(animate);
           else {
             setActiveHopDeviceId(to.id);
@@ -2943,7 +3523,7 @@ function App() {
         requestAnimationFrame(animate);
       };
       setTimeout(() => {
-        placePacket(pid, waypoints[0].x, waypoints[0].y, "icmp");
+        placePacket(pid, waypoints[0].x, waypoints[0].y, plan.packets?.[0]?.proto || "icmp");
         setActiveHopDeviceId(waypoints[0].id);
         step();
       }, delayMs);
@@ -2956,13 +3536,30 @@ function App() {
 
   const handlePing = (srcId, target, opts = {}, onComplete) => {
     const plan = OPT_Engine.planPath(devices, links, srcId, target);
-    plan.devices = devices;
+    if (!plan.devices) plan.devices = devices;
+    if (plan.devices && plan.devices !== devices) {
+      plan.devices = { ...devices, ...plan.devices };
+      setDevices(plan.devices);
+    }
+    if (!opts.silent) {
+      (plan.events || [])
+        .filter((ev) => ["arp", "nat", "icmp", "stp", "ospf"].includes(ev.proto) && ["request", "reply", "translate", "drop", "echo-request", "echo-reply"].includes(ev.kind))
+        .slice(0, 12)
+        .forEach((ev) => log(ev.kind === "drop" ? "err" : "ok", ev.proto, ev.note || ev.kind));
+    }
+    if (!opts.silent && opts.record !== false) {
+      recordPacketEvent(packetTraceFromPlan(plan, plan.devices || devices, srcId, target, {
+        kind: opts.trace ? "traceroute" : "icmp",
+        protocol: plan.family === "ipv6" ? "icmpv6" : "icmp",
+        trace: opts.trace,
+      }), plan.devices || devices);
+    }
     if (opts.silent || opts.trace) {
       onComplete && onComplete(plan);
       return plan;
     }
     log(plan.ok ? "ok" : "err", "ping", `${devices[srcId].hostname} → ${target}: ${plan.ok ? "in flight" : plan.error}`);
-    animatePath(plan, devices, () => {
+    animatePath(plan, plan.devices || devices, () => {
       if (plan.ok) log("ok", "ping", `${devices[srcId].hostname} → ${target}: success`);
       onComplete && onComplete(plan);
     });
@@ -3033,7 +3630,22 @@ function App() {
     setOpenAppTabs((items) => (
       items.some((item) => item.id === tabId)
         ? items
-        : [...items, { id: tabId, wid: activeWid, deviceId: id, appKey: app.key }]
+        : [...items, { id: tabId, wid: activeWid, deviceId: id, appKey: app.key, scope: "endpoint" }]
+    ));
+    setActiveCenterTab(tabId);
+  };
+  const openServerApp = (id, appKey) => {
+    const device = devices[id];
+    const app = serverAppByKey(appKey);
+    if (!device || device.kind !== "server" || !app) return;
+    const tabId = serverAppTabId(activeWid, id, app.key);
+    setSelectedId(id);
+    setServerModuleOpen(true);
+    setServerModuleTab("desktop");
+    setOpenAppTabs((items) => (
+      items.some((item) => item.id === tabId)
+        ? items
+        : [...items, { id: tabId, wid: activeWid, deviceId: id, appKey: app.key, scope: "server" }]
     ));
     setActiveCenterTab(tabId);
   };
@@ -3072,6 +3684,14 @@ function App() {
       return { ...m, [id]: nextDevice };
     });
   };
+  const updateSimulationDevices = (label, mutator, message = "desktop app updated") => {
+    if (!markProjectChanged(label)) return null;
+    const draft = cloneState(devices);
+    const result = mutator(draft);
+    setDevices(draft);
+    if (message) log(result?.ok === false ? "err" : "ok", "apps", result?.error || result?.result || message);
+    return result;
+  };
 
   // ── Top-level keyboard
   useEffect(() => {
@@ -3101,12 +3721,15 @@ function App() {
     return () => window.removeEventListener("keydown", k);
   }, [selectedIds, selectedLinkId, activeWid, devices, links]);
 
-  const selected = selectedId ? devices[selectedId] : null;
+  const simulatedDevices = useMemo(() => OPT_Engine.computeWirelessAssociations?.(devices) || devices, [devices]);
+  const selected = selectedId ? simulatedDevices[selectedId] : null;
   const appsSelected = selected && isEndpointAppsDevice(selected);
   const appTabsForWorkspace = openAppTabs.filter((item) => item.wid === activeWid && devices[item.deviceId]);
   const activeAppTab = activeCenterTab === "topology" ? null : appTabsForWorkspace.find((item) => item.id === activeCenterTab);
-  const activeAppDevice = activeAppTab ? devices[activeAppTab.deviceId] : null;
-  const activeEndpointApp = activeAppTab ? endpointAppByKey(activeAppTab.appKey) : null;
+  const activeAppDevice = activeAppTab ? simulatedDevices[activeAppTab.deviceId] : null;
+  const activeAppScope = activeAppTab?.scope || (activeAppTab?.id?.startsWith("server-app:") ? "server" : "endpoint");
+  const activeEndpointApp = activeAppTab && activeAppScope === "endpoint" ? endpointAppByKey(activeAppTab.appKey) : null;
+  const activeServerApp = activeAppTab && activeAppScope === "server" ? serverAppByKey(activeAppTab.appKey) : null;
   useEffect(() => {
     if (appsSidebarOpen && !appsSelected) setAppsSidebarOpen(false);
   }, [appsSidebarOpen, appsSelected, selectedId]);
@@ -3123,15 +3746,36 @@ function App() {
     hosts: Object.values(devices).filter(d => OPT_Engine.isHostLike?.(d)).length,
     links: links.length,
   };
+  const validationErrorCount = validationIssues.filter((issue) => issue.severity === "err").length;
+  const selectValidationIssue = (issue) => {
+    setActiveCenterTab("topology");
+    if (issue.linkId) {
+      setSelectedLinkId(issue.linkId);
+      setSelectedIds([]);
+    } else if (issue.deviceId) {
+      setSelectedIds([issue.deviceId]);
+      setSelectedLinkId(null);
+    }
+  };
   const autosaveDueMs = meaningfulChanges > 0 && (cloudProjectId || shareToken) && cloudLease
     ? Math.max(0, Math.max(
         meaningfulChanges >= SYNC_AUTOSAVE_CHANGES ? 0 : SYNC_AUTOSAVE_MS - (firstDirtyAt ? Date.now() - firstDirtyAt : 0),
         SYNC_MIN_SAVE_MS - (Date.now() - lastSaveAtRef.current)
       ))
     : 0;
-  const syncDetail = meaningfulChanges > 0 && (cloudProjectId || shareToken) && cloudLease
+  const syncDetail = syncStatus.state === "saving"
+    ? syncStatus.message
+    : meaningfulChanges > 0 && (cloudProjectId || shareToken) && cloudLease
     ? `Autosave in ${Math.ceil(autosaveDueMs / 1000)}s`
     : syncStatus.message;
+
+  if (routePath === JEOPARDY_URL && window.JeopardyPage) {
+    return <window.JeopardyPage />;
+  }
+
+  if (routePath === WORDLE_URL && window.WordlePage) {
+    return <window.WordlePage />;
+  }
 
   if (viewMode === "home" && window.HomePage) {
     return (
@@ -3140,6 +3784,7 @@ function App() {
         onEnterStarter={() => { setViewMode("app"); newStarterTab(); }}
         onEnterImport={() => { setViewMode("app"); openPacketTracerFilePicker(); }}
         onStartQuiz={() => { window.location.href = QUIZ_LIBRARY_URL; }}
+        onStartJeopardy={() => navigateAppRoute(JEOPARDY_URL)}
       />
     );
   }
@@ -3190,6 +3835,22 @@ function App() {
               <path d="M7 17L17 7M9 7h8v8"/>
             </svg>
           </button>
+          <button
+            type="button"
+            className="tb-btn quiz-link-btn"
+            title="Open OpenPT Jeopardy"
+            onClick={() => window.open(JEOPARDY_URL, "_blank", "noopener,noreferrer")}
+            style={{ padding: "3px 8px", fontSize: 11 }}
+          >
+            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <rect x="3" y="4" width="18" height="16" rx="2"/>
+              <path d="M8 4v16M16 4v16M3 10h18M3 15h18"/>
+            </svg>
+            Jeopardy
+            <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ opacity: 0.7 }}>
+              <path d="M7 17L17 7M9 7h8v8"/>
+            </svg>
+          </button>
         </div>
         <TitleMenus
           devices={devices}
@@ -3207,14 +3868,14 @@ function App() {
             if (!markProjectChanged("reset")) return;
             const s = OPT_Engine.makeStarter();
             setDevices(s.devices); setLinks(s.links); setSelectedId(null);
-            setEvents([]); setPackets([]); setPtActivity(null);
+            setEvents([]); setPackets([]); setPacketEvents([]); setPtActivity(null);
             log("ok", "system", "scenario reset to starter");
           }}
           onClearAll={async () => {
             const ok = await requestConfirm({ title: "Clear topology?", message: "Remove every device and cable from the current tab?", confirmLabel: "Clear", danger: true });
             if (!ok) return;
             if (!markProjectChanged("clear")) return;
-            setDevices({}); setLinks([]); setSelectedId(null); setSelectedLinkId(null); setEvents([]); setPackets([]); setPtActivity(null); log("warn", "system", "topology cleared");
+            setDevices({}); setLinks([]); setSelectedId(null); setSelectedLinkId(null); setEvents([]); setPackets([]); setPacketEvents([]); setPtActivity(null); log("warn", "system", "topology cleared");
           }}
           onDeleteSelected={() => selectedId && deleteDevice(selectedId)}
           onAddDeviceFromMenu={addDeviceFromMenu}
@@ -3264,13 +3925,11 @@ function App() {
           {cloudUser && !cloudProjectId && !shareToken && (
             <button className="tb-btn primary" onClick={createSyncedProject}>Save to cloud</button>
           )}
-          {cloudUser && (
-            <button className="tb-btn" onClick={() => setProjectsOpen(true)}>Projects</button>
-          )}
+          <button className="tb-btn" onClick={() => setProjectsOpen(true)}>Projects</button>
           {(cloudProjectId && !shareToken) && (
             <button className="tb-btn" onClick={() => setShareOpen(true)}>Share</button>
           )}
-          <button className="tb-btn" onClick={() => cloudUser ? setProjectsOpen(true) : setAuthOpen(true)}>
+          <button className="tb-btn" onClick={() => { setAccountInitial({ mode: cloudUser ? "account" : "login" }); setAccountOpen(true); }}>
             {cloudUser ? cloudUser.email.split("@")[0] : "Login / Sign up"}
           </button>
         </div>
@@ -3301,6 +3960,8 @@ function App() {
               activity={gradedPtActivity}
               onClose={() => setPtSidebarOpen(false)}
               onReportError={() => reportImportError(gradedPtActivity)}
+              requestedTab={ptSidebarRequestedTab}
+              onRequestedTabHandled={() => setPtSidebarRequestedTab(null)}
             />
             <div
               className="pt-sidebar-resizer"
@@ -3344,7 +4005,8 @@ function App() {
             <div className="tab-new" title="New blank tab" onClick={newBlankTab}>+</div>
             {appTabsForWorkspace.map((item) => {
               const dev = devices[item.deviceId];
-              const app = endpointAppByKey(item.appKey);
+              const scope = item.scope || (item.id?.startsWith("server-app:") ? "server" : "endpoint");
+              const app = scope === "server" ? serverAppByKey(item.appKey) : endpointAppByKey(item.appKey);
               if (!dev || !app) return null;
               return (
                 <div
@@ -3375,21 +4037,35 @@ function App() {
               tab={activeAppTab}
               app={activeEndpointApp}
               device={activeAppDevice}
-              devices={devices}
+              devices={simulatedDevices}
               links={links}
               onClose={() => closeEndpointApp(activeAppTab.id)}
               onUpdateDevice={(mutator, message) => updateEndpointDevice(activeAppDevice.id, mutator, message)}
+              onRunSimulation={(mutator, message) => updateSimulationDevices("endpoint-app", mutator, message)}
               onApplyCommand={(cmd) => onApplyToDevice(activeAppDevice.id, cmd)}
               onPing={handlePing}
+              onTraceEvent={(trace) => recordPacketEvent(trace, simulatedDevices)}
               scrollState={terminalScrolls[activeAppTab.id] || terminalScrolls[activeAppDevice.id]}
               onScrollStateChange={(devId, state) => setTerminalScrolls((m) => ({ ...m, [activeAppTab.id]: state }))}
               historyState={cliHistory[activeAppTab.id] || {}}
               onHistoryChange={(history) => setCliHistory((m) => ({ ...(m && !Array.isArray(m) ? m : {}), [activeAppTab.id]: history }))}
               ghostSuggestions={cliGhostSuggestions}
             />
+          ) : activeAppTab && activeAppDevice && activeServerApp ? (
+            <ServerAppWorkspace
+              tab={activeAppTab}
+              app={activeServerApp}
+              device={activeAppDevice}
+              devices={devices}
+              links={links}
+              onClose={() => closeEndpointApp(activeAppTab.id)}
+              onUpdateDevice={(mutator, message) => updateServerDevice(activeAppDevice.id, mutator, message)}
+              onRunSimulation={(mutator, message) => updateSimulationDevices("server-app", mutator, message)}
+              onPing={handlePing}
+            />
           ) : (
             <Topology
-              devices={devices}
+              devices={simulatedDevices}
               links={links}
               selectedIds={selectedIds}
               onSelect={(id, additive) => selectDevice(id, additive)}
@@ -3487,11 +4163,12 @@ function App() {
               {openConsoles.length > 0 && <div style={{ width: 1, background: "var(--line)" }}/>}
               {[
                 ["events", "Events", events.length || null],
-                ["packets", "Packets", null],
+                ["packets", "Packets", packetEvents.length || null],
+                ["validation", "Validation", validationIssues.length || null],
               ].map(([k, lbl, badge]) => (
                 <div key={k} className={`bp-tab ${activeBottom === k ? "active" : ""}`} onClick={() => setActiveBottom(k)}>
                   {lbl}
-                  {badge != null && <span className={`badge ${k === "events" && events.some(e => e.s === "err") ? "alert" : ""}`}>{badge}</span>}
+                  {badge != null && <span className={`badge ${(k === "events" && events.some(e => e.s === "err")) || (k === "validation" && validationErrorCount) ? "alert" : ""}`}>{badge}</span>}
                 </div>
               ))}
               <div className="bp-spacer"/>
@@ -3502,6 +4179,12 @@ function App() {
                   ))}
                   <button onClick={() => navigator.clipboard?.writeText(events.map((e) => `${e.t} ${e.s} ${e.src}: ${e.m}`).join("\n")).catch(() => {})}>Copy</button>
                   <button onClick={() => setEvents([])}>Clear</button>
+                </div>
+              )}
+              {activeBottom === "packets" && !bottomCollapsed && (
+                <div className="event-tools">
+                  <button onClick={() => navigator.clipboard?.writeText(packetEvents.map((e) => `${e.time} ${e.protocol} ${e.source}: ${e.summary}`).join("\n")).catch(() => {})}>Copy</button>
+                  <button onClick={() => setPacketEvents([])}>Clear</button>
                 </div>
               )}
               <button className="bp-collapse" title={bottomCollapsed ? "Expand bottom panel" : "Collapse bottom panel"} onClick={() => setBottomCollapsed((v) => !v)}>
@@ -3515,11 +4198,12 @@ function App() {
                   display: activeBottom === id ? "block" : "none",
                 }}>
                   <CLI
-                    device={devices[id]}
-                    devices={devices}
+                    device={simulatedDevices[id]}
+                    devices={simulatedDevices}
                     links={links}
                     onApply={(cmd) => onApplyToDevice(id, cmd)}
                     onPing={handlePing}
+                    onTraceEvent={(trace) => recordPacketEvent(trace, simulatedDevices)}
                     pendingCmd={pendingCmd && pendingCmd.devId === id ? pendingCmd : null}
                     active={activeBottom === id}
                     focusNonce={cliFocusNonce}
@@ -3541,7 +4225,15 @@ function App() {
                 <Events events={eventFilter === "all" ? events : events.filter((e) => e.s === eventFilter)} />
               </div>
               <div style={{ position: "absolute", inset: 0, display: activeBottom === "packets" ? "block" : "none" }}>
-                <PacketLog events={events.filter(e => e.src === "ping")} />
+                <PacketInspector events={packetEvents} />
+              </div>
+              <div style={{ position: "absolute", inset: 0, display: activeBottom === "validation" ? "block" : "none" }}>
+                <TopologyValidationPanel
+                  issues={validationIssues}
+                  devices={devices}
+                  links={links}
+                  onSelectIssue={selectValidationIssue}
+                />
               </div>
             </div>}
           </div>
@@ -3581,6 +4273,7 @@ function App() {
               onTabChange={setServerModuleTab}
               onConfigChange={setServerConfigSection}
               onUpdate={(mutator, message) => updateServerDevice(selected.id, mutator, message)}
+              onOpenApp={(appKey) => openServerApp(selected.id, appKey)}
               onClose={() => setServerModuleOpen(false)}
             />
           </>
@@ -3598,10 +4291,14 @@ function App() {
         </div>
       )}
 
-      {lastImportReport && (lastImportReport.unsupported || lastImportReport.reverseReport?.decoder?.error || lastImportReport.diagnostics?.decoder?.error) && (
+      {displayedImportReport && (displayedImportReport.format === "packet-tracer-activity" || displayedImportReport.unsupported || displayedImportReport.reverseReport?.decoder || displayedImportReport.diagnostics?.decoder) && (
         <ImportReportBanner
-          activity={lastImportReport}
-          onReport={() => reportImportError(lastImportReport)}
+          activity={displayedImportReport}
+          onReport={() => reportImportError(displayedImportReport)}
+          onOpen={() => {
+            setPtSidebarOpen(true);
+            setPtSidebarRequestedTab("import-report");
+          }}
           onClose={() => setLastImportReport(null)}
         />
       )}
@@ -3613,14 +4310,26 @@ function App() {
         </div>
       )}
 
-      {authOpen && (
-        <AuthDialog
+      {accountOpen && (
+        <AccountDialog
           syncClient={syncClient}
-          onClose={() => setAuthOpen(false)}
+          user={cloudUser}
+          initial={accountInitial}
+          onClose={() => { setAccountOpen(false); setAccountInitial(null); }}
           onSignedIn={(user) => {
             setCloudUser(user);
-            setAuthOpen(false);
+            setAccountOpen(false);
+            setAccountInitial(null);
             setSyncStatus({ state: "local", message: "Signed in" });
+          }}
+          onSignedOut={logoutCloud}
+          onAccountDeleted={(deletion) => {
+            setCloudUser(null);
+            setCloudProjects([]);
+            resetSyncState({ clearProject: true, clearShare: true, clearSaveCounters: true, status: { state: "local", message: "Account deletion scheduled" } });
+            setAccountOpen(false);
+            setAccountInitial(null);
+            setToast({ kind: "warn", msg: `Account scheduled for deletion on ${formatSessionTime(deletion.deletionScheduledAt)}` });
           }}
         />
       )}
@@ -3628,15 +4337,26 @@ function App() {
       {projectsOpen && (
         <ProjectsDialog
           projects={cloudProjects}
+          localProjects={localProjects}
           cloudUser={cloudUser}
           syncStatus={syncStatus}
+          activeWid={activeWid}
+          activeCloudProjectId={cloudProjectId}
+          activeCloudVersion={cloudVersion}
+          dirtyTabs={dirtyTabs}
           onClose={() => setProjectsOpen(false)}
           onOpen={openCloudProject}
-          onCreate={createSyncedProject}
+          onOpenLocal={applyLocalProjectRecord}
+          onUploadLocal={uploadLocalProjectToCloud}
           onRefresh={refreshProjects}
-          onLogout={logoutCloud}
           onRollback={restoreRollback}
           canRollback={!!cloudProjectId && !shareToken}
+          onRenameLocal={renameLocalProject}
+          onDuplicateLocal={duplicateLocalProject}
+          onDeleteLocal={deleteLocalProject}
+          onRenameCloud={renameCloudProject}
+          onDuplicateCloud={duplicateCloudProject}
+          onDeleteCloud={deleteCloudProject}
         />
       )}
 
@@ -3780,14 +4500,7 @@ function App() {
               case "power":
                 togglePower(id); break;
               case "restart":
-                // power off then on
-                if (d.powered) togglePower(id);
-                setTimeout(() => {
-                  setDevices((m) => m[id]?.powered ? m : { ...m, [id]: { ...m[id], powered: true,
-                    interfaces: Object.fromEntries(Object.entries(m[id].interfaces).map(([k,v])=>[k,{...v, up: hasLink(id, k, links)}])) } });
-                  log("ok", d.hostname, "device restarted");
-                }, 600);
-                log("warn", d.hostname, "restarting…");
+                reloadDevice(id);
                 break;
               case "delete":
                 deleteDevice(id); break;
@@ -4152,49 +4865,277 @@ function ModalShell({ title, onClose, children }) {
   );
 }
 
-function AuthDialog({ syncClient, onClose, onSignedIn }) {
-  const [mode, setMode] = useState("login");
+function AccountDialog({ syncClient, user, initial, onClose, onSignedIn, onSignedOut, onAccountDeleted }) {
+  const [mode, setMode] = useState(initial?.mode || (user ? "account" : "login"));
+  const [token, setToken] = useState(initial?.token || "");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [newPassword, setNewPassword] = useState("");
+  const [deletePassword, setDeletePassword] = useState("");
   const [company, setCompany] = useState("");
   const [startedAt] = useState(Date.now());
   const [error, setError] = useState("");
+  const [status, setStatus] = useState("");
+  const [debugLink, setDebugLink] = useState("");
+  const [sessions, setSessions] = useState([]);
   const [submitting, setSubmitting] = useState(false);
+
+  useEffect(() => {
+    setMode(initial?.mode || (user ? "account" : "login"));
+    setToken(initial?.token || "");
+    if (user?.email) setEmail(user.email);
+  }, [initial?.mode, initial?.token, user?.email]);
+
+  const loadSessions = async () => {
+    if (!syncClient || !user) return;
+    const data = await syncClient.listSessions();
+    setSessions(data.sessions || []);
+  };
+
+  useEffect(() => {
+    if (mode !== "account" || !user) return;
+    loadSessions().catch(() => {});
+  }, [mode, user?.id]);
+
+  const clearMessages = () => {
+    setError("");
+    setStatus("");
+    setDebugLink("");
+  };
+
+  const captureDebugLink = (data, key) => {
+    const link = data?.[key]?.link || data?.verification?.link || data?.reset?.link || "";
+    if (link) setDebugLink(link);
+  };
+
   const submit = async (e) => {
     e.preventDefault();
     if (submitting) return;
-    setError("");
+    clearMessages();
     setSubmitting(true);
     try {
-      const data = mode === "login"
-        ? await syncClient.login(email, password)
-        : await syncClient.register(email, password, { company, startedAt });
-      onSignedIn(data.user);
+      if (mode === "login") {
+        const data = await syncClient.login(email, password);
+        onSignedIn(data.user);
+      } else if (mode === "register") {
+        const data = await syncClient.register(email, password, { company, startedAt });
+        captureDebugLink(data, "verification");
+        setStatus(`Verification sent to ${data.email || email}.`);
+        setMode("verify-sent");
+      } else if (mode === "verify") {
+        await syncClient.verifyEmail(token);
+        setStatus("Email verified. You can sign in now.");
+        setMode("login");
+      } else if (mode === "forgot") {
+        const data = await syncClient.forgotPassword(email);
+        captureDebugLink(data, "reset");
+        setStatus("If that email exists, a reset link was sent.");
+        setMode("reset-sent");
+      } else if (mode === "reset") {
+        await syncClient.resetPassword(token, newPassword);
+        setStatus("Password reset. You can sign in now.");
+        setMode("login");
+      } else if (mode === "restore") {
+        const data = await syncClient.cancelAccountDeletion(email, password);
+        onSignedIn(data.user);
+      }
     } catch (err) {
-      setError(err.message || "Sign in failed");
+      if (err.data?.code === "EMAIL_NOT_VERIFIED") {
+        setEmail(err.data.email || email);
+        setMode("verify-sent");
+        setError("Verify your email before signing in.");
+      } else if (err.data?.code === "ACCOUNT_DELETION_PENDING") {
+        setEmail(err.data.email || email);
+        setMode("restore");
+        setError(`This account is scheduled for deletion on ${formatSessionTime(err.data.deletionScheduledAt)}.`);
+      } else {
+        setError(err.message || "Account request failed");
+      }
     } finally {
       setSubmitting(false);
     }
   };
+
+  const resendVerification = async () => {
+    clearMessages();
+    setSubmitting(true);
+    try {
+      const data = await syncClient.resendVerification(email);
+      captureDebugLink(data, "verification");
+      setStatus("Verification email sent.");
+    } catch (err) {
+      setError(err.message || "Could not resend verification.");
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  const revokeSession = async (session) => {
+    setSubmitting(true);
+    try {
+      const result = await syncClient.revokeSession(session.id);
+      if (result.currentRevoked) {
+        await onSignedOut();
+        return;
+      }
+      await loadSessions();
+    } catch (err) {
+      setError(err.message || "Could not revoke session.");
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  const revokeOthers = async () => {
+    setSubmitting(true);
+    try {
+      await syncClient.revokeOtherSessions();
+      await loadSessions();
+      setStatus("Other sessions signed out.");
+    } catch (err) {
+      setError(err.message || "Could not revoke sessions.");
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  const deleteAccount = async (event) => {
+    event.preventDefault();
+    clearMessages();
+    setSubmitting(true);
+    try {
+      const deletion = await syncClient.deleteAccount(deletePassword);
+      onAccountDeleted(deletion);
+    } catch (err) {
+      setError(err.message || "Could not schedule deletion.");
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
   return (
     <ModalShell title="OpenPT account" onClose={onClose}>
-      <form className="modal-body" onSubmit={submit}>
-        <div className="segmented">
-          <button type="button" disabled={submitting} className={mode === "login" ? "active" : ""} onClick={() => setMode("login")}>Sign in</button>
-          <button type="button" disabled={submitting} className={mode === "register" ? "active" : ""} onClick={() => setMode("register")}>Create account</button>
-        </div>
-        <label>Email<input value={email} onChange={(e) => setEmail(e.target.value)} type="email" required disabled={submitting} /></label>
-        <label>Password<input value={password} onChange={(e) => setPassword(e.target.value)} type="password" minLength={8} required disabled={submitting} /></label>
-        <label className="hp-field">Company<input value={company} onChange={(e) => setCompany(e.target.value)} tabIndex="-1" autoComplete="off" /></label>
-        {error && <div className="modal-error">{error}</div>}
-        <button className="tb-btn primary" type="submit" disabled={submitting}>{submitting ? "Working..." : (mode === "login" ? "Sign in" : "Create account")}</button>
-      </form>
+      <div className="modal-body account-panel">
+        {!user && !["verify", "reset", "restore"].includes(mode) && (
+          <div className="segmented">
+            <button type="button" disabled={submitting} className={mode === "login" ? "active" : ""} onClick={() => { clearMessages(); setMode("login"); }}>Sign in</button>
+            <button type="button" disabled={submitting} className={mode === "register" ? "active" : ""} onClick={() => { clearMessages(); setMode("register"); }}>Create account</button>
+          </div>
+        )}
+
+        {user && mode === "account" ? (
+          <>
+            <div className="account-summary">
+              <div>
+                <span>Signed in</span>
+                <strong>{user.email}</strong>
+              </div>
+              <button className="tb-btn" disabled={submitting} onClick={onSignedOut}>Logout</button>
+            </div>
+            <div className="modal-actions">
+              <button className="tb-btn" disabled={submitting} onClick={() => { setEmail(user.email); setMode("forgot"); }}>Reset password</button>
+              <button className="tb-btn" disabled={submitting} onClick={revokeOthers}>Sign out other sessions</button>
+              <button className="tb-btn" disabled={submitting} onClick={() => loadSessions().catch(() => {})}>Refresh sessions</button>
+            </div>
+            <div className="session-list">
+              {!sessions.length && <div className="empty-row">No active sessions.</div>}
+              {sessions.map((session) => (
+                <div key={session.id} className={`session-row ${session.current ? "current" : ""}`}>
+                  <div>
+                    <strong>{session.clientLabel}{session.current ? " (current)" : ""}</strong>
+                    <small>{formatSessionTime(session.lastSeenAt)} · expires {formatSessionTime(session.expiresAt)}</small>
+                  </div>
+                  <button className="tb-btn" disabled={submitting} onClick={() => revokeSession(session)}>Revoke</button>
+                </div>
+              ))}
+            </div>
+            <form className="danger-zone" onSubmit={deleteAccount}>
+              <div>
+                <strong>Delete account</strong>
+                <small>Deletion is scheduled for 14 days and can be canceled by signing in during the grace period.</small>
+              </div>
+              <label>Password<input value={deletePassword} onChange={(e) => setDeletePassword(e.target.value)} type="password" required disabled={submitting} /></label>
+              <button className="tb-btn" type="submit" disabled={submitting || !deletePassword}>Schedule deletion</button>
+            </form>
+          </>
+        ) : (
+          <form onSubmit={submit} className="account-form">
+            {(mode === "login" || mode === "register" || mode === "forgot" || mode === "restore") && (
+              <label>Email<input value={email} onChange={(e) => setEmail(e.target.value)} type="email" required disabled={submitting} /></label>
+            )}
+            {(mode === "login" || mode === "register" || mode === "restore") && (
+              <label>Password<input value={password} onChange={(e) => setPassword(e.target.value)} type="password" minLength={8} required disabled={submitting} /></label>
+            )}
+            {mode === "register" && <label className="hp-field">Company<input value={company} onChange={(e) => setCompany(e.target.value)} tabIndex="-1" autoComplete="off" /></label>}
+            {(mode === "verify" || mode === "reset") && (
+              <label>Token<input value={token} onChange={(e) => setToken(e.target.value)} required disabled={submitting} /></label>
+            )}
+            {mode === "reset" && (
+              <label>New password<input value={newPassword} onChange={(e) => setNewPassword(e.target.value)} type="password" minLength={8} required disabled={submitting} /></label>
+            )}
+            {mode === "verify-sent" && (
+              <div className="sync-line">Check your inbox for the verification link.</div>
+            )}
+            {mode === "reset-sent" && (
+              <div className="sync-line">Check your inbox for the password reset link.</div>
+            )}
+            {error && <div className="modal-error">{error}</div>}
+            {status && <div className="modal-success">{status}</div>}
+            {debugLink && <div className="debug-link"><a href={debugLink}>{debugLink}</a></div>}
+            <div className="modal-actions">
+              {mode === "verify-sent" ? (
+                <>
+                  <button className="tb-btn primary" type="button" disabled={submitting || !email} onClick={resendVerification}>{submitting ? "Working..." : "Resend verification"}</button>
+                  <button className="tb-btn" type="button" onClick={() => { clearMessages(); setMode("login"); }}>Back to sign in</button>
+                </>
+              ) : mode === "reset-sent" ? (
+                <>
+                  <button className="tb-btn primary" type="button" onClick={() => { clearMessages(); setMode("reset"); }}>Enter reset token</button>
+                  <button className="tb-btn" type="button" onClick={() => { clearMessages(); setMode("login"); }}>Back to sign in</button>
+                </>
+              ) : (
+                <button className="tb-btn primary" type="submit" disabled={submitting}>
+                  {submitting ? "Working..." : mode === "register" ? "Create account" : mode === "forgot" ? "Send reset link" : mode === "verify" ? "Verify email" : mode === "reset" ? "Reset password" : mode === "restore" ? "Cancel deletion" : "Sign in"}
+                </button>
+              )}
+              {mode === "login" && <button className="tb-btn" type="button" onClick={() => { clearMessages(); setMode("forgot"); }}>Forgot password</button>}
+              {mode === "forgot" && <button className="tb-btn" type="button" onClick={() => { clearMessages(); setMode("login"); }}>Back to sign in</button>}
+            </div>
+          </form>
+        )}
+      </div>
     </ModalShell>
   );
 }
 
-function ProjectsDialog({ projects, cloudUser, syncStatus, onClose, onOpen, onCreate, onRefresh, onLogout, onRollback, canRollback }) {
+function ProjectsDialog({
+  projects,
+  localProjects,
+  cloudUser,
+  syncStatus,
+  activeWid,
+  activeCloudProjectId,
+  activeCloudVersion,
+  dirtyTabs,
+  onClose,
+  onOpen,
+  onOpenLocal,
+  onUploadLocal,
+  onRefresh,
+  onRollback,
+  canRollback,
+  onRenameLocal,
+  onDuplicateLocal,
+  onDeleteLocal,
+  onRenameCloud,
+  onDuplicateCloud,
+  onDeleteCloud,
+}) {
   const [pending, setPending] = useState("");
+  const [view, setView] = useState("recent");
+  const [editing, setEditing] = useState(null);
+  const [draftTitle, setDraftTitle] = useState("");
+  const [openMenu, setOpenMenu] = useState(null);
   const run = async (name, action) => {
     if (pending) return;
     setPending(name);
@@ -4204,40 +5145,157 @@ function ProjectsDialog({ projects, cloudUser, syncStatus, onClose, onOpen, onCr
       setPending("");
     }
   };
+
+  const cloudById = new Map((projects || []).map((project) => [project.id, project]));
+  const localRows = (localProjects || []).map((project) => {
+    const cloud = project.cloudProjectId ? cloudById.get(project.cloudProjectId) : null;
+    const isActive = project.id === activeWid;
+    const hasConflict = !!cloud && Number(cloud.version || 0) > Number(project.cloudVersion || 0);
+    const status = hasConflict ? "Conflict" : project.cloudProjectId ? (dirtyTabs?.[project.id] || isActive && syncStatus.state === "dirty" ? "Local changes" : "Synced copy") : "Local";
+    return { kind: "local", key: `local:${project.id}`, project, cloud, title: project.title, updatedAt: project.updatedAt, status, hasConflict, isActive };
+  });
+  const cloudRows = (projects || []).map((project) => {
+    const local = localRows.find((row) => row.project.cloudProjectId === project.id);
+    const isActive = project.id === activeCloudProjectId;
+    const hasConflict = !!local && Number(project.version || 0) > Number(local.project.cloudVersion || 0);
+    const status = hasConflict ? "Server newer" : isActive ? (syncStatus.state === "dirty" ? "Local changes" : syncStatus.message) : "Cloud";
+    return { kind: "cloud", key: `cloud:${project.id}`, project, local: local?.project || null, title: project.title, updatedAt: project.updatedAt, status, hasConflict, isActive };
+  });
+  const recentRows = [...localRows, ...cloudRows.filter((row) => !localRows.some((local) => local.project.cloudProjectId === row.project.id))]
+    .sort((a, b) => new Date(b.updatedAt || 0) - new Date(a.updatedAt || 0));
+  const visibleRows = view === "local" ? localRows : view === "cloud" ? cloudRows : view === "conflicts" ? recentRows.filter((row) => row.hasConflict) : recentRows;
+
+  const startRename = (row) => {
+    setEditing(row.key);
+    setDraftTitle(row.title || "");
+  };
+  const commitRename = async (row) => {
+    const clean = stripProjectExtension(draftTitle || "").trim();
+    setEditing(null);
+    if (!clean || clean === row.title) return;
+    if (row.kind === "local") onRenameLocal(row.project.id, clean);
+    else await run(`rename:${row.key}`, () => onRenameCloud(row.project, clean));
+  };
+  const openRow = (row) => row.kind === "local"
+    ? run(`open:${row.key}`, () => onOpenLocal(row.project))
+    : run(`open:${row.key}`, () => onOpen(row.project.id));
+  const runMenu = (name, action) => {
+    setOpenMenu(null);
+    return run(name, action);
+  };
+
   return (
-    <ModalShell title="Synced projects" onClose={onClose}>
-      <div className="modal-body">
-        <div className="account-row">
-          <span>{cloudUser?.email}</span>
-          <button className="tb-btn" disabled={!!pending} onClick={() => run("logout", onLogout)}>Logout</button>
-        </div>
-        <div className="sync-line">{syncStatus.message}</div>
-        <div className="modal-actions">
-          <button className="tb-btn primary" disabled={!!pending} onClick={() => run("create", onCreate)}>{pending === "create" ? "Saving..." : "Save current project to cloud"}</button>
-          <button className="tb-btn" disabled={!!pending} onClick={() => run("refresh", onRefresh)}>Refresh</button>
-        </div>
-        <div className="project-list">
-          {!projects.length && <div className="empty-row">No synced projects yet.</div>}
-          {projects.map((p) => (
-            <button key={p.id} className="project-row" disabled={!!pending} onClick={() => run(`open:${p.id}`, () => onOpen(p.id))}>
-              <span>{p.title}</span>
-              <small>v{p.version} · {Math.round((p.bytes || 0) / 1024)} KB</small>
+    <ModalShell title={<span className="project-modal-title">Projects <span>- {cloudUser?.email || "Local browser"}</span></span>} onClose={onClose}>
+      <div className="modal-body project-browser">
+        <div className="segmented project-browser-tabs">
+          {[
+            ["recent", "Recent", recentRows.length],
+            ["local", "Local", localRows.length],
+            ["cloud", "Cloud", cloudRows.length],
+          ].map(([key, label, count]) => (
+            <button key={key} type="button" className={view === key ? "active" : ""} onClick={() => setView(key)}>
+              {label} <span>{count}</span>
             </button>
           ))}
         </div>
-        {canRollback && (
-          <>
-            <div className="modal-sep"/>
-            <div className="rollback-row">
-              {["1m", "5m", "10m", "30m", "1h"].map((target) => (
-                <button key={target} className="tb-btn" disabled={!!pending} onClick={() => run(`rollback:${target}`, () => onRollback(target))}>Rollback {target}</button>
-              ))}
+        <div className="modal-actions project-browser-tools">
+          <button className="tb-btn icon-only" title="Refresh projects" aria-label="Refresh projects" disabled={!!pending || !cloudUser} onClick={() => run("refresh", onRefresh)}>
+            {Icon.reset()}
+          </button>
+        </div>
+        <div className="project-list project-browser-list">
+          {!visibleRows.length && <div className="empty-row">No projects in this view.</div>}
+          {visibleRows.map((row) => (
+            <div key={row.key} className={`project-row project-browser-row ${row.isActive ? "active" : ""} ${row.hasConflict ? "conflict" : ""}`}>
+              <div className="project-row-main" onClick={() => openRow(row)}>
+                <span className="project-row-title">
+                  {editing === row.key ? (
+                    <input
+                      value={draftTitle}
+                      autoFocus
+                      onChange={(e) => setDraftTitle(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter") commitRename(row);
+                        if (e.key === "Escape") setEditing(null);
+                      }}
+                      onBlur={() => commitRename(row)}
+                    />
+                  ) : row.title}
+                </span>
+                <small>
+                  <ProjectStatusBadge kind={row.kind} status={row.status} conflict={row.hasConflict} />
+                  <span>{row.kind === "cloud" ? `v${row.project.version}` : `${row.project.devices || 0} devices`}</span>
+                  <span>{formatProjectBytes(row.project.bytes || 0)}</span>
+                  <span>{formatProjectTime(row.updatedAt)}</span>
+                </small>
+              </div>
+              <div className="project-row-actions">
+                <button
+                  type="button"
+                  className="tb-btn icon-only project-menu-button"
+                  aria-label={`Actions for ${row.title}`}
+                  aria-expanded={openMenu === row.key}
+                  disabled={!!pending}
+                  onClick={() => setOpenMenu(openMenu === row.key ? null : row.key)}
+                >
+                  ...
+                </button>
+                {openMenu === row.key && (
+                  <div className="project-row-menu">
+                    {row.hasConflict && row.kind === "local" && row.cloud && (
+                      <button type="button" disabled={!!pending} onClick={() => runMenu(`server:${row.key}`, () => onOpen(row.cloud.id))}>Use server copy</button>
+                    )}
+                    {row.kind === "local" && !row.project.cloudProjectId && (
+                      <button type="button" disabled={!!pending || !cloudUser} onClick={() => runMenu(`upload:${row.key}`, () => onUploadLocal(row.project))}>Upload to cloud</button>
+                    )}
+                    <button type="button" disabled={!!pending} onClick={() => { setOpenMenu(null); openRow(row); }}>Open</button>
+                    <button type="button" disabled={!!pending || editing === row.key} onClick={() => { setOpenMenu(null); startRename(row); }}>Rename</button>
+                    <button type="button" disabled={!!pending} onClick={() => runMenu(`dup:${row.key}`, () => row.kind === "local" ? onDuplicateLocal(row.project) : onDuplicateCloud(row.project))}>Duplicate</button>
+                    {canRollback && row.isActive && (
+                      <div className="project-submenu">
+                        <button type="button" disabled={!!pending}>Rollback <span>&gt;</span></button>
+                        <div className="project-submenu-menu">
+                          {["1m", "5m", "10m", "30m", "1h"].map((target) => (
+                            <button key={target} type="button" disabled={!!pending} onClick={() => runMenu(`rollback:${target}`, () => onRollback(target))}>{target}</button>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                    <button type="button" className="danger" disabled={!!pending} onClick={() => runMenu(`del:${row.key}`, () => row.kind === "local" ? onDeleteLocal(row.project) : onDeleteCloud(row.project))}>Delete</button>
+                  </div>
+                )}
+              </div>
             </div>
-          </>
-        )}
+          ))}
+        </div>
       </div>
     </ModalShell>
   );
+}
+
+function ProjectStatusBadge({ kind, status, conflict }) {
+  const cls = conflict ? "conflict" : kind;
+  return <span className={`project-status-badge ${cls}`}>{status}</span>;
+}
+
+function formatProjectBytes(bytes) {
+  const n = Number(bytes) || 0;
+  if (n >= 1024 * 1024) return `${(n / 1024 / 1024).toFixed(1)} MB`;
+  return `${Math.max(1, Math.round(n / 1024))} KB`;
+}
+
+function formatProjectTime(iso) {
+  if (!iso) return "recently";
+  const date = new Date(iso);
+  if (!Number.isFinite(date.getTime())) return "recently";
+  return date.toLocaleDateString(undefined, { month: "short", day: "numeric" });
+}
+
+function formatSessionTime(iso) {
+  if (!iso) return "unknown";
+  const date = new Date(iso);
+  if (!Number.isFinite(date.getTime())) return "unknown";
+  return date.toLocaleString(undefined, { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
 }
 
 function ShareDialog({ onClose, onShare, shareUrl }) {
@@ -4315,18 +5373,10 @@ function PingDialog({ device, initialTarget, recentTargets, onClose, onSubmit })
 }
 
 function computeDiagnostics(devices, links) {
-  const items = [];
-  for (const d of Object.values(devices)) {
-    if (OPT_Engine.isHostLike?.(d)) {
-      const hostIface = d.interfaces?.eth0 ? "eth0" : (d.interfaces?.en0 ? "en0" : Object.keys(d.interfaces || {})[0]);
-      const e = d.interfaces?.[hostIface];
-      if (!e || !e.ip) items.push({ label: `⚠ ${d.hostname}: no IP on ${hostIface || "host interface"}`, disabled: true });
-      else if (!e.gw) items.push({ label: `⚠ ${d.hostname}: no default gateway`, disabled: true });
-    }
-    if (OPT_Engine.isRouterLike?.(d) && !OPT_Engine.isSwitchLike?.(d) && (!d.routes || d.routes.length === 0)) {
-      items.push({ label: `⚠ ${d.hostname}: routing table empty`, disabled: true });
-    }
-  }
+  const iconFor = { err: "✕", warn: "⚠", info: "i" };
+  const items = (OPT_Engine.validateTopology?.(devices, links) || [])
+    .slice(0, 12)
+    .map((issue) => ({ label: `${iconFor[issue.severity] || "i"} ${issue.title}`, disabled: true }));
   if (!items.length) items.push({ label: "✓ All baseline checks passing", disabled: true });
   return items;
 }
@@ -4434,6 +5484,139 @@ function packetTracerAssessmentSections(activity) {
   };
 }
 
+function packetTracerImportReport(activity) {
+  if (!activity) return { imported: [], skipped: [], approximated: [], broken: [], summary: "No Packet Tracer import data available." };
+  const sections = packetTracerAssessmentSections(activity);
+  const assessmentCount = (sections.assessmentItems?.length || 0) + (sections.connectivityTests?.length || 0);
+  const coverageItems = activity.featureCoverage?.coverageItems || [];
+  if (coverageItems.length) {
+    const imported = [];
+    const skipped = [];
+    const approximated = [];
+    const broken = [];
+    const seen = new Set();
+    const sourceSuffix = (item) => {
+      const source = item.source || {};
+      const parts = [
+        source.xmlPath,
+        source.checkType ? `checkType ${source.checkType}` : "",
+        source.eclass ? `eclass ${source.eclass}` : "",
+        source.objectId ? `id ${source.objectId}` : "",
+      ].filter(Boolean);
+      return parts.length ? ` Source: ${parts.join(" · ")}.` : "";
+    };
+    const add = (bucket, item) => {
+      const key = `${item.status || "exact"}:${item.id || item.label}:${item.detail}`;
+      if (seen.has(key)) return;
+      seen.add(key);
+      bucket.push({
+        label: item.label || item.category || "Packet Tracer feature",
+        detail: `${item.detail || ""}${sourceSuffix(item)}`.trim(),
+        source: item.source || {},
+        evidence: item.evidence || {},
+      });
+    };
+    for (const item of coverageItems) {
+      if (!item) continue;
+      const status = String(item.status || "exact").toLowerCase();
+      if (status === "exact" || status === "imported") add(imported, item);
+      else if (status === "broken") add(broken, item);
+      else if (status === "approx" || status === "approximated" || status === "approximate") add(approximated, item);
+      else add(skipped, item);
+    }
+    for (const item of activity.gradingRun?.unsupported || []) {
+      add(skipped, {
+        id: `assessment.checker.${item.reason}`,
+        status: "missing",
+        label: `Assessment checker: ${item.reason}`,
+        detail: `${plural(item.count, "visible scored assessment item")} still grades as Unchecked.`,
+        source: { xmlPath: "/ACTIVITY/ASSESSMENTITEMS", checkType: item.reason },
+      });
+    }
+    const decoder = activity.reverseReport?.decoder || activity.diagnostics?.decoder || {};
+    if (decoder.error && !broken.some((item) => item.detail.includes(decoder.error))) {
+      broken.push({ label: "Decoder", detail: decoder.error });
+    }
+    if (!activity.unsupported && !activity.devices?.length && !activity.links?.length) {
+      broken.push({ label: "Topology", detail: "The file decoded, but no renderable devices or links were extracted." });
+    }
+    const summaryParts = [
+      `${imported.length} imported`,
+      `${skipped.length} skipped`,
+      `${approximated.length} approximated`,
+      `${broken.length} broken`,
+    ];
+    return {
+      imported,
+      skipped,
+      approximated,
+      broken,
+      summary: summaryParts.join(" / "),
+      hasIssues: !!(skipped.length || approximated.length || broken.length),
+    };
+  }
+  const devices = activity.devices || [];
+  const links = activity.links || [];
+  const decoded = activity.decoded || {};
+  const decoder = activity.reverseReport?.decoder || activity.diagnostics?.decoder || {};
+  const coverage = activity.featureCoverage || {};
+  const rawStorage = activity.rawFile?.storage || {};
+  const answerDeviceCount = Object.values(activity.answerCommands || {}).filter((lines) => Array.isArray(lines) && lines.length).length;
+  const hiddenObjects = decoded.hiddenObjects || [];
+  const imported = [];
+  const skipped = [];
+  const approximated = [];
+  const broken = [];
+
+  if (activity.instructionsHtml || activity.instructionsText) {
+    imported.push({ label: "Instructions", detail: "Assignment instructions were imported into the sidebar." });
+  } else if (!activity.unsupported) {
+    skipped.push({ label: "Instructions", detail: "No readable instructions were found in the decoded activity." });
+  }
+
+  if (devices.length) imported.push({ label: "Topology devices", detail: `${plural(devices.length, "device")} extracted from the logical workspace.` });
+  if (links.length) imported.push({ label: "Topology links", detail: `${plural(links.length, "link")} extracted and connected on the canvas.` });
+  if (assessmentCount) imported.push({ label: "Assessment", detail: `${plural(assessmentCount, "assessment item")} imported, including ${sections.connectivityTests.length} connectivity checks.` });
+  else if (!activity.unsupported) skipped.push({ label: "Assessment", detail: "No visible scored assessment items were found or classified." });
+  if (answerDeviceCount) imported.push({ label: "Device configs", detail: `Running configuration lines were captured for ${plural(answerDeviceCount, "device")}.` });
+  if (decoded.xmlText || decoded.xmlLength) imported.push({ label: "Decoded XML", detail: `Packet Tracer XML was preserved for follow-up analysis${decoded.xmlLength ? ` (${decoded.xmlLength} characters)` : ""}.` });
+  if (rawStorage.stored) imported.push({ label: "Original file", detail: `Raw PKA/PKT bytes were preserved in ${rawStorage.backend || "browser storage"}.` });
+  else if (activity.rawFile) broken.push({ label: "Original file", detail: `Raw file preservation failed${rawStorage.reason ? `: ${rawStorage.reason}` : "."}` });
+
+  if (hiddenObjects.length) skipped.push({ label: "Hidden objects", detail: `${plural(hiddenObjects.length, "Packet Tracer object")} was not rendered on the OpenPT canvas.` });
+  for (const item of coverage.preservedButUnsupported || []) {
+    skipped.push({ label: "Packet Tracer-only feature", detail: item });
+  }
+
+  if (activity.unsupported) {
+    skipped.push({ label: "Topology", detail: "Devices, links, configs, assessments, and workspace objects were not extracted." });
+    broken.push({ label: "Extractor coverage", detail: decoder.error || "No packaged extractor profile can decode this file yet." });
+  } else {
+    if (devices.length) approximated.push({ label: "Device models", detail: "Packet Tracer models were mapped to the closest OpenPT device/platform type." });
+    if (links.length) approximated.push({ label: "Cable media", detail: "Packet Tracer cable details were normalized to OpenPT copper or serial links." });
+    if (devices.length || links.length) approximated.push({ label: "Canvas layout", detail: "Logical workspace coordinates may be nudged to fit the OpenPT canvas." });
+    if (assessmentCount) approximated.push({ label: "Assessment checks", detail: "Packet Tracer rubric items were converted to OpenPT check rows; unsupported checks remain unchecked until implemented." });
+  }
+
+  if (decoder.error && !activity.unsupported) broken.push({ label: "Decoder", detail: decoder.error });
+  if (!activity.unsupported && !devices.length && !links.length) broken.push({ label: "Topology", detail: "The file decoded, but no renderable devices or links were extracted." });
+
+  const summaryParts = [
+    `${imported.length} imported`,
+    `${skipped.length} skipped`,
+    `${approximated.length} approximated`,
+    `${broken.length} broken`,
+  ];
+  return {
+    imported,
+    skipped,
+    approximated,
+    broken,
+    summary: summaryParts.join(" / "),
+    hasIssues: !!(skipped.length || approximated.length || broken.length),
+  };
+}
+
 function packetTracerRubricLeafComponent(label, pathParts = []) {
   const text = [...pathParts, label].join(" ").toLowerCase();
   if (/\blink\b|connection|cable/.test(text)) return "Device Connections";
@@ -4481,6 +5664,12 @@ function packetTracerItemsFromRubricPattern(pattern) {
 }
 
 function packetTracerGradeSourceItems(activity) {
+  const modelLeaves = (activity?.assessmentModel?.leaves || []).filter((item) => item.visible !== false && (Number(item.points) || 0) > 0);
+  if (modelLeaves.length) return modelLeaves.map((item) => ({
+    ...item,
+    rootName: item.rootName || item.pathParts?.[0] || "Assessment Items",
+    parentPath: item.parentPath || (item.pathParts || []).slice(0, -1).join(" / "),
+  }));
   const imported = packetTracerVisibleAssessmentItems(activity, activity?.assessmentItems || []);
   if (imported.length) return imported;
   return packetTracerItemsFromRubricPattern(activity?.rubricPattern || []);
@@ -4545,13 +5734,23 @@ function packetTracerItemTarget(item, devices) {
   const parts = packetTracerAssessmentPathParts(item);
   let device = null;
   let iface = null;
+  if (item?.target?.deviceName || item?.target?.packetTracerDeviceName || item?.target?.saveRefId || item?.target?.memAddr) {
+    device = packetTracerDeviceByName(devices, item.target.deviceName) ||
+      packetTracerDeviceByName(devices, item.target.packetTracerDeviceName) ||
+      Object.values(devices || {}).find((candidate) => {
+        return [candidate.packetTracer?.saveRefId, candidate.packetTracer?.memAddr].some((value) => value && (value === item.target.saveRefId || value === item.target.memAddr));
+      }) || null;
+  }
   for (const part of parts) {
+    if (device) break;
     device = packetTracerDeviceByName(devices, part);
     if (device) break;
   }
   if (!device) device = packetTracerExtractDeviceFromText(devices, [item?.path, item?.name, item?.parentPath].filter(Boolean).join(" / "));
   if (device) {
+    if (item?.target?.interfaceName) iface = packetTracerIfaceByName(device, item.target.interfaceName);
     for (const part of parts) {
+      if (iface) break;
       iface = packetTracerIfaceByName(device, part);
       if (iface) break;
     }
@@ -4645,6 +5844,12 @@ function packetTracerAnswerExpectations(activity, devices) {
       if (match) setForIfaces((data) => { data.channelGroup = { id: Number(match[1]), mode: match[2] }; });
       match = cmd.match(/^ip address (\S+) (\S+)$/);
       if (match) setForIfaces((data) => { data.ip = match[1]; data.mask = match[2]; });
+      match = cmd.match(/^switchport voice vlan (\d+)$/);
+      if (match) setForIfaces((data) => { data.voiceVlan = Number(match[1]); });
+      match = cmd.match(/^shutdown$/);
+      if (match) setForIfaces((data) => { data.admUp = false; });
+      match = cmd.match(/^no shutdown$/);
+      if (match) setForIfaces((data) => { data.admUp = true; });
     }
   }
   return expected;
@@ -4654,127 +5859,326 @@ function packetTracerCompare(actual, expected) {
   return packetTracerNormText(actual) === packetTracerNormText(expected);
 }
 
+function packetTracerExpectedText(item) {
+  const candidates = [
+    item?.expected?.primary,
+    item?.expected?.command,
+    item?.value,
+    item?.attrs?.expected,
+    item?.attrs?.value,
+    item?.attrs?.nodeValue,
+    item?.attrs?.checkValue,
+    item?.fields?.VALUE,
+    item?.fields?.EXPECTED,
+    item?.name,
+  ].filter(Boolean);
+  return String(candidates[0] || "");
+}
+
+function packetTracerConfigText(device) {
+  return packetTracerNormText(OPT_Engine.serializeConfig?.(device) || "");
+}
+
+function packetTracerGradeResult(item, base, result) {
+  const points = base.points;
+  const status = result.status || (result.correct ? "Correct" : "Incorrect");
+  const correct = status === "Correct";
+  const unchecked = status === "Unchecked";
+  return {
+    ...item,
+    points,
+    earnedPoints: correct ? points : 0,
+    correct,
+    unchecked,
+    status,
+    feedback: result.feedback || (correct ? "Passed" : unchecked ? "OpenPT does not have a checker for this Packet Tracer item yet" : "Does not match the expected state"),
+    checkerId: result.checkerId || base.checkerId || "unknown",
+    confidence: result.confidence || (unchecked ? "none" : "medium"),
+    expected: result.expected ?? item?.expected ?? null,
+    actual: result.actual ?? null,
+    evidence: {
+      ...(result.evidence || {}),
+      target: {
+        device: base.device?.hostname || base.device?.name || item?.target?.deviceName || "",
+        interface: base.iface || item?.target?.interfaceName || "",
+      },
+      decoded: {
+        checkType: item?.checkType || "",
+        rootCheckType: item?.rootCheckType || "",
+        eclass: item?.eclass || "",
+        rawXml: item?.rawXml || "",
+      },
+    },
+  };
+}
+
+function packetTracerUnsupported(item, base, feedback, reason = "missing-xml-mapping") {
+  return packetTracerGradeResult(item, base, {
+    status: "Unchecked",
+    feedback,
+    checkerId: base.checkerId || "unsupported",
+    confidence: "none",
+    evidence: { unsupportedReason: reason },
+  });
+}
+
+function packetTracerTransferredStateEntry(item, context = {}) {
+  const state = context.packetTracerState || {};
+  return state.assessmentByRawXml?.[item?.rawXml] ||
+    state.assessmentById?.[item?.id] ||
+    state.assessmentByPath?.[item?.path] ||
+    null;
+}
+
+function packetTracerGradeTransferredState(item, base, context = {}) {
+  const entry = packetTracerTransferredStateEntry(item, context);
+  if (!entry) return null;
+  return packetTracerGradeResult(item, { ...base, checkerId: "packet-tracer.transferred-state" }, {
+    status: "Correct",
+    checkerId: "packet-tracer.transferred-state",
+    confidence: entry.classification === "authored-rubric" ? "medium" : "high",
+    feedback: "Matched transferred Packet Tracer state",
+    expected: entry.value,
+    actual: entry.value,
+    evidence: {
+      packetTracerState: {
+        classification: entry.classification,
+        source: entry.source,
+      },
+    },
+  });
+}
+
+function packetTracerCommandLikeExpected(item) {
+  const text = packetTracerExpectedText(item);
+  return /^(?:hostname|ip|switchport|channel-group|router|network|line|transport|access-list|interface|vlan|spanning-tree|service|crypto|username|enable|ntp|logging)\b/i.test(text.trim()) ? text.trim() : "";
+}
+
+function packetTracerAclSummary(device) {
+  return Object.entries(device?.acls || {}).flatMap(([name, acl]) => (acl.entries || []).map((entry) => `${name} ${entry.action} ${entry.spec || [entry.proto, entry.src, entry.dst].filter(Boolean).join(" ")}`));
+}
+
+function packetTracerRouteSummary(device) {
+  return (device?.routes || []).filter((route) => route.type === "S").map((route) => `ip route ${route.dst} ${route.mask} ${route.via}`);
+}
+
+const PACKET_TRACER_CHECKERS = [
+  {
+    id: "identity.hostname",
+    supports: ({ text, device, expected }) => /display name|host ?name/.test(text) && device && expected?.hostname,
+    grade: ({ device, expected }) => ({
+      status: packetTracerCompare(device.hostname, expected.hostname) ? "Correct" : "Incorrect",
+      feedback: packetTracerCompare(device.hostname, expected.hostname) ? `${device.hostname} matches` : `Expected hostname ${expected.hostname}`,
+      expected: expected.hostname,
+      actual: device.hostname,
+    }),
+  },
+  {
+    id: "topology.link-type",
+    supports: ({ text, device, iface }) => /link type|cable type/.test(text) && device && iface,
+    grade: ({ text, device, iface, context }) => {
+      const link = packetTracerFindLink(context.devices, context.links, device, iface);
+      if (!link) return { status: "Incorrect", feedback: `No link on ${device.hostname} ${iface}`, actual: null };
+      const actual = link.type || link.packetTracer?.type || "";
+      if (/serial/.test(text)) return { status: /serial/i.test(actual) ? "Correct" : "Incorrect", feedback: /serial/i.test(actual) ? "Serial link" : "Expected serial link", expected: "serial", actual };
+      if (/copper|ethernet|straight/.test(text) || /trunk configuration/.test(text)) return { status: /serial/i.test(actual) ? "Incorrect" : "Correct", feedback: /serial/i.test(actual) ? "Expected Ethernet/copper link" : "Ethernet link", expected: "ethernet", actual };
+      return { status: "Correct", feedback: "Link type present", actual };
+    },
+  },
+  {
+    id: "topology.peer",
+    supports: ({ text, device, iface }) => /link to|connects to|connection|cable/.test(text) && device && iface,
+    grade: ({ text, device, iface, context }) => {
+      const peerMatch = packetTracerExpectedLinkPeer(text);
+      if (!peerMatch) return { status: "Unchecked", feedback: "Expected link peer was not decoded for this item", evidence: { unsupportedReason: "missing-xml-mapping" } };
+      const link = packetTracerFindLink(context.devices, context.links, device, iface);
+      if (!link) return { status: "Incorrect", feedback: `No link on ${device.hostname} ${iface}`, expected: `${peerMatch[1]} ${peerMatch[2]}`, actual: null };
+      const { peer, peerIface } = packetTracerLinkPeer(context.devices, link, device);
+      const peerNameOk = packetTracerCompare(peer?.hostname, peerMatch[1]) || packetTracerCompare(peer?.name, peerMatch[1]) || packetTracerCompare(peer?.packetTracer?.name, peerMatch[1]);
+      const peerIfaceOk = packetTracerIfaceKey(peerIface) === packetTracerIfaceKey(peerMatch[2]);
+      return {
+        status: peerNameOk && peerIfaceOk ? "Correct" : "Incorrect",
+        feedback: peerNameOk && peerIfaceOk ? `Linked to ${peer.hostname} ${peerIface}` : `Expected link to ${peerMatch[1]} ${peerMatch[2]}`,
+        expected: `${peerMatch[1]} ${peerMatch[2]}`,
+        actual: `${peer?.hostname || "unknown"} ${peerIface || ""}`.trim(),
+      };
+    },
+  },
+  {
+    id: "interface.switchport-mode",
+    supports: ({ text, actualIface }) => /port mode|switchport mode/.test(text) && actualIface,
+    grade: ({ text, iface, expectedIface, actualIface }) => {
+      const want = expectedIface?.mode || (/trunk/.test(text) ? "trunk" : /access/.test(text) ? "access" : null);
+      if (!want) return { status: "Unchecked", feedback: "Expected switchport mode was not decoded", evidence: { unsupportedReason: "missing-xml-mapping" } };
+      return { status: actualIface.mode === want ? "Correct" : "Incorrect", feedback: actualIface.mode === want ? `${iface} is ${want}` : `Expected ${iface} switchport mode ${want}`, expected: want, actual: actualIface.mode || "" };
+    },
+  },
+  {
+    id: "interface.vlan",
+    supports: ({ text, actualIface }) => /access vlan|vlan membership|assigned vlan|voice vlan|native vlan|allowed vlan/.test(text) && actualIface,
+    grade: ({ text, item, iface, expectedIface, actualIface }) => {
+      const raw = [packetTracerExpectedText(item), item?.name, item?.path].filter(Boolean).join(" ");
+      const want = expectedIface?.vlan || expectedIface?.voiceVlan || expectedIface?.nativeVlan || (raw.match(/\b(\d+)\b/) || [])[1];
+      if (!want && !/allowed vlan/.test(text)) return { status: "Unchecked", feedback: "Expected VLAN was not decoded", evidence: { unsupportedReason: "missing-xml-mapping" } };
+      if (/voice vlan/.test(text)) return { status: Number(actualIface.voiceVlan) === Number(want) ? "Correct" : "Incorrect", feedback: Number(actualIface.voiceVlan) === Number(want) ? `${iface} voice VLAN ${want}` : `Expected ${iface} voice VLAN ${want}`, expected: want, actual: actualIface.voiceVlan || "" };
+      if (/native vlan/.test(text)) return { status: Number(actualIface.nativeVlan) === Number(want) ? "Correct" : "Incorrect", feedback: Number(actualIface.nativeVlan) === Number(want) ? `${iface} native VLAN ${want}` : `Expected ${iface} native VLAN ${want}`, expected: want, actual: actualIface.nativeVlan || "" };
+      if (/allowed vlan/.test(text)) {
+        const allowed = expectedIface?.allowedVlans || raw.match(/allowed vlan\s+([0-9,\- ]+|all)/i)?.[1]?.trim();
+        if (!allowed) return { status: "Unchecked", feedback: "Expected allowed VLAN list was not decoded", evidence: { unsupportedReason: "missing-xml-mapping" } };
+        return { status: packetTracerCompare(actualIface.allowedVlans || "all", allowed) ? "Correct" : "Incorrect", feedback: packetTracerCompare(actualIface.allowedVlans || "all", allowed) ? `${iface} allowed VLANs ${allowed}` : `Expected ${iface} allowed VLANs ${allowed}`, expected: allowed, actual: actualIface.allowedVlans || "all" };
+      }
+      return { status: Number(actualIface.vlan) === Number(want) ? "Correct" : "Incorrect", feedback: Number(actualIface.vlan) === Number(want) ? `${iface} is assigned to VLAN ${want}` : `Expected ${iface} access VLAN ${want}`, expected: want, actual: actualIface.vlan || "" };
+    },
+  },
+  {
+    id: "interface.etherchannel",
+    supports: ({ text, actualIface }) => /channel group|channel mode|etherchannel/.test(text) && actualIface,
+    grade: ({ text, iface, expectedIface, actualIface }) => {
+      if (/channel mode/.test(text)) {
+        const want = expectedIface?.channelGroup?.mode;
+        if (!want) return { status: "Unchecked", feedback: "Expected channel mode was not decoded", evidence: { unsupportedReason: "missing-xml-mapping" } };
+        return { status: packetTracerCompare(actualIface.channelGroup?.mode, want) ? "Correct" : "Incorrect", feedback: packetTracerCompare(actualIface.channelGroup?.mode, want) ? `${iface} channel mode ${want}` : `Expected ${iface} channel mode ${want}`, expected: want, actual: actualIface.channelGroup?.mode || "" };
+      }
+      const want = expectedIface?.channelGroup?.id;
+      if (!want) return { status: "Unchecked", feedback: "Expected channel-group was not decoded", evidence: { unsupportedReason: "missing-xml-mapping" } };
+      return { status: Number(actualIface.channelGroup?.id) === Number(want) ? "Correct" : "Incorrect", feedback: Number(actualIface.channelGroup?.id) === Number(want) ? `${iface} is in channel-group ${want}` : `Expected ${iface} in channel-group ${want}`, expected: want, actual: actualIface.channelGroup?.id || "" };
+    },
+  },
+  {
+    id: "interface.ip",
+    supports: ({ text, actualIface }) => /(ip address|subnet mask|default gateway|ospf priority|interface status|port status|shutdown)/.test(text) && actualIface,
+    grade: ({ text, item, device, iface, actualIface }) => {
+      const value = packetTracerExpectedText(item);
+      const ip = item?.expected?.ip || (String(value).match(/\d+\.\d+\.\d+\.\d+/) || [])[0];
+      if (/ip address/.test(text) && ip) return { status: packetTracerCompare(actualIface.ip, ip) ? "Correct" : "Incorrect", feedback: packetTracerCompare(actualIface.ip, ip) ? `${iface} IP matches` : `Expected ${iface} IP ${ip}`, expected: ip, actual: actualIface.ip || "" };
+      if (/subnet mask/.test(text) && ip) return { status: packetTracerCompare(actualIface.mask, ip) ? "Correct" : "Incorrect", feedback: packetTracerCompare(actualIface.mask, ip) ? `${iface} mask matches` : `Expected ${iface} mask ${ip}`, expected: ip, actual: actualIface.mask || "" };
+      if (/default gateway/.test(text) && device && ip) {
+        const gateways = Object.values(device.interfaces || {}).map((ifc) => ifc.gw).filter(Boolean);
+        return { status: gateways.some((gw) => packetTracerCompare(gw, ip)) ? "Correct" : "Incorrect", feedback: gateways.some((gw) => packetTracerCompare(gw, ip)) ? "Default gateway matches" : `Expected default gateway ${ip}`, expected: ip, actual: gateways.join(", ") };
+      }
+      if (/ospf priority/.test(text)) {
+        const want = String(value || item?.name || "").match(/priority\s+(\d+)/i)?.[1] || item?.expected?.number;
+        if (!want) return { status: "Unchecked", feedback: "Expected OSPF priority was not decoded", evidence: { unsupportedReason: "missing-xml-mapping" } };
+        return { status: Number(actualIface.ospfPriority) === Number(want) ? "Correct" : "Incorrect", feedback: Number(actualIface.ospfPriority) === Number(want) ? `${iface} OSPF priority ${want}` : `Expected ${iface} OSPF priority ${want}`, expected: want, actual: actualIface.ospfPriority ?? "" };
+      }
+      if (/shutdown|interface status|port status/.test(text)) {
+        const wantUp = /no shutdown|up|enabled/.test(text) && !/\bdown\b|shutdown/.test(text.replace(/no shutdown/g, ""));
+        return { status: Boolean(actualIface.admUp !== false && actualIface.up !== false) === wantUp ? "Correct" : "Incorrect", feedback: wantUp ? `Expected ${iface} up` : `Expected ${iface} shutdown`, expected: wantUp ? "up" : "down", actual: actualIface.admUp === false || actualIface.up === false ? "down" : "up" };
+      }
+      return { status: "Unchecked", feedback: "Expected interface value was not decoded", evidence: { unsupportedReason: "missing-xml-mapping" } };
+    },
+  },
+  {
+    id: "line-and-service.config",
+    supports: ({ text, device }) => /(exec-timeout|transport input|ip ssh version|save config|startup|service password-encryption|domain-name|username|enable secret)/.test(text) && device,
+    grade: ({ text, item, device }) => {
+      const value = packetTracerExpectedText(item);
+      if (/exec-timeout/.test(text)) {
+        const match = String(value || item?.name || "").match(/exec-timeout\s+(\d+)\s+(\d+)/i);
+        const line = /vty/.test(text) ? "vty" : "console";
+        if (!match) return { status: "Unchecked", feedback: "Expected exec-timeout was not decoded", evidence: { unsupportedReason: "missing-xml-mapping" } };
+        const actual = device.lines?.[line]?.timeout;
+        const ok = Number(actual?.minutes) === Number(match[1]) && Number(actual?.seconds || 0) === Number(match[2]);
+        return { status: ok ? "Correct" : "Incorrect", feedback: ok ? `${line} exec-timeout ${match[1]} ${match[2]}` : `Expected ${line} exec-timeout ${match[1]} ${match[2]}`, expected: `${match[1]} ${match[2]}`, actual: actual ? `${actual.minutes} ${actual.seconds || 0}` : "" };
+      }
+      if (/transport input/.test(text)) {
+        const want = String(value || item?.name || "").match(/transport input\s+(.+)$/i)?.[1]?.trim();
+        if (!want) return { status: "Unchecked", feedback: "Expected VTY transport was not decoded", evidence: { unsupportedReason: "missing-xml-mapping" } };
+        const actual = (device.lines?.vty?.transport || []).join(" ");
+        return { status: packetTracerCompare(actual, want) ? "Correct" : "Incorrect", feedback: packetTracerCompare(actual, want) ? `vty transport input ${want}` : `Expected vty transport input ${want}`, expected: want, actual };
+      }
+      if (/ip ssh version/.test(text)) {
+        const want = String(value || item?.name || "").match(/ip ssh version\s+(\d+)/i)?.[1];
+        if (!want) return { status: "Unchecked", feedback: "Expected SSH version was not decoded", evidence: { unsupportedReason: "missing-xml-mapping" } };
+        return { status: Number(device.ssh?.version) === Number(want) ? "Correct" : "Incorrect", feedback: Number(device.ssh?.version) === Number(want) ? `SSH version ${want}` : `Expected ip ssh version ${want}`, expected: want, actual: device.ssh?.version || "" };
+      }
+      if (/save config|startup/.test(text)) return { status: device.startupConfig ? "Correct" : "Incorrect", feedback: device.startupConfig ? "Startup config saved" : "Expected startup-config to be saved", expected: "saved startup-config", actual: device.startupConfig ? "saved" : "empty" };
+      const command = packetTracerCommandLikeExpected(item);
+      if (!command) return { status: "Unchecked", feedback: "Expected service/line command was not decoded", evidence: { unsupportedReason: "missing-xml-mapping" } };
+      const config = packetTracerConfigText(device);
+      return { status: config.includes(packetTracerNormText(command)) ? "Correct" : "Incorrect", feedback: config.includes(packetTracerNormText(command)) ? "Expected config command found" : `Expected config command ${command}`, expected: command, actual: command && config.includes(packetTracerNormText(command)) ? command : "not present" };
+    },
+  },
+  {
+    id: "routing-and-services.config",
+    supports: ({ text, device }) => /(ip route|static route|router ospf|router rip|router eigrp|network |acl|access-list|nat|dhcp|spanning-tree|port-security|dhcp snooping|arp inspection)/.test(text) && device,
+    grade: ({ text, item, device }) => {
+      const command = packetTracerCommandLikeExpected(item);
+      const config = packetTracerConfigText(device);
+      if (command) {
+        return { status: config.includes(packetTracerNormText(command)) ? "Correct" : "Incorrect", feedback: config.includes(packetTracerNormText(command)) ? "Expected config command found" : `Expected config command ${command}`, expected: command, actual: config.includes(packetTracerNormText(command)) ? command : "not present" };
+      }
+      if (/ip route|static route/.test(text)) {
+        const routes = packetTracerRouteSummary(device);
+        return routes.length ? { status: "Correct", feedback: "Static route present", expected: "static route", actual: routes.join("; ") } : { status: "Incorrect", feedback: "Expected static route", expected: "static route", actual: "none" };
+      }
+      if (/acl|access-list/.test(text)) {
+        const acls = packetTracerAclSummary(device);
+        return acls.length ? { status: "Correct", feedback: "ACL present", expected: "ACL entry", actual: acls.join("; ") } : { status: "Incorrect", feedback: "Expected ACL entry", expected: "ACL entry", actual: "none" };
+      }
+      if (/nat/.test(text)) {
+        const rules = [...Object.keys(device.nat?.pools || {}), ...(device.nat?.rules || []).map((rule) => rule.config)].filter(Boolean);
+        return rules.length ? { status: "Correct", feedback: "NAT configuration present", expected: "NAT config", actual: rules.join("; ") } : { status: "Incorrect", feedback: "Expected NAT configuration", expected: "NAT config", actual: "none" };
+      }
+      if (/dhcp/.test(text)) {
+        const pools = Object.keys(device.dhcp?.pools || {});
+        return pools.length || device.dhcpSnooping?.enabled ? { status: "Correct", feedback: "DHCP-related configuration present", expected: "DHCP config", actual: pools.join(", ") || "dhcp snooping" } : { status: "Incorrect", feedback: "Expected DHCP-related configuration", expected: "DHCP config", actual: "none" };
+      }
+      return { status: "Unchecked", feedback: "OpenPT simulator state does not yet expose this Packet Tracer check precisely", evidence: { unsupportedReason: "missing-simulator-capability" } };
+    },
+  },
+  {
+    id: "connectivity.plan-path",
+    supports: ({ item, text, context }) => packetTracerIsConnectivityAssessment(item) && typeof OPT_Engine.planPath === "function" && context.devices,
+    grade: ({ text, item, context }) => {
+      const ips = [packetTracerExpectedText(item), item?.path, item?.name].join(" ").match(/\b\d{1,3}(?:\.\d{1,3}){3}\b/g) || [];
+      const srcName = packetTracerAssessmentPathParts(item).find((part) => packetTracerDeviceByName(context.devices, part));
+      const src = packetTracerDeviceByName(context.devices, srcName);
+      const dstIp = ips[ips.length - 1];
+      if (!src || !dstIp) return { status: "Unchecked", feedback: "Connectivity endpoints were not decoded for this item", evidence: { unsupportedReason: "missing-xml-mapping" } };
+      const result = OPT_Engine.planPath(context.devices, context.links, src.id, dstIp);
+      return { status: result.ok ? "Correct" : "Incorrect", feedback: result.ok ? `Reachable from ${src.hostname} to ${dstIp}` : result.error || `Not reachable from ${src.hostname} to ${dstIp}`, expected: `reachable ${dstIp}`, actual: result.ok ? "reachable" : "unreachable", evidence: { hops: result.hops || [] } };
+    },
+  },
+  {
+    id: "config-value.fallback",
+    supports: ({ item, device }) => device && !!packetTracerExpectedText(item),
+    grade: ({ item, device }) => {
+      const value = packetTracerExpectedText(item);
+      const config = packetTracerConfigText(device);
+      if (config.includes(packetTracerNormText(value))) return { status: "Correct", feedback: "Expected config value found", expected: value, actual: value, confidence: "low" };
+      return { status: "Unchecked", feedback: "Decoded value does not map to a precise OpenPT checker yet", expected: value, actual: "not matched", confidence: "low", evidence: { unsupportedReason: "missing-xml-mapping" } };
+    },
+  },
+];
+
 function packetTracerGradeItem(item, context) {
-  const points = Number(item?.points) || 0;
-  const text = packetTracerAssessmentText(item);
-  const { device, iface } = packetTracerItemTarget(item, context.devices);
-  const expected = device ? context.expected[device.id] : null;
-  const expectedIface = iface ? expected?.interfaces?.[iface] : null;
-  const actualIface = iface ? device?.interfaces?.[iface] : null;
-  const correct = (feedback = "Passed") => ({ ...item, points, earnedPoints: points, correct: true, status: "Correct", feedback });
-  const incorrect = (feedback = "Does not match the expected state") => ({ ...item, points, earnedPoints: 0, correct: false, status: "Incorrect", feedback });
-  const unchecked = (feedback = "OpenPT does not have a checker for this Packet Tracer item yet") => ({ ...item, points, earnedPoints: 0, correct: false, unchecked: true, status: "Unchecked", feedback });
+  const base = {
+    points: Number(item?.points) || 0,
+    text: packetTracerAssessmentText(item),
+    checkerId: "",
+  };
+  const target = packetTracerItemTarget(item, context.devices);
+  base.device = target.device;
+  base.iface = target.iface;
+  base.expected = base.device ? context.expected[base.device.id] : null;
+  base.expectedIface = base.iface ? base.expected?.interfaces?.[base.iface] : null;
+  base.actualIface = base.iface ? base.device?.interfaces?.[base.iface] : null;
 
-  if (/display name|host ?name/.test(text) && device && expected?.hostname) {
-    return packetTracerCompare(device.hostname, expected.hostname)
-      ? correct(`${device.hostname} matches`)
-      : incorrect(`Expected hostname ${expected.hostname}`);
-  }
-
-  if (/link type|cable type/.test(text) && device && iface) {
-    const link = packetTracerFindLink(context.devices, context.links, device, iface);
-    if (!link) return incorrect(`No link on ${device.hostname} ${iface}`);
-    if (/serial/.test(text)) return /serial/i.test(link.type || link.packetTracer?.type || "") ? correct("Serial link") : incorrect("Expected serial link");
-    if (/copper|ethernet|straight/.test(text) || /trunk configuration/.test(text)) {
-      return /serial/i.test(link.type || "") ? incorrect("Expected Ethernet/copper link") : correct("Ethernet link");
+  for (const checker of PACKET_TRACER_CHECKERS) {
+    if (!checker.supports({ ...base, item, context })) continue;
+    base.checkerId = checker.id;
+    const result = { ...checker.grade({ ...base, item, context }), checkerId: checker.id };
+    if (result.status === "Unchecked") {
+      const transferred = packetTracerGradeTransferredState(item, base, context);
+      if (transferred) return transferred;
     }
-    return correct("Link type present");
+    return packetTracerGradeResult(item, base, result);
   }
 
-  if (/link to|connects to|connection|cable/.test(text) && device && iface) {
-    const peerMatch = packetTracerExpectedLinkPeer(text);
-    if (!peerMatch) return unchecked("Expected link peer was not decoded for this item");
-    const link = packetTracerFindLink(context.devices, context.links, device, iface);
-    if (!link) return incorrect(`No link on ${device.hostname} ${iface}`);
-    const { peer, peerIface } = packetTracerLinkPeer(context.devices, link, device);
-    const peerNameOk = packetTracerCompare(peer?.hostname, peerMatch[1]) || packetTracerCompare(peer?.name, peerMatch[1]) || packetTracerCompare(peer?.packetTracer?.name, peerMatch[1]);
-    const peerIfaceOk = packetTracerIfaceKey(peerIface) === packetTracerIfaceKey(peerMatch[2]);
-    return peerNameOk && peerIfaceOk
-      ? correct(`Linked to ${peer.hostname} ${peerIface}`)
-      : incorrect(`Expected link to ${peerMatch[1]} ${peerMatch[2]}`);
-  }
-
-  if (/port mode|switchport mode/.test(text) && actualIface) {
-    const want = expectedIface?.mode || (/trunk/.test(text) ? "trunk" : /access/.test(text) ? "access" : null);
-    if (!want) return unchecked();
-    return actualIface.mode === want ? correct(`${iface} is ${want}`) : incorrect(`Expected ${iface} switchport mode ${want}`);
-  }
-
-  if (/access vlan|vlan membership|assigned vlan/.test(text) && actualIface) {
-    const want = expectedIface?.vlan || (String(item?.value || item?.name || "").match(/\b(\d+)\b/) || [])[1];
-    if (!want) return unchecked();
-    return Number(actualIface.vlan) === Number(want)
-      ? correct(`${iface} is assigned to VLAN ${want}`)
-      : incorrect(`Expected ${iface} access VLAN ${want}`);
-  }
-
-  if (/channel group/.test(text) && actualIface) {
-    const want = expectedIface?.channelGroup?.id;
-    if (!want) return unchecked();
-    return Number(actualIface.channelGroup?.id) === Number(want)
-      ? correct(`${iface} is in channel-group ${want}`)
-      : incorrect(`Expected ${iface} in channel-group ${want}`);
-  }
-
-  if (/channel mode/.test(text) && actualIface) {
-    const want = expectedIface?.channelGroup?.mode;
-    if (!want) return unchecked();
-    return packetTracerCompare(actualIface.channelGroup?.mode, want)
-      ? correct(`${iface} channel mode ${want}`)
-      : incorrect(`Expected ${iface} channel mode ${want}`);
-  }
-
-  if (/ospf priority/.test(text) && actualIface) {
-    const want = (String(item?.value || item?.name || "").match(/priority\s+(\d+)/i) || [])[1];
-    if (!want) return unchecked();
-    return Number(actualIface.ospfPriority) === Number(want)
-      ? correct(`${iface} OSPF priority ${want}`)
-      : incorrect(`Expected ${iface} OSPF priority ${want}`);
-  }
-
-  if (/exec-timeout/.test(text) && device) {
-    const match = String(item?.value || item?.name || "").match(/exec-timeout\s+(\d+)\s+(\d+)/i);
-    const line = /vty/.test(text) ? "vty" : "console";
-    if (!match) return unchecked();
-    const actual = device.lines?.[line]?.timeout;
-    return Number(actual?.minutes) === Number(match[1]) && Number(actual?.seconds || 0) === Number(match[2])
-      ? correct(`${line} exec-timeout ${match[1]} ${match[2]}`)
-      : incorrect(`Expected ${line} exec-timeout ${match[1]} ${match[2]}`);
-  }
-
-  if (/transport input/.test(text) && device) {
-    const want = (String(item?.value || item?.name || "").match(/transport input\s+(.+)$/i) || [])[1]?.trim();
-    if (!want) return unchecked();
-    const actual = (device.lines?.vty?.transport || []).join(" ");
-    return packetTracerCompare(actual, want)
-      ? correct(`vty transport input ${want}`)
-      : incorrect(`Expected vty transport input ${want}`);
-  }
-
-  if (/ip ssh version/.test(text) && device) {
-    const want = (String(item?.value || item?.name || "").match(/ip ssh version\s+(\d+)/i) || [])[1];
-    if (!want) return unchecked();
-    return Number(device.ssh?.version) === Number(want)
-      ? correct(`SSH version ${want}`)
-      : incorrect(`Expected ip ssh version ${want}`);
-  }
-
-  const value = item?.value || item?.attrs?.value || item?.attrs?.expected || "";
-  if (/ip address/.test(text) && actualIface && /\d+\.\d+\.\d+\.\d+/.test(value)) {
-    return packetTracerCompare(actualIface.ip, value) ? correct(`${iface} IP matches`) : incorrect(`Expected ${iface} IP ${value}`);
-  }
-  if (/subnet mask/.test(text) && actualIface && /\d+\.\d+\.\d+\.\d+/.test(value)) {
-    return packetTracerCompare(actualIface.mask, value) ? correct(`${iface} mask matches`) : incorrect(`Expected ${iface} mask ${value}`);
-  }
-  if (/default gateway/.test(text) && device && /\d+\.\d+\.\d+\.\d+/.test(value)) {
-    const gateways = Object.values(device.interfaces || {}).map((ifc) => ifc.gw).filter(Boolean);
-    return gateways.some((gw) => packetTracerCompare(gw, value)) ? correct("Default gateway matches") : incorrect(`Expected default gateway ${value}`);
-  }
-  if (value && device) {
-    const config = packetTracerNormText(OPT_Engine.serializeConfig?.(device) || "");
-    if (config.includes(packetTracerNormText(value))) return correct("Expected config value found");
-  }
-  return unchecked();
+  const transferred = packetTracerGradeTransferredState(item, { ...base, checkerId: "packet-tracer.transferred-state" }, context);
+  if (transferred) return transferred;
+  return packetTracerUnsupported(item, { ...base, checkerId: "unsupported" }, "OpenPT does not have a checker for this Packet Tracer item yet");
 }
 
 function packetTracerProgressFromItems(items) {
@@ -4782,23 +6186,59 @@ function packetTracerProgressFromItems(items) {
   const earnedPoints = items.reduce((sum, item) => sum + (Number(item.earnedPoints) || 0), 0);
   const totalItems = items.length;
   const earnedItems = items.filter((item) => item.correct).length;
+  const uncheckedItems = items.filter((item) => item.unchecked).length;
+  const incorrectItems = items.filter((item) => item.status === "Incorrect").length;
   return {
     percent: totalPoints ? Math.round((earnedPoints / totalPoints) * 100) : 0,
     score: `${earnedPoints}/${totalPoints}`,
     itemCount: `${earnedItems}/${totalItems}`,
+    counts: {
+      correct: earnedItems,
+      incorrect: incorrectItems,
+      unchecked: uncheckedItems,
+      total: totalItems,
+    },
     components: Object.values(items.reduce((acc, item) => {
       const name = item.components || "Other";
-      acc[name] = acc[name] || { name, earnedItems: 0, items: 0, earnedPoints: 0, points: 0 };
+      acc[name] = acc[name] || { name, earnedItems: 0, incorrectItems: 0, uncheckedItems: 0, items: 0, earnedPoints: 0, points: 0 };
       acc[name].items += 1;
       acc[name].points += Number(item.points) || 0;
       if (item.correct) acc[name].earnedItems += 1;
+      if (item.status === "Incorrect") acc[name].incorrectItems += 1;
+      if (item.unchecked) acc[name].uncheckedItems += 1;
       acc[name].earnedPoints += Number(item.earnedPoints) || 0;
       return acc;
     }, {})).map((component) => ({
       name: component.name,
       items: `${component.earnedItems}/${component.items}`,
       score: `${component.earnedPoints}/${component.points}`,
+      correct: component.earnedItems,
+      incorrect: component.incorrectItems,
+      unchecked: component.uncheckedItems,
     })),
+  };
+}
+
+function packetTracerGradingRunFromItems(items) {
+  const byChecker = {};
+  const unsupported = {};
+  for (const item of items || []) {
+    const checker = item.checkerId || "unknown";
+    byChecker[checker] = byChecker[checker] || { checkerId: checker, correct: 0, incorrect: 0, unchecked: 0, total: 0 };
+    byChecker[checker].total += 1;
+    if (item.correct) byChecker[checker].correct += 1;
+    else if (item.unchecked) {
+      byChecker[checker].unchecked += 1;
+      const reason = item.evidence?.unsupportedReason || "unknown";
+      unsupported[reason] = (unsupported[reason] || 0) + 1;
+    } else byChecker[checker].incorrect += 1;
+  }
+  return {
+    version: 1,
+    checkedAt: new Date().toISOString(),
+    summary: packetTracerProgressFromItems(items).counts,
+    byChecker: Object.values(byChecker),
+    unsupported: Object.entries(unsupported).map(([reason, count]) => ({ reason, count })),
   };
 }
 
@@ -4810,12 +6250,23 @@ function gradePacketTracerActivity(activity, devices, links) {
     devices,
     links,
     expected: packetTracerAnswerExpectations(activity, devices),
+    packetTracerState: activity.packetTracerState || null,
   };
   const assessmentItems = sourceItems.map((item) => packetTracerGradeItem(item, context));
+  const progress = packetTracerProgressFromItems(assessmentItems);
   return {
     ...activity,
     assessmentItems,
-    progress: packetTracerProgressFromItems(assessmentItems),
+    progress,
+    gradingRun: packetTracerGradingRunFromItems(assessmentItems),
+    gradingProfile: {
+      version: 1,
+      runtime: "browser-native",
+      mode: "structured-checker-registry",
+      checkerCount: PACKET_TRACER_CHECKERS.length,
+      importedItems: sourceItems.length,
+      ...(activity.gradingProfile || {}),
+    },
   };
 }
 
@@ -4905,6 +6356,7 @@ function PacketTracerInstructions({ activity }) {
 function PacketTracerProgress({ activity, assessmentSections, hasProgress }) {
   const components = activity?.progress?.components || [];
   const totalAssessmentItems = assessmentSections.assessmentItems.length + assessmentSections.connectivityTests.length;
+  const counts = activity?.progress?.counts;
   if (!hasProgress) return <div className="pt-empty">No progress or assessment data was decoded for this assignment.</div>;
   return (
     <div className="pt-progress">
@@ -4921,6 +6373,18 @@ function PacketTracerProgress({ activity, assessmentSections, hasProgress }) {
           <span>Assessment</span>
           <strong>{assessmentSections.assessmentItems.length}</strong>
         </div>
+        {counts && (
+          <>
+            <div className="pt-metric">
+              <span>Incorrect</span>
+              <strong>{counts.incorrect}</strong>
+            </div>
+            <div className="pt-metric">
+              <span>Unchecked</span>
+              <strong>{counts.unchecked}</strong>
+            </div>
+          </>
+        )}
       </div>
 
       {components.length > 0 && (
@@ -5018,11 +6482,15 @@ function PacketTracerAssessmentSummary({ items }) {
   const totalPoints = items.reduce((sum, item) => sum + (Number(item.points) || 0), 0);
   const earnedPoints = items.reduce((sum, item) => sum + (Number(item.earnedPoints) || 0), 0);
   const earnedItems = items.filter((item) => item.correct).length;
+  const incorrectItems = items.filter((item) => item.status === "Incorrect").length;
+  const uncheckedItems = items.filter((item) => item.unchecked).length;
   return (
     <aside className="pt-check-summary">
       <div className="pt-check-score">
         <div><strong>Score</strong><span>{earnedPoints}/{totalPoints}</span></div>
         <div><strong>Item Count</strong><span>{earnedItems}/{items.length}</span></div>
+        <div><strong>Incorrect</strong><span>{incorrectItems}</span></div>
+        <div><strong>Unchecked</strong><span>{uncheckedItems}</span></div>
       </div>
       <div className="pt-component-table">
         <div className="pt-component-head"><span>Component</span><span>Items/Total</span><span>Score</span></div>
@@ -5067,6 +6535,11 @@ function PacketTracerAssessmentRows({ items, empty }) {
     return [row.name, item?.status, item?.components, item?.feedback, item?.path].filter(Boolean).join(" ").toLowerCase().includes(q);
   });
   const uncheckedCount = (items || []).filter((item) => item.unchecked).length;
+  const unsupportedGroups = Object.entries((items || []).filter((item) => item.unchecked).reduce((acc, item) => {
+    const reason = item.evidence?.unsupportedReason || "unknown";
+    acc[reason] = (acc[reason] || 0) + 1;
+    return acc;
+  }, {}));
   const toggleNode = (key) => {
     setExpanded((current) => {
       const next = new Set(current);
@@ -5083,6 +6556,11 @@ function PacketTracerAssessmentRows({ items, empty }) {
           <button type="button" onClick={() => setShowIncorrectOnly((value) => !value)}>{showIncorrectOnly ? "Show All Items" : "Show Incorrect Items"}</button>
           {uncheckedCount > 0 && <span className="pt-check-note">{uncheckedCount} unchecked by OpenPT</span>}
         </div>
+        {unsupportedGroups.length > 0 && (
+          <div className="pt-check-note" style={{ margin: "0 0 8px" }}>
+            Unsupported checks: {unsupportedGroups.map(([reason, count]) => `${reason}: ${count}`).join(" · ")}
+          </div>
+        )}
         <div className="pt-check-grid" role="table" aria-label="Packet Tracer assessment items">
           <div className="pt-check-row pt-check-head" role="row">
             <span>Assessment Items</span><span>Status</span><span>Points</span><span>Component(s)</span><span>Feedback</span>
@@ -5090,22 +6568,38 @@ function PacketTracerAssessmentRows({ items, empty }) {
           {visibleRows.map((row) => {
             const item = row.item;
             const hasChildren = row.children.length > 0;
+            const evidenceText = item ? [
+              item.checkerId ? `checker ${item.checkerId}` : "",
+              item.confidence ? `confidence ${item.confidence}` : "",
+              item.expected != null ? `expected ${typeof item.expected === "string" ? item.expected : JSON.stringify(item.expected)}` : "",
+              item.actual != null ? `actual ${typeof item.actual === "string" ? item.actual : JSON.stringify(item.actual)}` : "",
+              item.evidence?.unsupportedReason ? `reason ${item.evidence.unsupportedReason}` : "",
+            ].filter(Boolean).join(" · ") : "";
             return (
-              <div className="pt-check-row" role="row" key={row.key}>
-                <span className="pt-check-name" style={{ paddingLeft: `${Math.max(0, row.depth) * 20 + 4}px` }} title={item?.path || row.name}>
-                  {hasChildren ? (
-                    <button type="button" className="pt-check-expander" onClick={() => toggleNode(row.key)} aria-label={`${expanded.has(row.key) ? "Collapse" : "Expand"} ${row.name}`}>
-                      {expanded.has(row.key) ? "-" : "+"}
-                    </button>
-                  ) : <span className="pt-check-spacer" />}
-                  {item && <span className="pt-check-x">{item.correct ? "✓" : "x"}</span>}
-                  <span>{row.name}</span>
-                </span>
-                <span>{item ? (item.status || "Unchecked") : ""}</span>
-                <span>{item ? `${Number(item.earnedPoints) || 0}/${Number(item.points) || 0}` : ""}</span>
-                <span title={item?.components || ""}>{item?.components || ""}</span>
-                <span title={item?.feedback || item?.attrs?.incorrectFeedback || item?.attrs?.feedback || ""}>{item?.feedback || item?.attrs?.incorrectFeedback || item?.attrs?.feedback || ""}</span>
-              </div>
+              <React.Fragment key={row.key}>
+                <div className="pt-check-row" role="row">
+                  <span className="pt-check-name" style={{ paddingLeft: `${Math.max(0, row.depth) * 20 + 4}px` }} title={item?.path || row.name}>
+                    {hasChildren ? (
+                      <button type="button" className="pt-check-expander" onClick={() => toggleNode(row.key)} aria-label={`${expanded.has(row.key) ? "Collapse" : "Expand"} ${row.name}`}>
+                        {expanded.has(row.key) ? "-" : "+"}
+                      </button>
+                    ) : <span className="pt-check-spacer" />}
+                    {item && <span className="pt-check-x">{item.correct ? "✓" : item.unchecked ? "?" : "x"}</span>}
+                    <span>{row.name}</span>
+                  </span>
+                  <span>{item ? (item.status || "Unchecked") : ""}</span>
+                  <span>{item ? `${Number(item.earnedPoints) || 0}/${Number(item.points) || 0}` : ""}</span>
+                  <span title={item?.components || ""}>{item?.components || ""}</span>
+                  <span title={item?.feedback || item?.attrs?.incorrectFeedback || item?.attrs?.feedback || ""}>{item?.feedback || item?.attrs?.incorrectFeedback || item?.attrs?.feedback || ""}</span>
+                </div>
+                {item && evidenceText && (
+                  <div className="pt-check-row" role="row">
+                    <span className="pt-check-name" style={{ paddingLeft: `${Math.max(0, row.depth) * 20 + 28}px`, color: "var(--fg-3)", gridColumn: "1 / -1", fontFamily: "var(--font-mono)", fontSize: 10.5 }} title={item.evidence?.decoded?.rawXml || ""}>
+                      {evidenceText}
+                    </span>
+                  </div>
+                )}
+              </React.Fragment>
             );
           })}
         </div>
@@ -5115,7 +6609,7 @@ function PacketTracerAssessmentRows({ items, empty }) {
   );
 }
 
-function ServerModuleSidebar({ device, activeTab, activeConfig, onTabChange, onConfigChange, onUpdate, onClose }) {
+function ServerModuleSidebar({ device, activeTab, activeConfig, onTabChange, onConfigChange, onUpdate, onOpenApp, onClose }) {
   const cfg = ensureServerConfig(device);
   return (
     <aside className="server-module-sidebar" aria-label={`${device.hostname} server module`}>
@@ -5131,7 +6625,7 @@ function ServerModuleSidebar({ device, activeTab, activeConfig, onTabChange, onC
         <button type="button" className={activeTab === "desktop" ? "active" : ""} onClick={() => onTabChange("desktop")}>Desktop</button>
       </div>
       {activeTab === "desktop" ? (
-        <ServerDesktopPanel />
+        <ServerDesktopPanel onOpenApp={onOpenApp} />
       ) : (
         <ServerConfigPanel device={device} cfg={cfg} activeConfig={activeConfig} onConfigChange={onConfigChange} onUpdate={onUpdate} />
       )}
@@ -5288,20 +6782,56 @@ function DhcpConfig({ cfg, onUpdate }) {
 }
 
 function Dhcpv6Config({ cfg, onUpdate }) {
+  const first = cfg.pools?.[0] || {};
+  const [selected, setSelected] = useState(null);
+  const [form, setForm] = useState({
+    poolName: cfg.selectedPool || first.poolName || "IPv6Pool",
+    prefix: first.prefix || "2001:db8:1::",
+    prefixLength: first.prefixLength || first.length || 64,
+    gateway: first.gateway || "",
+    dnsServer: first.dnsServer || "",
+    domainName: first.domainName || "",
+  });
+  useEffect(() => {
+    const selectedPool = cfg.pools?.find((p) => p.poolName === cfg.selectedPool) || cfg.pools?.[0];
+    if (selectedPool) setForm({ poolName: selectedPool.poolName || "IPv6Pool", prefix: selectedPool.prefix || "2001:db8:1::", prefixLength: selectedPool.prefixLength || selectedPool.length || 64, gateway: selectedPool.gateway || "", dnsServer: selectedPool.dnsServer || "", domainName: selectedPool.domainName || "" });
+  }, [cfg.selectedPool, cfg.pools?.length]);
+  const setField = (key, value) => setForm((f) => ({ ...f, [key]: value }));
   return (
     <div className="server-section">
       <h3>DHCPv6</h3>
       <ServiceSwitch value={cfg.service} onChange={(v) => onUpdate((d, c) => { c.dhcpv6.service = v; d.services.dhcpv6 = v; }, `DHCPv6 service ${v ? "enabled" : "disabled"}`)} />
+      <div className="server-form-grid compact">
+        <label>Pool Name<input value={form.poolName} onChange={(e) => setField("poolName", e.target.value)} /></label>
+        <label>IPv6 Prefix<input value={form.prefix} onChange={(e) => setField("prefix", e.target.value)} placeholder="2001:db8:1::" /></label>
+        <label>Prefix Length<input value={form.prefixLength} onChange={(e) => setField("prefixLength", e.target.value)} placeholder="64" /></label>
+        <label>Default Gateway<input value={form.gateway} onChange={(e) => setField("gateway", e.target.value)} placeholder="fe80::1" /></label>
+        <label>DNS Server<input value={form.dnsServer} onChange={(e) => setField("dnsServer", e.target.value)} /></label>
+        <label>Domain Name<input value={form.domainName} onChange={(e) => setField("domainName", e.target.value)} /></label>
+      </div>
       <div className="server-actions">
-        <button type="button" onClick={() => { const poolName = window.prompt("DHCPv6 pool name", "IPv6Pool"); if (!poolName) return; onUpdate((d, c) => { c.dhcpv6.pools.push({ poolName, dnsServer: "", domainName: "" }); }, "DHCPv6 pool created"); }}>Create Pool</button>
-        <button type="button" onClick={() => onUpdate((d, c) => { c.dhcpv6.pools.pop(); }, "DHCPv6 pool removed")}>Remove Pool</button>
+        <button type="button" onClick={() => { setSelected(null); setForm({ poolName: "IPv6Pool", prefix: "2001:db8:1::", prefixLength: 64, gateway: "", dnsServer: "", domainName: "" }); }}>Add</button>
+        <button type="button" onClick={() => onUpdate((d, c) => {
+          const pool = { ...form, poolName: form.poolName || "IPv6Pool", prefixLength: Number(form.prefixLength || 64) };
+          const idx = c.dhcpv6.pools.findIndex((p) => p.poolName === pool.poolName);
+          if (idx >= 0) c.dhcpv6.pools[idx] = pool; else c.dhcpv6.pools.push(pool);
+          c.dhcpv6.selectedPool = pool.poolName;
+          d.dhcpv6.pools[pool.poolName] = { prefix: pool.prefix, prefixLength: pool.prefixLength, gateway: pool.gateway, dnsServer: pool.dnsServer, domainName: pool.domainName };
+        }, "DHCPv6 pool saved")}>Save</button>
+        <button type="button" onClick={() => onUpdate((d, c) => {
+          c.dhcpv6.pools = c.dhcpv6.pools.filter((p) => p.poolName !== form.poolName);
+          delete d.dhcpv6.pools[form.poolName];
+          c.dhcpv6.selectedPool = c.dhcpv6.pools[0]?.poolName || "";
+        }, "DHCPv6 pool removed")}>Remove</button>
       </div>
       <h4>IPv6 Address Prefix</h4>
-      <ServerTable columns={[{ key: "prefix", label: "Prefix" }, { key: "length", label: "Prefix Length" }, { key: "valid", label: "Valid Lifetime" }, { key: "preferred", label: "Preferred Lifetime" }]} rows={cfg.prefixes || []} />
+      <ServerTable columns={[{ key: "poolName", label: "Pool Name" }, { key: "prefix", label: "Prefix" }, { key: "prefixLength", label: "Prefix Length" }, { key: "dnsServer", label: "DNS Server" }]} rows={cfg.pools || []} selectedIndex={selected} onSelect={(i) => { setSelected(i); setForm({ ...cfg.pools[i] }); }} />
       <h4>IPv6 Prefix-Delegation</h4>
       <ServerTable columns={[{ key: "prefix", label: "Prefix" }, { key: "duid", label: "DUID" }, { key: "pool", label: "Local Pool" }, { key: "valid", label: "Valid Lifetime" }]} rows={cfg.delegations || []} />
       <h4>IPv6 Local Pool</h4>
       <ServerTable columns={[{ key: "poolName", label: "Pool Name" }, { key: "prefix", label: "Prefix" }, { key: "length", label: "Prefix Length" }]} rows={cfg.localPools || []} />
+      <h4>Bindings</h4>
+      <ServerTable columns={[{ key: "client", label: "Client" }, { key: "ipv6", label: "IPv6 Address" }, { key: "pool", label: "Pool" }]} rows={cfg.bindings || []} />
     </div>
   );
 }
@@ -5536,8 +7066,8 @@ function AppsSidebar({ device, activeAppKey, onOpenApp, onClose }) {
 }
 
 function EndpointAppWorkspace({
-  tab, app, device, devices, links, onClose, onUpdateDevice, onApplyCommand, onPing,
-  scrollState, onScrollStateChange, historyState, onHistoryChange, ghostSuggestions,
+  tab, app, device, devices, links, onClose, onUpdateDevice, onApplyCommand, onPing, onTraceEvent,
+  onRunSimulation, scrollState, onScrollStateChange, historyState, onHistoryChange, ghostSuggestions,
 }) {
   const isCliApp = app.action === "console";
   return (
@@ -5558,6 +7088,7 @@ function EndpointAppWorkspace({
             links={links}
             onApply={onApplyCommand}
             onPing={onPing}
+            onTraceEvent={onTraceEvent}
             pendingCmd={null}
             active={true}
             scrollState={scrollState}
@@ -5568,25 +7099,92 @@ function EndpointAppWorkspace({
           />
         </div>
       ) : (
-        <EndpointAppBody tab={tab} app={app} device={device} onUpdateDevice={onUpdateDevice} />
+        <EndpointAppBody tab={tab} app={app} device={device} devices={devices} links={links} onUpdateDevice={onUpdateDevice} onApplyCommand={onApplyCommand} onRunSimulation={onRunSimulation} onPing={onPing} />
       )}
     </div>
   );
 }
 
-function EndpointAppBody({ app, device, onUpdateDevice }) {
+function ServerAppWorkspace({ app, device, devices, links, onClose, onUpdateDevice, onRunSimulation, onPing }) {
+  return (
+    <div className="endpoint-app-page">
+      <div className="endpoint-app-head">
+        <AppLibraryIcon kind={app.key} />
+        <div className="endpoint-app-title">
+          <span>{device.hostname} - {app.label}</span>
+          <small>{app.kind}</small>
+        </div>
+        <button type="button" className="endpoint-app-close" onClick={onClose} title="Close app">×</button>
+      </div>
+      <ServerAppBody app={app} device={device} devices={devices} links={links} onUpdateDevice={onUpdateDevice} onRunSimulation={onRunSimulation} onPing={onPing} />
+    </div>
+  );
+}
+
+function ServerAppBody({ app, device, devices, links, onUpdateDevice, onRunSimulation, onPing }) {
+  if (app.key === "ip") return <EndpointIpApp app={app} device={device} onUpdateDevice={onUpdateDevice} />;
+  if (app.key === "browser") return <EndpointBrowserApp app={app} device={device} devices={devices} links={links} onUpdateDevice={onUpdateDevice} onRunSimulation={onRunSimulation} />;
+  if (app.key === "email") return <EndpointEmailApp app={app} device={device} devices={devices} links={links} onUpdateDevice={onUpdateDevice} onRunSimulation={onRunSimulation} />;
+  if (app.key === "accounting") return <ServerAccountingApp device={device} />;
+  if (app.key === "traffic") return <TrafficGeneratorApp app={app} device={device} devices={devices} links={links} onUpdateDevice={onUpdateDevice} onRunSimulation={onRunSimulation} onPing={onPing} />;
+  if (app.key === "mib") return <MibBrowserApp app={app} device={device} links={links} onUpdateDevice={onUpdateDevice} onRunSimulation={onRunSimulation} />;
+  if (app.key === "vpn") return <SessionConnectApp app={app} device={device} links={links} kind="vpn" onUpdateDevice={onUpdateDevice} onRunSimulation={onRunSimulation} />;
+  if (app.key === "pppoe") return <SessionConnectApp app={app} device={device} links={links} kind="pppoe" onUpdateDevice={onUpdateDevice} onRunSimulation={onRunSimulation} />;
+  if (app.key === "communicator") return <CommunicatorApp app={app} device={device} links={links} onUpdateDevice={onUpdateDevice} onRunSimulation={onRunSimulation} />;
+  if (app.key === "firewall" || app.key === "ipv6firewall") return <FirewallApp app={app} device={device} family={app.key} onUpdateDevice={onUpdateDevice} />;
+  if (app.key === "iotmon" || app.key === "iotide") return <IotApp app={app} device={device} links={links} onUpdateDevice={onUpdateDevice} onRunSimulation={onRunSimulation} ide={app.key === "iotide"} />;
+  return <EndpointUtilityApp app={app} device={device} onUpdateDevice={onUpdateDevice} />;
+}
+
+function ServerAccountingApp({ device }) {
+  const cfg = ensureServerConfig(device);
+  const registrations = Object.values(device.appRuntime?.voice?.registrations || {});
+  const iot = device.appRuntime?.iot?.registrations || [];
+  const mailboxes = Object.entries(device.appRuntime?.mail?.mailboxes || {}).map(([username, messages]) => ({ username, messages: messages.length }));
+  return (
+    <div className="endpoint-app-body">
+      <div className="endpoint-table-panel">
+        <div className="endpoint-panel-title">AAA Users</div>
+        <div className="endpoint-table">
+          <div className="endpoint-table-head"><span>User</span><span>Password</span><span>Status</span></div>
+          {(cfg.aaa.users || []).map((user) => <div key={user.username} className="endpoint-table-row"><span>{user.username}</span><span>{user.password}</span><span>Active</span></div>)}
+          {!cfg.aaa.users?.length && <div className="server-table-empty">No AAA users</div>}
+        </div>
+      </div>
+      <div className="endpoint-table-panel">
+        <div className="endpoint-panel-title">Runtime Activity</div>
+        <div className="endpoint-table">
+          <div className="endpoint-table-head"><span>Type</span><span>Name</span><span>Count/Status</span></div>
+          {mailboxes.map((box) => <div key={`mail-${box.username}`} className="endpoint-table-row"><span>Mailbox</span><span>{box.username}</span><span>{box.messages}</span></div>)}
+          {registrations.map((reg) => <div key={`voice-${reg.extension}`} className="endpoint-table-row"><span>Voice</span><span>{reg.extension}</span><span>Registered</span></div>)}
+          {iot.map((reg) => <div key={`iot-${reg.deviceId}`} className="endpoint-table-row"><span>IoT</span><span>{reg.name}</span><span>{reg.status}</span></div>)}
+          {!mailboxes.length && !registrations.length && !iot.length && <div className="server-table-empty">No runtime entries</div>}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function EndpointAppBody({ app, device, devices, links, onUpdateDevice, onApplyCommand, onRunSimulation, onPing }) {
   if (app.key === "ip" || app.key === "wireless") {
-    return <EndpointIpApp app={app} device={device} preferWireless={app.key === "wireless"} onUpdateDevice={onUpdateDevice} />;
+    return <EndpointIpApp app={app} device={device} devices={devices} preferWireless={app.key === "wireless"} onUpdateDevice={onUpdateDevice} onApplyCommand={onApplyCommand} />;
   }
   if (app.key === "editor") {
     return <EndpointTextEditorApp device={device} onUpdateDevice={onUpdateDevice} />;
   }
   if (app.key === "browser") {
-    return <EndpointBrowserApp app={app} device={device} onUpdateDevice={onUpdateDevice} />;
+    return <EndpointBrowserApp app={app} device={device} devices={devices} links={links} onUpdateDevice={onUpdateDevice} onRunSimulation={onRunSimulation} />;
   }
   if (app.key === "email") {
-    return <EndpointEmailApp app={app} device={device} onUpdateDevice={onUpdateDevice} />;
+    return <EndpointEmailApp app={app} device={device} devices={devices} links={links} onUpdateDevice={onUpdateDevice} onRunSimulation={onRunSimulation} />;
   }
+  if (app.key === "traffic") return <TrafficGeneratorApp app={app} device={device} devices={devices} links={links} onUpdateDevice={onUpdateDevice} onRunSimulation={onRunSimulation} onPing={onPing} />;
+  if (app.key === "mib") return <MibBrowserApp app={app} device={device} links={links} onUpdateDevice={onUpdateDevice} onRunSimulation={onRunSimulation} />;
+  if (app.key === "vpn") return <SessionConnectApp app={app} device={device} links={links} kind="vpn" onUpdateDevice={onUpdateDevice} onRunSimulation={onRunSimulation} />;
+  if (app.key === "pppoe") return <SessionConnectApp app={app} device={device} links={links} kind="pppoe" onUpdateDevice={onUpdateDevice} onRunSimulation={onRunSimulation} />;
+  if (app.key === "communicator") return <CommunicatorApp app={app} device={device} links={links} onUpdateDevice={onUpdateDevice} onRunSimulation={onRunSimulation} />;
+  if (app.key === "firewall" || app.key === "ipv6firewall") return <FirewallApp app={app} device={device} family={app.key} onUpdateDevice={onUpdateDevice} />;
+  if (app.key === "iotmon" || app.key === "iotide") return <IotApp app={app} device={device} links={links} onUpdateDevice={onUpdateDevice} onRunSimulation={onRunSimulation} ide={app.key === "iotide"} />;
   return <EndpointUtilityApp app={app} device={device} onUpdateDevice={onUpdateDevice} />;
 }
 
@@ -5601,9 +7199,10 @@ function setAppSetting(key, field, value) {
   };
 }
 
-function EndpointIpApp({ app, device, preferWireless, onUpdateDevice }) {
+function EndpointIpApp({ app, device, devices, preferWireless, onUpdateDevice, onApplyCommand }) {
   const ifaceNames = Object.keys(device.interfaces || {});
-  const preferred = preferWireless && device.interfaces?.wlan0 ? "wlan0" : (device.interfaces?.eth0 ? "eth0" : ifaceNames[0]);
+  const wirelessIface = ifaceNames.find((name) => OPT_Engine.ifacePortInfo?.(device, name)?.media === "wireless");
+  const preferred = preferWireless && wirelessIface ? wirelessIface : (device.interfaces?.eth0 ? "eth0" : ifaceNames[0]);
   const [ifaceNameValue, setIfaceNameValue] = useState(preferred);
   useEffect(() => {
     if (!device.interfaces?.[ifaceNameValue]) setIfaceNameValue(preferred);
@@ -5615,6 +7214,26 @@ function EndpointIpApp({ app, device, preferWireless, onUpdateDevice }) {
   const setDhcp = (enabled) => onUpdateDevice((d) => {
     d.interfaces[ifaceNameValue] = { ...(d.interfaces[ifaceNameValue] || {}), dhcp: enabled };
   }, `${ifaceName(ifaceNameValue)} DHCP ${enabled ? "enabled" : "disabled"}`);
+  const requestIpv6 = (kind) => {
+    if (onApplyCommand) onApplyCommand({ kind, iface: ifaceNameValue });
+  };
+  const associatedAp = ifc.associatedApId ? devices?.[ifc.associatedApId] : null;
+  const wirelessSecurity = OPT_Engine.normalizeWirelessSecurity?.(ifc.security || ifc.auth || "open") || "open";
+  const connectWireless = () => onUpdateDevice((d) => {
+    const current = d.interfaces[ifaceNameValue] || {};
+    d.interfaces[ifaceNameValue] = {
+      ...current,
+      ssid: current.ssid || "OpenPT",
+      security: OPT_Engine.normalizeWirelessSecurity?.(current.security || current.auth || "open") || "open",
+      passphrase: current.passphrase || "",
+      admUp: true,
+      up: true,
+    };
+  }, `${ifaceName(ifaceNameValue)} wireless connect`);
+  const disconnectWireless = () => onUpdateDevice((d) => {
+    const current = d.interfaces[ifaceNameValue] || {};
+    d.interfaces[ifaceNameValue] = { ...current, ssid: null, associatedApId: null, associationState: "disconnected", signalDbm: null, up: false };
+  }, `${ifaceName(ifaceNameValue)} wireless disconnected`);
   return (
     <div className="endpoint-app-body">
       <div className="endpoint-form-panel wide">
@@ -5635,9 +7254,40 @@ function EndpointIpApp({ app, device, preferWireless, onUpdateDevice }) {
           <label>Subnet Mask<input value={ifc.mask || ""} onChange={(e) => updateIface("mask", e.target.value)} placeholder="255.255.255.0" /></label>
           <label>Default Gateway<input value={ifc.gw || ""} onChange={(e) => updateIface("gw", e.target.value)} placeholder="192.168.1.1" /></label>
           <label>DNS Server<input value={ifc.dns || ""} onChange={(e) => updateIface("dns", e.target.value)} placeholder="8.8.8.8" /></label>
-          {preferWireless && <label>SSID<input value={ifc.ssid || ""} onChange={(e) => updateIface("ssid", e.target.value)} placeholder="OpenPT-WLAN" /></label>}
-          {preferWireless && <label>Authentication<input value={ifc.auth || ""} onChange={(e) => updateIface("auth", e.target.value)} placeholder="WPA2-PSK" /></label>}
+          <label>IPv6 Assignment
+            <select value={ifc.ipv6Source || (ifc.ipv6Autoconfig ? "slaac" : "static")} onChange={(e) => {
+              const value = e.target.value;
+              if (value === "slaac") requestIpv6("host-slaac");
+              else if (value === "dhcpv6") requestIpv6("host-dhcpv6");
+              else updateIface("ipv6Source", "static");
+            }}>
+              <option value="static">Static</option>
+              <option value="slaac">Auto Config</option>
+              <option value="dhcpv6">DHCPv6</option>
+            </select>
+          </label>
+          <label>IPv6 Address<input value={ifc.ipv6 || ""} onChange={(e) => updateIface("ipv6", e.target.value)} placeholder="2001:db8:1::10" /></label>
+          <label>IPv6 Prefix Length<input value={ifc.ipv6PrefixLength || ""} onChange={(e) => updateIface("ipv6PrefixLength", e.target.value)} placeholder="64" /></label>
+          <label>IPv6 Gateway<input value={ifc.ipv6Gw || ""} onChange={(e) => updateIface("ipv6Gw", e.target.value)} placeholder="fe80::1" /></label>
+          <label>IPv6 DNS Server<input value={ifc.ipv6Dns || ""} onChange={(e) => updateIface("ipv6Dns", e.target.value)} placeholder="2001:4860:4860::8888" /></label>
+          {preferWireless && <label>SSID<input value={ifc.ssid || ""} onChange={(e) => updateIface("ssid", e.target.value)} placeholder="OpenPT" /></label>}
+          {preferWireless && <label>Security
+            <select value={wirelessSecurity} onChange={(e) => updateIface("security", e.target.value)}>
+              <option value="open">Open</option>
+              <option value="wpa2-psk">WPA2-PSK</option>
+            </select>
+          </label>}
+          {preferWireless && wirelessSecurity === "wpa2-psk" && <label>Passphrase<input value={ifc.passphrase || ""} onChange={(e) => updateIface("passphrase", e.target.value)} placeholder="openpt123" /></label>}
         </div>
+        {preferWireless && (
+          <div className="endpoint-wireless-status">
+            <div><span>State</span><strong>{ifc.associationState || "disconnected"}</strong></div>
+            <div><span>AP</span><strong>{associatedAp?.hostname || "-"}</strong></div>
+            <div><span>Signal</span><strong>{ifc.signalDbm != null ? `${ifc.signalDbm} dBm` : "-"}</strong></div>
+            <button type="button" onClick={connectWireless}>Connect</button>
+            <button type="button" onClick={disconnectWireless}>Disconnect</button>
+          </div>
+        )}
       </div>
       <EndpointInterfaceSummary device={device} />
     </div>
@@ -5648,8 +7298,10 @@ function EndpointInterfaceSummary({ device }) {
   const rows = Object.entries(device.interfaces || {}).map(([name, ifc]) => ({
     name,
     ip: ifc.ip || "unassigned",
+    ipv6: ifc.ipv6 ? `${ifc.ipv6}/${ifc.ipv6PrefixLength || 64}` : (ifc.ipv6Enabled || ifc.linkLocal ? "link-local" : "unassigned"),
     mask: ifc.mask || "unassigned",
     gw: ifc.gw || "unassigned",
+    ipv6Gw: ifc.ipv6Gw || "unassigned",
     mac: ifc.mac || "unknown",
     state: ifc.admUp === false ? "admin down" : (ifc.up ? "up" : "down"),
   }));
@@ -5661,8 +7313,8 @@ function EndpointInterfaceSummary({ device }) {
         {rows.map((row) => (
           <div key={row.name} className="endpoint-table-row">
             <span title={row.name}>{ifaceName(row.name)}</span>
-            <span title={`${row.ip} / ${row.mask}`}>{row.ip}</span>
-            <span title={row.gw}>{row.gw}</span>
+            <span title={`IPv4 ${row.ip} / ${row.mask}\nIPv6 ${row.ipv6}`}>{row.ip}{row.ipv6 !== "unassigned" ? ` | ${row.ipv6}` : ""}</span>
+            <span title={`IPv4 ${row.gw}\nIPv6 ${row.ipv6Gw}`}>{row.gw}{row.ipv6Gw !== "unassigned" ? ` | ${row.ipv6Gw}` : ""}</span>
             <span className={row.state === "up" ? "up" : ""}>{row.state}</span>
           </div>
         ))}
@@ -5700,29 +7352,74 @@ function EndpointTextEditorApp({ device, onUpdateDevice }) {
   );
 }
 
-function EndpointBrowserApp({ app, device, onUpdateDevice }) {
+function EndpointBrowserApp({ app, device, devices, links, onUpdateDevice, onRunSimulation }) {
   const settings = appSettings(device, app.key);
   const url = settings.url || "http://192.168.20.20";
+  const last = device.appRuntime?.browser?.lastResponse;
+  const load = () => onRunSimulation?.((draft) => {
+    const result = OPT_Services.requestHttp({ devices: draft, links, sourceId: device.id, url });
+    const target = draft[device.id];
+    OPT_Services.ensureSettings(target, app.key).lastLoaded = url;
+    OPT_Services.ensureRuntime(target, "browser").lastResponse = result;
+    return result;
+  }, "Web Browser loaded");
   return (
     <div className="endpoint-app-body single">
       <div className="endpoint-browser-panel">
         <div className="endpoint-browser-bar">
           <input value={url} onChange={(e) => onUpdateDevice(setAppSetting(app.key, "url", e.target.value), "Web Browser URL updated")} />
-          <button type="button" onClick={() => onUpdateDevice(setAppSetting(app.key, "lastLoaded", url), "Web Browser loaded")}>Go</button>
+          <button type="button" onClick={load}>Go</button>
         </div>
-        <div className="endpoint-browser-page">
+        <div className={`endpoint-browser-page ${last?.ok === false ? "error" : ""}`}>
           <div className="endpoint-browser-url">{settings.lastLoaded || url}</div>
-          <h3>OpenPT Browser</h3>
-          <p>HTTP requests from {device.hostname} use this target address in simulations and notes.</p>
+          {last ? (
+            last.ok ? (
+              <>
+                <h3>HTTP {last.status} {last.statusText}</h3>
+                <pre className="endpoint-response-pre">{last.body}</pre>
+              </>
+            ) : (
+              <>
+                <h3>Request failed</h3>
+                <p>{last.error}</p>
+              </>
+            )
+          ) : (
+            <>
+              <h3>OpenPT Browser</h3>
+              <p>Enter a URL and the request will use simulated DNS, routing, firewall, and server HTTP state.</p>
+            </>
+          )}
         </div>
       </div>
     </div>
   );
 }
 
-function EndpointEmailApp({ app, device, onUpdateDevice }) {
+function EndpointEmailApp({ app, device, links, onUpdateDevice, onRunSimulation }) {
   const settings = appSettings(device, app.key);
   const set = (field, value) => onUpdateDevice(setAppSetting(app.key, field, value), "Email updated");
+  const inbox = device.appRuntime?.mail?.inbox || [];
+  const sent = device.appRuntime?.mail?.sent || [];
+  const status = device.appRuntime?.mail?.lastStatus;
+  const send = () => onRunSimulation?.((draft) => {
+    const result = OPT_Services.sendMail({
+      devices: draft,
+      links,
+      sourceId: device.id,
+      account: settings,
+      message: { from: settings.address, to: settings.to, subject: settings.subject, body: settings.body },
+    });
+    OPT_Services.ensureRuntime(draft[device.id], "mail").lastStatus = result.ok ? `Sent to ${settings.to}` : result.error;
+    return result;
+  }, "Email send");
+  const receive = () => onRunSimulation?.((draft) => {
+    const result = OPT_Services.fetchMail({ devices: draft, links, sourceId: device.id, account: settings });
+    const mail = OPT_Services.ensureRuntime(draft[device.id], "mail");
+    mail.inbox = result.messages || [];
+    mail.lastStatus = result.ok ? `Fetched ${mail.inbox.length} message(s)` : result.error;
+    return result;
+  }, "Email receive");
   return (
     <div className="endpoint-app-body">
       <div className="endpoint-form-panel">
@@ -5733,6 +7430,11 @@ function EndpointEmailApp({ app, device, onUpdateDevice }) {
           <label>Outgoing Server<input value={settings.smtp || ""} onChange={(e) => set("smtp", e.target.value)} placeholder="192.168.20.20" /></label>
           <label>Password<input value={settings.password || ""} onChange={(e) => set("password", e.target.value)} placeholder="password" /></label>
         </div>
+        <div className="server-actions">
+          <button type="button" onClick={receive}>Receive</button>
+          <button type="button" onClick={send}>Send</button>
+        </div>
+        {status && <p className="server-note">{status}</p>}
       </div>
       <div className="endpoint-form-panel">
         <div className="endpoint-panel-title">Compose</div>
@@ -5742,6 +7444,214 @@ function EndpointEmailApp({ app, device, onUpdateDevice }) {
         </div>
         <textarea className="endpoint-textarea compact" value={settings.body || ""} onChange={(e) => set("body", e.target.value)} />
       </div>
+      <div className="endpoint-table-panel">
+        <div className="endpoint-panel-title">Inbox</div>
+        <div className="endpoint-table">
+          <div className="endpoint-table-head"><span>From</span><span>Subject</span><span>Time</span></div>
+          {inbox.map((msg) => <div key={msg.id} className="endpoint-table-row"><span>{msg.from}</span><span title={msg.body}>{msg.subject}</span><span>{msg.time}</span></div>)}
+          {!inbox.length && <div className="server-table-empty">No messages</div>}
+        </div>
+      </div>
+      <div className="endpoint-table-panel">
+        <div className="endpoint-panel-title">Sent</div>
+        <div className="endpoint-table">
+          <div className="endpoint-table-head"><span>To</span><span>Subject</span><span>Time</span></div>
+          {sent.map((msg) => <div key={msg.id} className="endpoint-table-row"><span>{msg.to}</span><span title={msg.body}>{msg.subject}</span><span>{msg.time}</span></div>)}
+          {!sent.length && <div className="server-table-empty">No sent mail</div>}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function TrafficGeneratorApp({ app, device, links, onUpdateDevice, onRunSimulation, onPing }) {
+  const settings = appSettings(device, app.key);
+  const history = device.appRuntime?.traffic?.history || [];
+  const set = (field, value) => onUpdateDevice(setAppSetting(app.key, field, value), "Traffic Generator updated");
+  const run = () => {
+    const result = onRunSimulation?.((draft) => OPT_Services.generateTraffic({
+      devices: draft,
+      links,
+      sourceId: device.id,
+      destination: settings.destination || "",
+      protocol: settings.protocol || "ICMP",
+      count: Number(settings.count || 5),
+    }), "Traffic generated");
+    if (result?.ok && String(settings.protocol || "ICMP").toUpperCase() === "ICMP") onPing?.(device.id, result.targetIp || settings.destination);
+  };
+  return (
+    <div className="endpoint-app-body">
+      <div className="endpoint-form-panel">
+        <div className="endpoint-panel-title">{app.label}</div>
+        <div className="endpoint-form-grid">
+          <label>Destination<input value={settings.destination || ""} onChange={(e) => set("destination", e.target.value)} placeholder="192.168.20.20" /></label>
+          <label>Protocol<select value={settings.protocol || "ICMP"} onChange={(e) => set("protocol", e.target.value)}><option>ICMP</option><option>TCP</option><option>UDP</option><option>HTTP</option></select></label>
+          <label>Count<input value={settings.count || "5"} onChange={(e) => set("count", e.target.value)} /></label>
+        </div>
+        <div className="server-actions"><button type="button" onClick={run}>Generate</button></div>
+      </div>
+      <div className="endpoint-table-panel">
+        <div className="endpoint-panel-title">History</div>
+        <div className="endpoint-table">
+          <div className="endpoint-table-head"><span>Time</span><span>Protocol</span><span>Result</span></div>
+          {history.slice().reverse().map((row, idx) => <div key={`${row.time}-${idx}`} className="endpoint-table-row"><span>{row.time}</span><span>{row.protocol}</span><span title={row.result}>{row.ok ? "Delivered" : row.result}</span></div>)}
+          {!history.length && <div className="server-table-empty">No generated traffic</div>}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function MibBrowserApp({ app, device, links, onUpdateDevice, onRunSimulation }) {
+  const settings = appSettings(device, app.key);
+  const last = device.appRuntime?.mib?.lastQuery;
+  const set = (field, value) => onUpdateDevice(setAppSetting(app.key, field, value), "MIB Browser updated");
+  const query = (mode = "get") => onRunSimulation?.((draft) => {
+    const result = OPT_Services.querySnmp({
+      devices: draft,
+      links,
+      sourceId: device.id,
+      target: settings.agent || "",
+      community: settings.community || "public",
+      oid: settings.oid || "1.3.6.1.2.1.1.1.0",
+      bulk: mode === "bulk",
+      setValue: mode === "set" ? settings.value || "" : null,
+    });
+    OPT_Services.ensureRuntime(draft[device.id], "mib").lastQuery = result;
+    return result;
+  }, "SNMP query");
+  return (
+    <div className="endpoint-app-body">
+      <div className="endpoint-form-panel">
+        <div className="endpoint-panel-title">{app.label}</div>
+        <div className="endpoint-form-grid">
+          <label>Agent<input value={settings.agent || ""} onChange={(e) => set("agent", e.target.value)} placeholder="192.168.1.1" /></label>
+          <label>Community<input value={settings.community || "public"} onChange={(e) => set("community", e.target.value)} /></label>
+          <label>OID<input value={settings.oid || "1.3.6.1.2.1.1.1.0"} onChange={(e) => set("oid", e.target.value)} /></label>
+          <label>Set Value<input value={settings.value || ""} onChange={(e) => set("value", e.target.value)} /></label>
+        </div>
+        <div className="server-actions"><button type="button" onClick={() => query("get")}>Get</button><button type="button" onClick={() => query("bulk")}>Get Bulk</button><button type="button" onClick={() => query("set")}>Set</button></div>
+      </div>
+      <div className="endpoint-status-panel">
+        <AppLibraryIcon kind={app.key} />
+        <div><div className="endpoint-status-title">{last?.ok ? "SNMP Response" : "SNMP Status"}</div><p>{last ? (last.ok ? last.value : last.error) : "No query sent"}</p></div>
+      </div>
+    </div>
+  );
+}
+
+function SessionConnectApp({ app, device, links, kind, onUpdateDevice, onRunSimulation }) {
+  const settings = appSettings(device, app.key);
+  const session = device.appRuntime?.sessions?.[kind];
+  const set = (field, value) => onUpdateDevice(setAppSetting(app.key, field, value), `${app.label} updated`);
+  const connect = () => onRunSimulation?.((draft) => {
+    const fn = kind === "pppoe" ? OPT_Services.connectPppoe : OPT_Services.connectVpn;
+    return fn({ devices: draft, links, sourceId: device.id, target: settings.server || "", username: settings.username || "", password: settings.password || "" });
+  }, `${app.label} connected`);
+  return (
+    <div className="endpoint-app-body">
+      <div className="endpoint-form-panel">
+        <div className="endpoint-panel-title">{app.label}</div>
+        <div className="endpoint-form-grid">
+          <label>Server<input value={settings.server || ""} onChange={(e) => set("server", e.target.value)} placeholder="192.168.20.20" /></label>
+          <label>Username<input value={settings.username || ""} onChange={(e) => set("username", e.target.value)} /></label>
+          <label>Password<input value={settings.password || ""} onChange={(e) => set("password", e.target.value)} /></label>
+        </div>
+        <div className="server-actions"><button type="button" onClick={connect}>Connect</button></div>
+      </div>
+      <div className="endpoint-status-panel"><AppLibraryIcon kind={app.key} /><div><div className="endpoint-status-title">{session?.connected ? "Connected" : "Disconnected"}</div><p>{session?.connected ? `${session.username} via ${session.server} at ${session.connectedAt}` : "No active session"}</p></div></div>
+    </div>
+  );
+}
+
+function CommunicatorApp({ app, device, links, onUpdateDevice, onRunSimulation }) {
+  const settings = appSettings(device, app.key);
+  const registration = device.appRuntime?.voice?.registration;
+  const last = device.appRuntime?.voice?.lastCall;
+  const set = (field, value) => onUpdateDevice(setAppSetting(app.key, field, value), "Communicator updated");
+  const register = () => onRunSimulation?.((draft) => {
+    const result = OPT_Services.registerCommunicator({ devices: draft, links, sourceId: device.id, server: settings.server || "", extension: settings.extension || "", password: settings.password || "" });
+    return result;
+  }, "Communicator registered");
+  const call = () => onRunSimulation?.((draft) => {
+    const result = OPT_Services.placeCall({ devices: draft, links, sourceId: device.id, extension: settings.dial || "" });
+    OPT_Services.ensureRuntime(draft[device.id], "voice").lastCall = result.ok ? result.result : result.error;
+    return result;
+  }, "Call placed");
+  return (
+    <div className="endpoint-app-body">
+      <div className="endpoint-form-panel">
+        <div className="endpoint-panel-title">{app.label}</div>
+        <div className="endpoint-form-grid">
+          <label>Call Server<input value={settings.server || ""} onChange={(e) => set("server", e.target.value)} /></label>
+          <label>Extension<input value={settings.extension || ""} onChange={(e) => set("extension", e.target.value)} /></label>
+          <label>Password<input value={settings.password || ""} onChange={(e) => set("password", e.target.value)} /></label>
+          <label>Dial<input value={settings.dial || ""} onChange={(e) => set("dial", e.target.value)} /></label>
+        </div>
+        <div className="server-actions"><button type="button" onClick={register}>Register</button><button type="button" onClick={call}>Call</button></div>
+      </div>
+      <div className="endpoint-status-panel"><AppLibraryIcon kind={app.key} /><div><div className="endpoint-status-title">{registration ? `Registered ${registration.extension}` : "Not registered"}</div><p>{last || (registration ? `Server ${registration.serverId}` : "Register before placing calls")}</p></div></div>
+    </div>
+  );
+}
+
+function FirewallApp({ app, device, family, onUpdateDevice }) {
+  const settings = appSettings(device, family);
+  const rules = settings.rules || [];
+  const draft = settings.draft || { action: "deny", protocol: "tcp", src: "any", dst: "any", port: "80", direction: "both" };
+  const saveSettings = (next) => onUpdateDevice((d) => {
+    d.appSettings = d.appSettings || {};
+    d.appSettings[family] = { ...(d.appSettings[family] || {}), ...next };
+  }, `${app.label} updated`);
+  const setDraft = (field, value) => saveSettings({ draft: { ...draft, [field]: value } });
+  const addRule = () => saveSettings({ rules: [...rules, { ...draft, id: `rule_${Date.now()}`, enabled: true }] });
+  return (
+    <div className="endpoint-app-body">
+      <div className="endpoint-form-panel">
+        <div className="endpoint-panel-title">{app.label}</div>
+        <label className="endpoint-toggle-label"><input type="checkbox" checked={!!settings.enabled} onChange={(e) => saveSettings({ enabled: e.target.checked })} /> Firewall enabled</label>
+        <div className="endpoint-form-grid">
+          <label>Action<select value={draft.action} onChange={(e) => setDraft("action", e.target.value)}><option>deny</option><option>allow</option></select></label>
+          <label>Protocol<select value={draft.protocol} onChange={(e) => setDraft("protocol", e.target.value)}><option>tcp</option><option>udp</option><option>icmp</option><option>any</option></select></label>
+          <label>Source<input value={draft.src} onChange={(e) => setDraft("src", e.target.value)} /></label>
+          <label>Destination<input value={draft.dst} onChange={(e) => setDraft("dst", e.target.value)} /></label>
+          <label>Port<input value={draft.port} onChange={(e) => setDraft("port", e.target.value)} /></label>
+          <label>Direction<select value={draft.direction} onChange={(e) => setDraft("direction", e.target.value)}><option>both</option><option>in</option><option>out</option></select></label>
+        </div>
+        <div className="server-actions"><button type="button" onClick={addRule}>Add Rule</button><button type="button" onClick={() => saveSettings({ rules: [] })}>Clear</button></div>
+      </div>
+      <div className="endpoint-table-panel">
+        <div className="endpoint-panel-title">Rules</div>
+        <div className="endpoint-table">
+          <div className="endpoint-table-head"><span>Action</span><span>Match</span><span>Direction</span></div>
+          {rules.map((rule) => <div key={rule.id} className="endpoint-table-row"><span>{rule.action}</span><span>{rule.protocol} {rule.src} to {rule.dst} port {rule.port}</span><span>{rule.direction}</span></div>)}
+          {!rules.length && <div className="server-table-empty">No rules</div>}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function IotApp({ app, device, links, onUpdateDevice, onRunSimulation, ide }) {
+  const settings = appSettings(device, app.key);
+  const runtime = device.appRuntime?.iot || {};
+  const set = (field, value) => onUpdateDevice(setAppSetting(app.key, field, value), `${app.label} updated`);
+  const register = () => onRunSimulation?.((draft) => OPT_Services.registerIotDevice({ devices: draft, links, sourceId: device.id, server: settings.server || "", zone: settings.zone || "Lab" }), "IoT registered");
+  const run = () => onRunSimulation?.((draft) => OPT_Services.runIotScript({ devices: draft, sourceId: device.id, project: settings.project || "main", language: settings.language || "JavaScript", code: settings.code || "" }), "IoT script ran");
+  return (
+    <div className="endpoint-app-body">
+      <div className="endpoint-form-panel">
+        <div className="endpoint-panel-title">{app.label}</div>
+        <div className="endpoint-form-grid">
+          <label>Registration Server<input value={settings.server || ""} onChange={(e) => set("server", e.target.value)} /></label>
+          <label>Zone<input value={settings.zone || "Lab"} onChange={(e) => set("zone", e.target.value)} /></label>
+          {ide && <label>Project<input value={settings.project || "main"} onChange={(e) => set("project", e.target.value)} /></label>}
+          {ide && <label>Language<select value={settings.language || "JavaScript"} onChange={(e) => set("language", e.target.value)}><option>JavaScript</option><option>Python</option><option>Blockly</option></select></label>}
+        </div>
+        {ide && <textarea className="endpoint-textarea compact" value={settings.code || ""} onChange={(e) => set("code", e.target.value)} placeholder="toggle('led0')" />}
+        <div className="server-actions"><button type="button" onClick={register}>Register</button>{ide && <button type="button" onClick={run}>Run</button>}</div>
+      </div>
+      <div className="endpoint-status-panel"><AppLibraryIcon kind={app.key} /><div><div className="endpoint-status-title">{runtime.registration?.status || "Not registered"}</div><p>{runtime.scripts?.slice(-1)[0]?.result || "No IoT activity"}</p></div></div>
     </div>
   );
 }
@@ -5863,7 +7773,7 @@ function endpointUtilitySpec(key) {
   ] };
 }
 
-function ServerDesktopPanel() {
+function ServerDesktopPanel({ onOpenApp }) {
   return (
     <div className="server-desktop-panel" aria-label="Server Desktop tools">
       <div className="server-desktop-list" role="table" aria-label="Server desktop applications">
@@ -5872,13 +7782,13 @@ function ServerDesktopPanel() {
           <span>Kind</span>
         </div>
         {SERVER_DESKTOP_APPS.map((app) => (
-          <div key={app.key} className="server-desktop-row" role="row" aria-disabled="true" title={`${app.label} (not implemented yet)`}>
+          <button key={app.key} type="button" className="server-desktop-row" role="row" onClick={() => onOpenApp?.(app.key)} title={app.label}>
             <span className="server-desktop-name" role="cell">
               <AppLibraryIcon kind={app.key} className="server-desktop-icon" />
               <span>{app.label}</span>
             </span>
             <span className="server-desktop-kind" role="cell">{app.kind}</span>
-          </div>
+          </button>
         ))}
       </div>
     </div>
@@ -6491,11 +8401,67 @@ function RubricNode({ node, depth }) {
   );
 }
 
-function PacketTracerSidebar({ activity, onClose, onReportError }) {
-  const [topTab, setTopTab] = useState("instructions");
+function ImportReportList({ title, kind, items, empty }) {
+  return (
+    <section className={`pt-import-section ${kind}`}>
+      <div className="pt-import-section-head">
+        <span>{title}</span>
+        <strong>{items.length}</strong>
+      </div>
+      {items.length ? (
+        <div className="pt-import-items">
+          {items.map((item, index) => (
+            <div key={`${kind}-${index}`} className="pt-import-item">
+              <div className="pt-import-item-label">{item.label}</div>
+              <div className="pt-import-item-detail">{item.detail}</div>
+            </div>
+          ))}
+        </div>
+      ) : (
+        <div className="pt-sb-empty">{empty}</div>
+      )}
+    </section>
+  );
+}
+
+function PacketTracerImportReport({ activity }) {
+  const report = packetTracerImportReport(activity);
+  return (
+    <div className="pt-import-report">
+      <div className="pt-import-summary">
+        <div>
+          <div className="pt-import-kicker">Import report</div>
+          <div className="pt-import-title">{activity?.sourceName || activity?.title || "Packet Tracer file"}</div>
+        </div>
+        <div className={`pt-import-state ${report.broken.length ? "broken" : report.hasIssues ? "warn" : "ok"}`}>
+          {report.broken.length ? "Needs attention" : report.hasIssues ? "Partial" : "Clean"}
+        </div>
+      </div>
+      <div className="pt-import-counts">
+        <span className="ok">{report.imported.length} imported</span>
+        <span className="dim">{report.skipped.length} skipped</span>
+        <span className="warn">{report.approximated.length} approximated</span>
+        <span className={report.broken.length ? "err" : "dim"}>{report.broken.length} broken</span>
+      </div>
+      <ImportReportList title="Imported" kind="imported" items={report.imported} empty="Nothing was semantically imported." />
+      <ImportReportList title="Skipped" kind="skipped" items={report.skipped} empty="No skipped features were detected." />
+      <ImportReportList title="Approximated" kind="approximated" items={report.approximated} empty="No approximations were needed." />
+      <ImportReportList title="Broken" kind="broken" items={report.broken} empty="No broken import steps were detected." />
+    </div>
+  );
+}
+
+function PacketTracerSidebar({ activity, onClose, onReportError, requestedTab, onRequestedTabHandled }) {
+  const hasImportReport = !!(activity?.format === "packet-tracer-activity" || activity?.rawFile || /\.(pka|pkt)$/i.test(activity?.sourceName || ""));
+  const [topTab, setTopTab] = useState(hasImportReport ? "import-report" : "instructions");
   useEffect(() => {
-    setTopTab("instructions");
-  }, [activity?.title]);
+    setTopTab(hasImportReport ? "import-report" : "instructions");
+  }, [activity?.title, activity?.sourceSha256, hasImportReport]);
+  useEffect(() => {
+    if (!requestedTab) return;
+    setTopTab(requestedTab);
+    onRequestedTabHandled && onRequestedTabHandled();
+  }, [requestedTab]);
   if (!activity) return null;
 
   const progress = activity.progress || null;
@@ -6533,6 +8499,7 @@ function PacketTracerSidebar({ activity, onClose, onReportError }) {
 
       <div className="side-tabs pt-sb-tabs">
         {[
+          ...(hasImportReport ? [["import-report", "Import Report"]] : []),
           ["instructions", "Instructions"],
           ["assessment", `Assessment Items${allAssessmentItems.length ? ` (${allAssessmentItems.length})` : ""}`],
           ["progress", "Progress"],
@@ -6554,6 +8521,14 @@ function PacketTracerSidebar({ activity, onClose, onReportError }) {
                 <p>{hint}</p>
               </div>
             ))}
+          </div>
+        </div>
+      )}
+
+      {topTab === "import-report" && (
+        <div className="pt-sb-body">
+          <div className="pt-sb-section">
+            <PacketTracerImportReport activity={activity} />
           </div>
         </div>
       )}
@@ -6640,6 +8615,144 @@ function PacketTracerSidebar({ activity, onClose, onReportError }) {
   );
 }
 
+function PacketInspector({ events }) {
+  const [filter, setFilter] = useState("all");
+  const [selectedId, setSelectedId] = useState(null);
+  const filtered = useMemo(() => {
+    const group = (event) => {
+      const p = String(event.protocol || "").toLowerCase();
+      if (p.includes("icmp")) return "icmp";
+      if (p === "dns") return "dns";
+      if (p === "dhcp") return "dhcp";
+      if (p === "snmp") return "snmp";
+      if (["tcp", "http", "https", "ssh", "telnet", "ftp", "tftp", "curl"].includes(p) || event.kind === "service") return "app";
+      return p || "ip";
+    };
+    if (filter === "all") return events;
+    if (filter === "drops") return events.filter((event) => event.status === "drop" || event.artifacts?.drop);
+    return events.filter((event) => group(event) === filter);
+  }, [events, filter]);
+  const selected = filtered.find((event) => event.id === selectedId) || filtered[filtered.length - 1] || null;
+
+  useEffect(() => {
+    if (selected && selected.id !== selectedId) setSelectedId(selected.id);
+  }, [selected?.id]);
+
+  const renderFields = (fields = {}) => (
+    <div className="packet-field-grid">
+      {Object.entries(fields).filter(([, value]) => value !== "" && value != null).map(([key, value]) => (
+        <React.Fragment key={key}>
+          <span className="k">{key}</span>
+          <span className="v">{typeof value === "object" ? JSON.stringify(value) : String(value)}</span>
+        </React.Fragment>
+      ))}
+    </div>
+  );
+
+  return (
+    <div className="packet-inspector">
+      <div className="packet-filterbar">
+        {[
+          ["all", "All"],
+          ["icmp", "ICMP"],
+          ["dns", "DNS"],
+          ["dhcp", "DHCP"],
+          ["app", "TCP/App"],
+          ["snmp", "SNMP"],
+          ["drops", "Drops"],
+        ].map(([key, label]) => (
+          <button key={key} className={filter === key ? "active" : ""} onClick={() => setFilter(key)}>{label}</button>
+        ))}
+      </div>
+      {events.length === 0 ? (
+        <div className="packet-empty">No packet events yet. Run ping, DHCP, DNS, curl, SSH, FTP, SNMP, or packet mode to populate the inspector.</div>
+      ) : (
+        <div className="packet-inspector-body">
+          <div className="packet-trace-list">
+            {filtered.length === 0 && <div className="packet-empty small">No events match this filter.</div>}
+            {filtered.map((event) => (
+              <button key={event.id} className={`packet-trace-row ${selected?.id === event.id ? "selected" : ""} ${event.status === "drop" ? "drop" : ""}`} onClick={() => setSelectedId(event.id)}>
+                <span className="time">{event.time}</span>
+                <span className="proto">{event.protocol}</span>
+                <span className="summary">{event.summary}</span>
+                <span className={`state ${event.status}`}>{event.status}</span>
+              </button>
+            ))}
+          </div>
+          <div className="packet-detail">
+            {!selected ? (
+              <div className="packet-empty small">Select a packet event.</div>
+            ) : (
+              <>
+                <div className="packet-detail-head">
+                  <div>
+                    <div className="packet-title">{selected.protocol.toUpperCase()} {selected.kind}</div>
+                    <div className="packet-subtitle">{selected.source} -> {selected.target || "unknown"}</div>
+                  </div>
+                  <span className={`packet-status ${selected.status}`}>{selected.status}</span>
+                </div>
+
+                <div className="packet-section">
+                  <h4>Frame</h4>
+                  <div className="packet-frame-columns">
+                    <div><h5>L2</h5>{renderFields(selected.frame?.l2)}</div>
+                    <div><h5>L3</h5>{renderFields(selected.frame?.l3)}</div>
+                    <div><h5>L4/App</h5>{renderFields({ ...(selected.frame?.l4 || {}), ...(selected.frame?.app || {}) })}</div>
+                  </div>
+                </div>
+
+                <div className="packet-section">
+                  <h4>Hop Decisions</h4>
+                  <div className="packet-step-list">
+                    {(selected.steps || []).map((step, index) => (
+                      <div key={`${step.phase}-${index}`} className={`packet-step ${step.status === "drop" ? "drop" : ""}`}>
+                        <span className="idx">{index + 1}</span>
+                        <span className="phase">{step.phase}</span>
+                        <span className="note">{step.device ? `${step.device}: ` : ""}{step.note}</span>
+                        {step.iface && <span className="iface">{ifaceName(step.iface)}</span>}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+
+                <div className="packet-section">
+                  <h4>Artifacts</h4>
+                  <div className="packet-artifacts">
+                    {(selected.artifacts?.aclHits || []).map((hit, index) => (
+                      <div key={`acl-${index}`} className={`packet-artifact ${hit.action === "deny" ? "drop" : ""}`}>
+                        ACL {hit.aclName} {hit.action}{hit.sequence ? ` seq ${hit.sequence}` : ""} on {hit.device || hit.deviceId} {hit.iface || ""} {hit.direction || ""}
+                        <span>{hit.spec}</span>
+                      </div>
+                    ))}
+                    {(selected.artifacts?.natTranslations || []).map((nat, index) => (
+                      <div key={`nat-${index}`} className="packet-artifact">
+                        NAT {nat.insideLocal} -> {nat.insideGlobal}
+                        <span>{nat.outsideLocal || "-"} -> {nat.outsideGlobal || "-"}</span>
+                      </div>
+                    ))}
+                    {selected.artifacts?.dhcpLease && (
+                      <div className="packet-artifact">DHCP lease {selected.artifacts.dhcpLease.ip}<span>router {selected.artifacts.dhcpLease.router || "-"} dns {selected.artifacts.dhcpLease.dns || "-"}</span></div>
+                    )}
+                    {selected.artifacts?.dnsLookup && (
+                      <div className={`packet-artifact ${selected.artifacts.dnsLookup.status === "nxdomain" ? "drop" : ""}`}>DNS {selected.artifacts.dnsLookup.qname}<span>{selected.artifacts.dnsLookup.answer || selected.artifacts.dnsLookup.status}</span></div>
+                    )}
+                    {selected.artifacts?.drop && (
+                      <div className="packet-artifact drop">Drop<span>{selected.artifacts.drop.reason || selected.summary}</span></div>
+                    )}
+                    {!selected.artifacts?.drop && !(selected.artifacts?.aclHits || []).length && !(selected.artifacts?.natTranslations || []).length && !selected.artifacts?.dhcpLease && !selected.artifacts?.dnsLookup && (
+                      <div className="packet-empty small">No ACL, NAT, DHCP, DNS, or drop artifacts for this event.</div>
+                    )}
+                  </div>
+                </div>
+              </>
+            )}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function PacketLog({ events }) {
   return (
     <div className="events">
@@ -6655,18 +8768,54 @@ function PacketLog({ events }) {
   );
 }
 
-function ImportReportBanner({ activity, onReport, onClose }) {
-  const decoderError = activity?.reverseReport?.decoder?.error || activity?.diagnostics?.decoder?.error;
+function PacketEventList({ events = [] }) {
   return (
-    <div className="import-report-banner">
+    <div className="events">
+      {events.length === 0 && <div style={{ padding: 24, color: "var(--fg-3)", textAlign: "center" }}>No packet events yet. Run ping, traffic generator, or packet mode to capture protocol details.</div>}
+      {events.slice().reverse().map((event) => (
+        <div key={event.id || `${event.time}-${event.summary}`} className="event">
+          <span className="t">{event.time}</span>
+          <span className={`s ${event.status === "ok" ? "ok" : "err"}`}>{event.protocol || event.kind}</span>
+          <span className="src">{event.source || event.sourceDeviceId}</span>
+          <span className="m">
+            {event.summary}
+            {!!event.steps?.length && <small style={{ display: "block", color: "var(--fg-3)", marginTop: 3 }}>{event.steps.map((step) => step.note || step.action).filter(Boolean).join(" · ")}</small>}
+          </span>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function ImportReportBanner({ activity, onReport, onOpen, onClose }) {
+  const decoderError = activity?.reverseReport?.decoder?.error || activity?.diagnostics?.decoder?.error;
+  const report = packetTracerImportReport(activity);
+  const hasBroken = report.broken.length > 0 || !!decoderError || !!activity?.unsupported;
+  return (
+    <div className={`import-report-banner ${hasBroken ? "has-broken" : report.hasIssues ? "has-warnings" : ""}`}>
       <div>
-        <strong>{activity?.sourceName || "Packet Tracer import"}</strong>
-        <span>{decoderError || "This Packet Tracer file could not be fully decoded."}</span>
+        <strong>{hasBroken ? "Packet Tracer import needs review" : "Packet Tracer import report"}</strong>
+        <span>{decoderError || report.summary}</span>
+        <div className="import-report-banner-counts">
+          <span>{report.imported.length} imported</span>
+          <span>{report.skipped.length} skipped</span>
+          <span>{report.approximated.length} approximated</span>
+          <span>{report.broken.length} broken</span>
+        </div>
       </div>
-      <button className="tb-btn primary" onClick={onReport}>Report Error</button>
+      {onOpen && <button className="tb-btn primary" onClick={onOpen}>Details</button>}
+      {hasBroken && onReport && <button className="tb-btn" onClick={onReport}>Report Error</button>}
       <button className="icon-btn" onClick={onClose}>×</button>
     </div>
   );
+}
+
+if (typeof window !== "undefined") {
+  window.OpenPTPacketTracerDiagnostics = {
+    importReport: packetTracerImportReport,
+    gradeActivity: gradePacketTracerActivity,
+    assessmentSections: packetTracerAssessmentSections,
+  };
 }
 
 function FilesPanel({ devices, links }) {
@@ -6707,6 +8856,111 @@ function LabsPanel({ onLoadStarter }) {
           <div style={{ fontSize: 11, color: "var(--fg-3)", marginTop: 3, lineHeight: 1.45 }}>{l.desc}</div>
         </div>
       ))}
+    </div>
+  );
+}
+
+function TopologyValidationPanel({ issues = [], devices = {}, links = [], onSelectIssue }) {
+  const [severityFilter, setSeverityFilter] = useState("all");
+  const [categoryFilter, setCategoryFilter] = useState("all");
+  const [expanded, setExpanded] = useState(null);
+  const severityOrder = ["err", "warn", "info"];
+  const categoryLabels = {
+    ip: "IP",
+    mask: "Masks",
+    gateway: "Gateways",
+    port: "Ports",
+    vlan: "VLANs",
+    trunk: "Trunks",
+    media: "Media",
+  };
+  const counts = severityOrder.reduce((acc, key) => ({ ...acc, [key]: issues.filter((issue) => issue.severity === key).length }), {});
+  const categories = Object.keys(categoryLabels).filter((key) => issues.some((issue) => issue.category === key));
+  const visible = issues
+    .filter((issue) => severityFilter === "all" || issue.severity === severityFilter)
+    .filter((issue) => categoryFilter === "all" || issue.category === categoryFilter)
+    .sort((a, b) => severityOrder.indexOf(a.severity) - severityOrder.indexOf(b.severity) || String(a.category).localeCompare(String(b.category)));
+  const targetLabel = (issue) => {
+    const dev = devices[issue.deviceId];
+    if (dev) return `${deviceLabel(dev)}${issue.iface ? ` ${ifaceName(issue.iface)}` : ""}`;
+    const link = links.find((item) => item.id === issue.linkId);
+    if (link) return linkLabel(link, devices);
+    return "topology";
+  };
+  const select = (issue) => {
+    setExpanded((id) => id === issue.id ? null : issue.id);
+    onSelectIssue && onSelectIssue(issue);
+  };
+
+  return (
+    <div className="validation-panel">
+      <div className="validation-summary">
+        {[
+          ["err", "Errors", counts.err || 0],
+          ["warn", "Warnings", counts.warn || 0],
+          ["info", "Info", counts.info || 0],
+        ].map(([key, label, count]) => (
+          <button
+            key={key}
+            type="button"
+            className={`validation-chip ${key} ${severityFilter === key ? "active" : ""}`}
+            onClick={() => setSeverityFilter(severityFilter === key ? "all" : key)}
+          >
+            <span className="dot"/>
+            <b>{count}</b>
+            {label}
+          </button>
+        ))}
+        <div className="validation-filter-spacer"/>
+        <button type="button" className={`validation-filter ${categoryFilter === "all" ? "active" : ""}`} onClick={() => setCategoryFilter("all")}>All</button>
+        {categories.map((key) => (
+          <button key={key} type="button" className={`validation-filter ${categoryFilter === key ? "active" : ""}`} onClick={() => setCategoryFilter(key)}>
+            {categoryLabels[key]}
+          </button>
+        ))}
+      </div>
+      <div className="validation-list">
+        {!issues.length && (
+          <div className="validation-empty">
+            <div className="validation-empty-mark">✓</div>
+            <div>
+              <div>All topology validation checks passing.</div>
+              <span>No duplicate IPs, bad masks, gateway gaps, down linked ports, VLAN/trunk mismatches, or media issues found.</span>
+            </div>
+          </div>
+        )}
+        {!!issues.length && !visible.length && (
+          <div className="validation-empty subtle">
+            No validation issues match the current filters.
+          </div>
+        )}
+        {visible.map((issue) => {
+          const isOpen = expanded === issue.id;
+          return (
+            <div key={issue.id} className={`validation-issue ${issue.severity} ${isOpen ? "open" : ""}`}>
+              <button type="button" className="validation-issue-main" onClick={() => select(issue)}>
+                <span className="validation-dot"/>
+                <span className="validation-issue-text">
+                  <span className="validation-title">{issue.title}</span>
+                  <span className="validation-meta">{categoryLabels[issue.category] || issue.category} · {targetLabel(issue)}</span>
+                </span>
+                <span className="validation-severity">{issue.severity}</span>
+              </button>
+              {isOpen && (
+                <div className="validation-detail">
+                  <p>{issue.detail}</p>
+                  {!!issue.commands?.length && (
+                    <div className="validation-commands">
+                      <div>Suggested commands</div>
+                      {issue.commands.map((cmd, index) => <code key={`${issue.id}-cmd-${index}`}>{cmd}</code>)}
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+          );
+        })}
+      </div>
     </div>
   );
 }
@@ -6785,6 +9039,11 @@ function parseAclEntry(action, spec, aclType) {
     if (words[idx] === "host") return { value: words[idx + 1], wildcard: "0.0.0.0", next: idx + 2 };
     return { value: words[idx], wildcard: words[idx + 1] || "0.0.0.0", next: idx + 2 };
   };
+  const portValue = (value) => ({ ftp: 21, ssh: 22, telnet: 23, dns: 53, tftp: 69, http: 80, https: 443 })[String(value || "").toLowerCase()] || Number(value) || value;
+  const parsePort = (idx) => {
+    if (words[idx] === "eq") return { port: portValue(words[idx + 1]), next: idx + 2 };
+    return { next: idx };
+  };
   if (aclType === "standard") {
     const src = parseHost(0);
     return { action, spec, src: src.value, srcWildcard: src.wildcard };
@@ -6793,8 +9052,16 @@ function parseAclEntry(action, spec, aclType) {
   let proto = "ip";
   if (/^(ip|icmp|tcp|udp)$/i.test(words[0])) proto = words[idx++];
   const src = parseHost(idx);
-  const dst = parseHost(src.next);
-  return { action, spec, proto, src: src.value, srcWildcard: src.wildcard, dst: dst.value, dstWildcard: dst.wildcard };
+  const srcPort = parsePort(src.next);
+  const dst = parseHost(srcPort.next);
+  const dstPort = parsePort(dst.next);
+  return {
+    action, spec, proto,
+    src: src.value, srcWildcard: src.wildcard,
+    dst: dst.value, dstWildcard: dst.wildcard,
+    ...(srcPort.port != null ? { srcPort: srcPort.port } : {}),
+    ...(dstPort.port != null ? { dstPort: dstPort.port } : {}),
+  };
 }
 function wildcardToMaskSafe(wildcard) {
   if (!wildcard || !wildcard.includes(".")) return "255.255.255.0";

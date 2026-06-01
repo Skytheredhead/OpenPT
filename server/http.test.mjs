@@ -50,6 +50,7 @@ async function withTestServer(env, fn) {
       OPENPT_DATA_DIR: dir,
       PORT: String(port),
       HOST: "127.0.0.1",
+      OPENPT_ACCOUNT_EMAIL_DEBUG: "1",
       ...env,
     },
     stdio: ["ignore", "pipe", "pipe"],
@@ -69,13 +70,17 @@ async function registerSession(baseUrl, email = "lease@example.com") {
     headers: { "content-type": "application/json" },
     body: JSON.stringify({ email, password: "password123" }),
   });
-  assert.equal(res.status, 200);
+  assert.equal(res.status, 202);
   const body = await res.json();
-  return {
-    cookie: res.headers.get("set-cookie").split(";")[0],
-    csrf: body.csrf || res.headers.get("x-openpt-csrf"),
-    user: body.user,
-  };
+  assert.equal(body.needsVerification, true);
+  assert.ok(body.verification?.token);
+  const verify = await fetch(`${baseUrl}/api/auth/verify-email`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ token: body.verification.token }),
+  });
+  assert.equal(verify.status, 200);
+  return loginSession(baseUrl, email);
 }
 
 async function loginSession(baseUrl, email = "lease@example.com") {
@@ -101,7 +106,7 @@ test("duplicate registration returns 409 without leaking sqlite internals", { ti
       headers: { "content-type": "application/json" },
       body: JSON.stringify(payload),
     });
-    assert.equal(first.status, 200);
+    assert.equal(first.status, 202);
     const second = await fetch(`${baseUrl}/api/auth/register`, {
       method: "POST",
       headers: { "content-type": "application/json" },
@@ -139,8 +144,146 @@ test("production frontend origin can register against backend-only API", { timeo
       },
       body: JSON.stringify({ email: "custom-origin@example.com", password: "password123" }),
     });
-    assert.equal(register.status, 200);
+    assert.equal(register.status, 202);
     assert.equal(register.headers.get("access-control-allow-origin"), "https://openpt.skylarenns.com");
+  });
+});
+
+test("email verification gates login and uses single-use token", { timeout: 15_000 }, async () => {
+  await withTestServer({}, async (baseUrl) => {
+    const email = "verify@example.com";
+    const register = await fetch(`${baseUrl}/api/auth/register`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ email, password: "password123" }),
+    });
+    assert.equal(register.status, 202);
+    const registered = await register.json();
+
+    const blocked = await fetch(`${baseUrl}/api/auth/login`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ email, password: "password123" }),
+    });
+    assert.equal(blocked.status, 403);
+    assert.equal((await blocked.json()).code, "EMAIL_NOT_VERIFIED");
+
+    const verify = await fetch(`${baseUrl}/api/auth/verify-email`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ token: registered.verification.token }),
+    });
+    assert.equal(verify.status, 200);
+
+    const reused = await fetch(`${baseUrl}/api/auth/verify-email`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ token: registered.verification.token }),
+    });
+    assert.equal(reused.status, 400);
+
+    const session = await loginSession(baseUrl, email);
+    assert.equal(session.user.email, email);
+  });
+});
+
+test("password reset is generic, single-use, and revokes sessions", { timeout: 15_000 }, async () => {
+  await withTestServer({}, async (baseUrl) => {
+    const email = "reset@example.com";
+    const session = await registerSession(baseUrl, email);
+    const forgot = await fetch(`${baseUrl}/api/auth/forgot-password`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ email }),
+    });
+    assert.equal(forgot.status, 200);
+    const forgotBody = await forgot.json();
+    assert.ok(forgotBody.reset?.token);
+
+    const reset = await fetch(`${baseUrl}/api/auth/reset-password`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ token: forgotBody.reset.token, password: "newpassword123" }),
+    });
+    assert.equal(reset.status, 200);
+
+    const oldMe = await fetch(`${baseUrl}/api/me`, { headers: { cookie: session.cookie } });
+    assert.equal((await oldMe.json()).user, null);
+
+    const reused = await fetch(`${baseUrl}/api/auth/reset-password`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ token: forgotBody.reset.token, password: "anotherpass123" }),
+    });
+    assert.equal(reused.status, 400);
+
+    const login = await fetch(`${baseUrl}/api/auth/login`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ email, password: "newpassword123" }),
+    });
+    assert.equal(login.status, 200);
+  });
+});
+
+test("sessions can be listed and revoked by public ids", { timeout: 15_000 }, async () => {
+  await withTestServer({}, async (baseUrl) => {
+    const email = "sessions@example.com";
+    const first = await registerSession(baseUrl, email);
+    const second = await loginSession(baseUrl, email);
+    const list = await fetch(`${baseUrl}/api/sessions`, { headers: { cookie: first.cookie } });
+    assert.equal(list.status, 200);
+    const body = await list.json();
+    assert.equal(body.sessions.length, 2);
+    assert.ok(body.sessions.every((session) => session.id && !session.id.includes("=")));
+    assert.ok(body.sessions.some((session) => session.current));
+
+    const other = body.sessions.find((session) => !session.current);
+    const revoke = await fetch(`${baseUrl}/api/sessions/${other.id}`, {
+      method: "DELETE",
+      headers: { cookie: first.cookie, "x-openpt-csrf": first.csrf },
+    });
+    assert.equal(revoke.status, 200);
+
+    const secondMe = await fetch(`${baseUrl}/api/me`, { headers: { cookie: second.cookie } });
+    assert.equal((await secondMe.json()).user, null);
+  });
+});
+
+test("account deletion can be scheduled and cancelled during grace period", { timeout: 15_000 }, async () => {
+  await withTestServer({}, async (baseUrl) => {
+    const email = "delete-me@example.com";
+    const session = await registerSession(baseUrl, email);
+    const deletion = await fetch(`${baseUrl}/api/account`, {
+      method: "DELETE",
+      headers: {
+        "content-type": "application/json",
+        cookie: session.cookie,
+        "x-openpt-csrf": session.csrf,
+      },
+      body: JSON.stringify({ password: "password123" }),
+    });
+    assert.equal(deletion.status, 200);
+    const deletionBody = await deletion.json();
+    assert.ok(deletionBody.deletionScheduledAt);
+
+    const blocked = await fetch(`${baseUrl}/api/auth/login`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ email, password: "password123" }),
+    });
+    assert.equal(blocked.status, 403);
+    assert.equal((await blocked.json()).code, "ACCOUNT_DELETION_PENDING");
+
+    const cancel = await fetch(`${baseUrl}/api/account/deletion/cancel`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ email, password: "password123" }),
+    });
+    assert.equal(cancel.status, 200);
+    const cancelBody = await cancel.json();
+    assert.equal(cancelBody.user.email, email);
+    assert.ok(cancel.headers.get("set-cookie"));
   });
 });
 
@@ -158,7 +301,7 @@ test("frontend serves lab and quiz path entrypoints", { timeout: 15_000 }, async
 
     const quizRedirect = await fetch(`${baseUrl}/quiz`, { redirect: "manual" });
     assert.equal(quizRedirect.status, 308);
-    assert.equal(quizRedirect.headers.get("location"), "/quiz/");
+    assert.equal(quizRedirect.headers.get("location"), "/quiz/?view=library");
 
     const quiz = await fetch(`${baseUrl}/quiz/`);
     assert.equal(quiz.status, 200);
@@ -240,5 +383,97 @@ test("logout requires csrf and released leases can be reacquired after logout", 
     assert.equal(nextLeaseRes.status, 200);
     const nextLeaseBody = await nextLeaseRes.json();
     assert.equal(nextLeaseBody.lease.clientId, "client-b");
+  });
+});
+
+test("admin storage endpoints are hidden without a token and guarded with bearer auth", { timeout: 15_000 }, async () => {
+  await withTestServer({}, async (baseUrl) => {
+    const hidden = await fetch(`${baseUrl}/api/admin/backups`, { method: "POST" });
+    assert.equal(hidden.status, 404);
+  });
+
+  await withTestServer({ OPENPT_ADMIN_TOKEN: "test-admin-token" }, async (baseUrl) => {
+    const invalid = await fetch(`${baseUrl}/api/admin/storage/cleanup`, {
+      method: "POST",
+      headers: {
+        authorization: "Bearer wrong-token",
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({ dryRun: true }),
+    });
+    assert.equal(invalid.status, 401);
+
+    const cleanup = await fetch(`${baseUrl}/api/admin/storage/cleanup`, {
+      method: "POST",
+      headers: {
+        authorization: "Bearer test-admin-token",
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({ dryRun: true }),
+    });
+    assert.equal(cleanup.status, 200);
+    assert.equal((await cleanup.json()).dryRun, true);
+
+    const backup = await fetch(`${baseUrl}/api/admin/backups`, {
+      method: "POST",
+      headers: { authorization: "Bearer test-admin-token" },
+    });
+    assert.equal(backup.status, 200);
+    const body = await backup.json();
+    assert.match(body.backup.id, /^openpt-/);
+  });
+});
+
+test("project browser cloud actions rename duplicate and delete", { timeout: 15_000 }, async () => {
+  await withTestServer({}, async (baseUrl) => {
+    const session = await registerSession(baseUrl, "browser-actions@example.com");
+    const authHeaders = {
+      "content-type": "application/json",
+      cookie: session.cookie,
+      "x-openpt-csrf": session.csrf,
+    };
+    const create = await fetch(`${baseUrl}/api/projects`, {
+      method: "POST",
+      headers: authHeaders,
+      body: JSON.stringify({
+        title: "Browser Lab",
+        document: { schemaVersion: 1, title: "Browser Lab", devices: { d1: { hostname: "R1" } }, links: [], uiState: {} },
+      }),
+    });
+    assert.equal(create.status, 200);
+    const created = await create.json();
+
+    const rename = await fetch(`${baseUrl}/api/projects/${created.project.id}`, {
+      method: "POST",
+      headers: authHeaders,
+      body: JSON.stringify({ title: "Renamed Browser Lab" }),
+    });
+    assert.equal(rename.status, 200);
+    assert.equal((await rename.json()).project.title, "Renamed Browser Lab");
+
+    const duplicate = await fetch(`${baseUrl}/api/projects/${created.project.id}/duplicate`, {
+      method: "POST",
+      headers: authHeaders,
+      body: JSON.stringify({ title: "Browser Lab Copy" }),
+    });
+    assert.equal(duplicate.status, 200);
+    const copied = await duplicate.json();
+    assert.equal(copied.project.title, "Browser Lab Copy");
+    assert.equal(copied.document.devices.d1.hostname, "R1");
+
+    const del = await fetch(`${baseUrl}/api/projects/${created.project.id}`, {
+      method: "DELETE",
+      headers: {
+        cookie: session.cookie,
+        "x-openpt-csrf": session.csrf,
+      },
+    });
+    assert.equal(del.status, 200);
+
+    const list = await fetch(`${baseUrl}/api/projects`, { headers: { cookie: session.cookie } });
+    assert.equal(list.status, 200);
+    const listed = await list.json();
+    assert.equal(listed.projects.some((project) => project.id === created.project.id), false);
+    assert.equal(listed.projects.some((project) => project.id === copied.project.id), true);
   });
 });

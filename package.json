@@ -4,9 +4,21 @@
   "private": true,
   "type": "module",
   "scripts": {
+    "ci": "npm run lint && npm run format:check && npm run typecheck && npm run test:unit && npm run test:import-corpus && npm run test:browser",
     "start": "node server/index.mjs",
     "dev": "node server/index.mjs",
-    "test": "node --test server/*.test.mjs"
+    "lint": "eslint *.js quiz/*.js server/*.mjs server/*.test.mjs scripts/*.mjs test/*.mjs test/browser/*.mjs playwright.config.mjs eslint.config.js",
+    "format": "prettier --write package.json package-lock.json .github/workflows/ci.yml eslint.config.js playwright.config.mjs scripts/check-static.mjs test/import-corpus.test.mjs test/browser/openpt-smoke.spec.mjs test/browser/pka-corpus.spec.mjs",
+    "format:check": "prettier --check package.json package-lock.json .github/workflows/ci.yml eslint.config.js playwright.config.mjs scripts/check-static.mjs test/import-corpus.test.mjs test/browser/openpt-smoke.spec.mjs test/browser/pka-corpus.spec.mjs",
+    "typecheck": "tsc -p tsconfig.json --noEmit && node scripts/check-static.mjs",
+    "test": "npm run test:unit",
+    "test:unit": "node --test server/*.test.mjs",
+    "test:import-corpus": "node --test test/import-corpus.test.mjs",
+    "test:browser": "playwright test",
+    "storage:backup": "node server/storage-cli.mjs backup",
+    "storage:restore": "node server/storage-cli.mjs restore",
+    "storage:cleanup": "node server/storage-cli.mjs cleanup",
+    "storage:cleanup:dry-run": "node server/storage-cli.mjs cleanup:dry-run"
   },
   "dependencies": {
     "@fastify/cookie": "^11.0.2",
@@ -19,6 +31,13 @@
   },
   "devDependencies": {
     "@babel/core": "^7.29.0",
-    "@babel/preset-react": "^7.28.5"
+    "@babel/preset-react": "^7.28.5",
+    "@eslint/js": "^10.0.1",
+    "@playwright/test": "^1.60.0",
+    "@types/node": "^25.9.1",
+    "eslint": "^10.4.0",
+    "globals": "^17.6.0",
+    "prettier": "^3.8.3",
+    "typescript": "^6.0.3"
   }
 }

@@ -48,6 +48,22 @@ Current sync behavior:
 - Patch/diff save payloads with local IndexedDB offline queueing.
 - Rollback targets for 1m, 5m, 10m, 30m, and 1h.
 - 5GB per-user storage limit and 500MB max project size.
+- Versioned SQLite migrations under `server/migrations`.
+- Full local backups, restore requests, object cleanup, and quota checks for the
+  filesystem-backed production store.
+
+Storage operations:
+
+```sh
+npm run storage:backup
+npm run storage:cleanup:dry-run
+npm run storage:cleanup
+npm run storage:restore -- --backup openpt-...
+```
+
+Set `OPENPT_ADMIN_TOKEN` to enable token-gated HTTP admin endpoints for backup,
+cleanup, and restart-applied restore requests. Without the token, those endpoints
+return 404.
 
 SpacetimeDB 2.x is kept as the realtime PT-side sync boundary in
 `spacetime/openpt-sync`. The Fastify gateway owns auth, quota checks, object

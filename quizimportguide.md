@@ -27,6 +27,12 @@
 - Quiz label: `CCNA / Semester 1 / Modules 11-13 Quiz`
 - Imported count: 40 questions
 
+- Source PDF: `/Users/skylarenns/Downloads/sem1 mod 14-15.pdf`
+- Destination bank: `ccna/sem-01/m-14-15`
+- Quiz label: `CCNA / Semester 1 / Modules 14-15 Quiz`
+- Imported count: 35 questions
+- Answer cross-check: `https://itexamanswers.net/ccna-1-v7-modules-14-15-network-application-communications-exam-answers.html`
+
 - Source PDF: `/Users/skylarenns/Downloads/sem1 mod 16-17.pdf`
 - Destination bank: `ccna/sem-01/m-16-17`
 - Quiz label: `CCNA / Semester 1 / Modules 16-17 Quiz`
@@ -95,7 +101,7 @@
 
 ## What Was Imported
 
-The PDFs are OneNote exports where most slide/question content is embedded as page images. I rendered the PDF pages and used OCR plus visual review to identify the quiz-style items. In the Semester 3 final import, meaningful content ends around page 123, and pages 124-245 are effectively blank aside from the OneNote frame/footer. The Semester 3 final bank keeps the 197 unique quiz items from the source rather than every repeated occurrence in the PDF. In the Modules 1-3 import, pages 36-69 contain no meaningful slide content beyond the OneNote frame/footer, so the import uses pages 2-35. In the Modules 4-7 import, meaningful content ends around page 53, and pages 54-105 are effectively blank aside from the OneNote frame/footer. In the Modules 8-10 import, meaningful content ends around page 47, and pages 48-95 are effectively blank aside from the OneNote frame/footer. In the Modules 11-13 import, meaningful content ends around page 53, and pages 54-107 are effectively blank aside from the OneNote frame/footer. In the Modules 16-17 import, meaningful content ends around page 44, and pages 45-87 are effectively blank aside from the OneNote frame/footer. In the Semester 1 final import, meaningful content ends around page 93, and pages 94-185 are effectively blank aside from the OneNote frame/footer.
+The PDFs are OneNote exports where most slide/question content is embedded as page images. I rendered the PDF pages and used OCR plus visual review to identify the quiz-style items. In the Semester 3 final import, meaningful content ends around page 123, and pages 124-245 are effectively blank aside from the OneNote frame/footer. The Semester 3 final bank keeps the 197 unique quiz items from the source rather than every repeated occurrence in the PDF. In the Modules 1-3 import, pages 36-69 contain no meaningful slide content beyond the OneNote frame/footer, so the import uses pages 2-35. In the Modules 4-7 import, meaningful content ends around page 53, and pages 54-105 are effectively blank aside from the OneNote frame/footer. In the Modules 8-10 import, meaningful content ends around page 47, and pages 48-95 are effectively blank aside from the OneNote frame/footer. In the Modules 11-13 import, meaningful content ends around page 53, and pages 54-107 are effectively blank aside from the OneNote frame/footer. In the Modules 14-15 import, meaningful content ends around page 46, and pages 47-91 are effectively blank aside from the OneNote frame/footer. In the Modules 16-17 import, meaningful content ends around page 44, and pages 45-87 are effectively blank aside from the OneNote frame/footer. In the Semester 1 final import, meaningful content ends around page 93, and pages 94-185 are effectively blank aside from the OneNote frame/footer.
 
 The Semester 2 Modules 1-4 PDF follows the same OneNote-image pattern. Meaningful content appears on pages 1-57; pages 58-115 are effectively blank aside from the OneNote frame/footer. Normal PDF text extraction only sees the wrapper text, so render pages to images before OCR. On this machine, Tesseract 5.5.2 could not read PNG inputs from `/tmp` reliably, but the same rendered pages worked when copied under the repo `tmp/` directory and passed to Tesseract with relative paths. Several slide answer markers were ambiguous after OCR, so the import uses visible marks where clear and otherwise uses the adjacent "What Did I Learn" summary slides and standard CCNA behavior.
 
@@ -131,11 +137,11 @@ The imported bank includes:
 
 - Semester 3 final bank data lives in `quiz/questions-data.js`, with a readable JSON mirror in `quiz/questions-ccna3.json`.
 - Semester 3 Modules 1-2, Modules 3-5, Modules 6-8, Modules 9-12, and Modules 13-14 bank data lives in `quiz/questions-sem3-mod1-2.js`, `quiz/questions-sem3-mod3-5.js`, `quiz/questions-sem3-mod6-8.js`, `quiz/questions-sem3-mod9-12.js`, and `quiz/questions-sem3-mod13-14.js`.
-- Semester 1 bank data lives in `quiz/questions-sem1-mod1-3.js`, `quiz/questions-sem1-mod4-7.js`, `quiz/questions-sem1-mod8-10.js`, `quiz/questions-sem1-mod11-13.js`, `quiz/questions-sem1-mod16-17.js`, and `quiz/questions-sem1-final.js`.
+- Semester 1 bank data lives in `quiz/questions-sem1-mod1-3.js`, `quiz/questions-sem1-mod4-7.js`, `quiz/questions-sem1-mod8-10.js`, `quiz/questions-sem1-mod11-13.js`, `quiz/questions-sem1-mod14-15.js`, `quiz/questions-sem1-mod16-17.js`, and `quiz/questions-sem1-final.js`.
 - Semester 2 Modules 1-4, Modules 5-6, Modules 7-9, Modules 10-13, Modules 14-16, and final bank data lives in `quiz/questions-sem2-mod1-4.js`, `quiz/questions-sem2-mod5-6.js`, `quiz/questions-sem2-mod7-9.js`, `quiz/questions-sem2-mod10-13.js`, `quiz/questions-sem2-mod14-16.js`, and `quiz/questions-sem2-final.js`.
 - `quiz/index.html` loads the original Semester 3 final bank first, then appends the Semester 3, Semester 1, and Semester 2 module banks.
 - `quiz/questions.jsx` now preserves bank metadata and optional structured exhibits.
-- `quiz/home.jsx` exposes the imported Semester 1 quizzes including `Semester 1 -> Final exam`, the imported Semester 2 module quizzes plus `Semester 2 -> Final exam`, and all imported Semester 3 module quizzes through `Semester 3 -> Modules 13-14 Quiz`.
+- `quiz/home.jsx` exposes a top-level `CCNA -> ALL Quiz` pooled quiz for every normalized imported question, the imported Semester 1 quizzes including `Semester 1 -> Final exam`, the imported Semester 2 module quizzes plus `Semester 2 -> Final exam`, and all imported Semester 3 module quizzes through `Semester 3 -> Modules 13-14 Quiz`.
 - `quiz/app.jsx` filters the quiz pool by the selected bank instead of launching every question globally.
 - `quiz/quiz.jsx` renders structured exhibits below the question and above the answers.
 
@@ -217,6 +223,8 @@ Semester 1 Modules 1-3 already has its own bank. If a source PDF is labeled Modu
 Likewise, if a source PDF is labeled Modules 8-10, import it as `ccna/sem-01/m-8-10` and replace any broader placeholder such as Modules 8-13 rather than merging unrelated future modules.
 
 If a source PDF is labeled Modules 11-13, import it as `ccna/sem-01/m-11-13` and add it as its own library slot between Modules 8-10 and Modules 14-17.
+
+If a source PDF is labeled Modules 14-15, import it as `ccna/sem-01/m-14-15` and add it as its own library slot between Modules 11-13 and Modules 16-17.
 
 If a source PDF is labeled Modules 16-17, import it as `ccna/sem-01/m-16-17` and add it as its own library slot rather than labeling it as the broader Modules 14-17 placeholder.
 
