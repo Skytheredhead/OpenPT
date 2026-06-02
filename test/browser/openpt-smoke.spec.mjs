@@ -60,7 +60,7 @@ test("jeopardy board and scoring flow work", async ({ page }) => {
   });
 
   await page.goto("/jeopardy");
-  await expect(page).toHaveTitle("OpenPT");
+  await expect(page).toHaveTitle("OpenPT Jeopardy");
   await expect(page.locator(".jeopardy-header-stat")).toContainText("25");
   await expect(page.locator(".jeopardy-category")).toHaveCount(5);
   await expect(page.locator(".jeopardy-category", { hasText: "Automation" })).toBeVisible();
@@ -84,6 +84,22 @@ test("jeopardy board and scoring flow work", async ({ page }) => {
   expect(headerAlignment.childCenters).toEqual([headerAlignment.center, headerAlignment.center]);
 
   await page.locator(".jeopardy-board .jeopardy-tile").first().click();
+  await page.getByRole("button", { name: "Show Choices" }).click();
+  await expect(page.locator(".jeopardy-choice-list li")).toHaveCount(4);
+  const choiceLayout = await page.locator(".jeopardy-modal").evaluate((modal) => {
+    const body = modal.querySelector(".jeopardy-modal-body");
+    const modalRect = modal.getBoundingClientRect();
+    const choices = [...modal.querySelectorAll(".jeopardy-choice-list li")];
+    return {
+      bodyHasVerticalOverflow: body.scrollHeight > body.clientHeight + 1,
+      choicesInsideModal: choices.every((choice) => {
+        const rect = choice.getBoundingClientRect();
+        return rect.top >= modalRect.top && rect.bottom <= modalRect.bottom;
+      }),
+    };
+  });
+  expect(choiceLayout.bodyHasVerticalOverflow).toBe(false);
+  expect(choiceLayout.choicesInsideModal).toBe(true);
   await page.getByRole("button", { name: "Reveal Answer" }).click();
   await page.locator(".jeopardy-awards button", { hasText: /^Correct$/ }).first().click();
   await expect(page.locator(".jeopardy-header-stat strong")).toHaveText("24");

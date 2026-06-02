@@ -568,7 +568,7 @@ function JeopardyPage() {
 
       {activeClue && (
         <div className="jeopardy-modal-backdrop" role="dialog" aria-modal="true" aria-labelledby="jeopardy-clue-title">
-          <div className="jeopardy-modal">
+          <div className={`jeopardy-modal ${choicesShown ? "choices-visible" : ""}`}>
             <div className="jeopardy-modal-head">
               <div>
                 <div className="jeopardy-modal-kicker">{activeClue.category} for {activeClue.points}</div>

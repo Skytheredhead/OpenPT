@@ -615,6 +615,10 @@ app.patch("/api/share/:token", async (req) => {
 });
 
 if (!backendOnly) {
+  app.get("/_vercel/insights/script.js", async (_req, reply) => {
+    return reply.type("application/javascript").send("");
+  });
+
   await app.register(staticPlugin, {
     root,
     prefix: "/",

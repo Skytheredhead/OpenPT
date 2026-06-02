@@ -4024,6 +4024,13 @@ body.is-resizing-layout .server-module-resizer::before {
   box-shadow: 0 28px 80px rgba(0,0,0,0.62);
 }
 
+.jeopardy-modal.choices-visible {
+  width: min(1120px, 100%);
+  max-height: calc(100vh - 44px);
+  grid-template-rows: auto auto auto auto;
+  overflow: auto;
+}
+
 .jeopardy-final-modal {
   grid-template-rows: auto minmax(0, 1fr);
 }
@@ -4095,6 +4102,10 @@ body.is-resizing-layout .server-module-resizer::before {
   padding: 20px 26px;
 }
 
+.jeopardy-modal.choices-visible .jeopardy-modal-body {
+  overflow: visible;
+}
+
 .jeopardy-note {
   margin-bottom: 14px;
   padding: 10px 12px;
@@ -4111,6 +4122,10 @@ body.is-resizing-layout .server-module-resizer::before {
   margin: 18px 0 0;
   padding: 0;
   list-style: none;
+}
+
+.jeopardy-modal.choices-visible .jeopardy-choice-list {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
 }
 
 .jeopardy-choice-list li {
@@ -4130,6 +4145,12 @@ body.is-resizing-layout .server-module-resizer::before {
   font-size: 21px;
   font-weight: 500;
   line-height: 1.32;
+}
+
+.jeopardy-modal.choices-visible .jeopardy-choice-list li {
+  min-height: 58px;
+  padding: 12px 16px 12px 12px;
+  font-size: 19px;
 }
 
 .jeopardy-choice-list li.correct {
@@ -4344,6 +4365,9 @@ body.is-resizing-layout .server-module-resizer::before {
   .jeopardy-modal {
     max-height: calc(100vh - 20px);
   }
+  .jeopardy-modal.choices-visible {
+    grid-template-rows: auto auto minmax(0, 1fr) auto;
+  }
   .jeopardy-modal-head {
     padding: 18px 16px 14px;
   }
@@ -4358,6 +4382,9 @@ body.is-resizing-layout .server-module-resizer::before {
   }
   .jeopardy-choice-list {
     gap: 10px;
+  }
+  .jeopardy-modal.choices-visible .jeopardy-choice-list {
+    grid-template-columns: 1fr;
   }
   .jeopardy-choice-list li {
     grid-template-columns: 36px minmax(0, 1fr);

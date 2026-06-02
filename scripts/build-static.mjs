@@ -28,6 +28,7 @@ const rootFiles = [
   "home.jsx",
   "jeopardy.jsx",
   "wordle.jsx",
+  "app.jsx",
   "wordle-real-words.js",
   "01 Jeopardy (Main Theme).m4a"
 ];
