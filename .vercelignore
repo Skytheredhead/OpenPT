@@ -1,0 +1,19 @@
+node_modules/
+.openpt-data/
+.claude/
+.cache/
+.vercel/
+tmp/
+test-results/
+coverage/
+dist/
+build/
+screenshots/
+uploads/
+.codex-*.png
+.DS_Store
+*.sqlite
+*.sqlite-shm
+*.sqlite-wal
+*.log
+OpenPT quiz.zip
