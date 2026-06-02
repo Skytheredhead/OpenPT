@@ -33,6 +33,7 @@ async function assertLocalScriptSourcesExist(htmlFile) {
   for (const match of html.matchAll(srcPattern)) {
     const src = match[1];
     if (/^(https?:)?\/\//.test(src)) continue;
+    if (src.startsWith("/_vercel/")) continue;
     const scriptPath = join(dirname(htmlPath), src);
     try {
       await access(scriptPath, constants.R_OK);
