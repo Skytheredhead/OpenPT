@@ -1,5 +1,8 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
+  "installCommand": "echo 'Skipping install for static OpenPT deploy'",
+  "buildCommand": "node scripts/build-static.mjs",
+  "outputDirectory": "dist",
   "rewrites": [
     {
       "source": "/",
