@@ -39,7 +39,24 @@ const CATALOG = [
   },
 ];
 
-const HomePage = ({ onLaunch }) => {
+const QUIZ_LENGTHS = [15, 30];
+
+function getLengthOptions(exam) {
+  const count = exam?.count || 0;
+  return [
+    ...QUIZ_LENGTHS.map(size => ({ key: String(size), label: String(size), size, disabled: count < size })),
+    { key: 'all', label: 'all', size: count, disabled: !count },
+  ];
+}
+
+function resolveLaunchSize(exam, requestedSize) {
+  const enabledOptions = getLengthOptions(exam).filter(option => !option.disabled);
+  const exactOption = enabledOptions.find(option => option.size === requestedSize);
+  if (exactOption) return exactOption.size;
+  return enabledOptions.find(option => option.size === 30)?.size || enabledOptions[0]?.size || requestedSize;
+}
+
+const HomePage = ({ onLaunch, onLaunchStudy, studyDashboard, user }) => {
   const [openCourses, setOpenCourses] = useState({ ccna: true });
   // Open the live semester by default; collapse the rest
   const [openSems, setOpenSems] = useState({ 'ccna/sem-01': true, 'ccna/sem-02': true, 'ccna/sem-03': true });
@@ -69,7 +86,7 @@ const HomePage = ({ onLaunch }) => {
   }, [selected]);
 
   const launchSelection = (modeArg = mode, sizeArg = size, keyArg = selected, selectedArg = selectedExam) => {
-    const launchSize = selectedArg?.exam?.allQuestions ? selectedArg.exam.count : sizeArg;
+    const launchSize = resolveLaunchSize(selectedArg?.exam, sizeArg);
     onLaunch(modeArg, launchSize, keyArg);
   };
 
@@ -188,22 +205,26 @@ const HomePage = ({ onLaunch }) => {
         size={size}
         setSize={setSize}
         onLaunch={onLaunch}
+        onLaunchStudy={onLaunchStudy}
+        studyDashboard={studyDashboard}
+        user={user}
       />
      </div>
     </div>
   );
 };
 
-const SelectionCard = ({ selectedExam, mode, setMode, size, setSize, onLaunch }) => {
+const SelectionCard = ({ selectedExam, mode, setMode, size, setSize, onLaunch, onLaunchStudy, studyDashboard, user }) => {
   const visible = !!selectedExam;
   const exam = selectedExam?.exam;
   const sem = selectedExam?.sem;
   const course = selectedExam?.course;
   const isAvail = !!exam?.available;
   const isFinal = exam?.id === 'final';
-  const isAll = !!exam?.allQuestions;
   const count = exam?.count;
-  const maxSize = isAll ? count : Math.min(count || 0, 100);
+  const isAll = !!exam?.allQuestions;
+  const lengthOptions = getLengthOptions(exam);
+  const launchSize = resolveLaunchSize(exam, size);
 
   return (
     <div className={`sel-card ${visible ? 'visible' : ''}`} aria-hidden={!visible}>
@@ -253,30 +274,36 @@ const SelectionCard = ({ selectedExam, mode, setMode, size, setSize, onLaunch })
               <div className="sel-row">
                 <div className="sel-label">length</div>
                 <div className="sel-seg">
-                  {isAll ? (
-                    <button type="button" className="sel-seg-btn active" onClick={() => setSize(count)}>
-                      ALL
-                    </button>
-                  ) : (
-                    [25, 50, 75, 100].filter(n => n <= maxSize || n === 25).map(n => (
+                  {lengthOptions.map(option => {
+                    return (
                       <button
-                        key={n}
+                        key={option.key}
                         type="button"
-                        className={`sel-seg-btn ${size === n ? 'active' : ''}`}
-                        onClick={() => setSize(Math.min(n, count))}>
-                        {Math.min(n, count)}
+                        className={`sel-seg-btn ${launchSize === option.size ? 'active' : ''}`}
+                        disabled={option.disabled}
+                        onClick={() => setSize(option.size)}>
+                        {option.label}
                       </button>
-                    ))
-                  )}
+                    );
+                  })}
                 </div>
               </div>
 
               <div className="sel-actions">
-                <button type="button" className="sel-start" onClick={() => onLaunch(mode, isAll ? count : size, selectedExam.key)}>
+                <button type="button" className="sel-start" onClick={() => onLaunch(mode, launchSize, selectedExam.key)}>
                   <Icon name="play" size={12} />
                   Start {mode}
                 </button>
+                {isAll && (
+                  <button type="button" className="sel-start study" onClick={() => onLaunchStudy()}>
+                    <Icon name="target" size={12} />
+                    CCNA Study Mode
+                  </button>
+                )}
               </div>
+              {isAll && (
+                <StudyLaunchDashboard dashboard={studyDashboard} user={user} count={count} />
+              )}
             </div>
           ) : (
             <div className="sel-empty">
@@ -289,6 +316,46 @@ const SelectionCard = ({ selectedExam, mode, setMode, size, setSize, onLaunch })
           )}
         </>
       )}
+    </div>
+  );
+};
+
+const StudyLaunchDashboard = ({ dashboard, user, count }) => {
+  if (!user) {
+    return (
+      <div className="study-launch-dashboard locked">
+        <div className="study-lock"><Icon name="target" size={15} /></div>
+        <div>
+          <b>Login required for Study Mode</b>
+          <span>Progress, misses, timing, and confidence are saved to your account.</span>
+        </div>
+      </div>
+    );
+  }
+  const total = dashboard?.totalQuestionCount || count || 0;
+  const seen = dashboard?.seenCount || 0;
+  const seenPct = total ? Math.round((seen / total) * 100) : 0;
+  return (
+    <div className="study-launch-dashboard">
+      <div className="study-mini-stat">
+        <b>{seenPct}%</b>
+        <span>progress</span>
+      </div>
+      <div className="study-mini-stat">
+        <b>{dashboard?.recentScore ?? '-'}</b>
+        <span>recent</span>
+      </div>
+      <div className="study-mini-stat">
+        <b>{dashboard?.averageScore ?? '-'}</b>
+        <span>avg score</span>
+      </div>
+      <div className="study-mini-stat">
+        <b>{dashboard?.confidenceScore ?? '-'}</b>
+        <span>confidence</span>
+      </div>
+      <div className="study-progress-line">
+        <span style={{ width: `${seenPct}%` }} />
+      </div>
     </div>
   );
 };

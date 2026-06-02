@@ -42,6 +42,35 @@ test("quiz library loads and can start practice", async ({ page }) => {
   expect(errors, "browser console/page errors").toEqual([]);
 });
 
+test("ccna study mode is login gated and records a timed answer", async ({ page, request }) => {
+  const errors = collectPageErrors(page);
+  await page.addInitScript(() => localStorage.clear());
+
+  await page.goto("/quiz/?view=library");
+  await page.getByText("ALL Quiz").click();
+  await expect(page.getByRole("button", { name: /CCNA Study Mode/i })).toBeVisible();
+  await page.getByRole("button", { name: /CCNA Study Mode/i }).click();
+  await expect(page.getByText("Sign in to save CCNA Study Mode progress.")).toBeVisible();
+
+  const email = `study-browser-${Date.now()}@example.com`;
+  const password = "password123";
+  const register = await request.post("/api/auth/register", { data: { email, password } });
+  expect(register.status()).toBe(202);
+  const registered = await register.json();
+  expect(registered.verification?.token).toBeTruthy();
+  const verify = await request.post("/api/auth/verify-email", { data: { token: registered.verification.token } });
+  expect(verify.status()).toBe(200);
+
+  await page.getByLabel("Email").fill(email);
+  await page.getByLabel("Password").fill(password);
+  await page.getByRole("button", { name: /Sign in and start/i }).click();
+  await expect(page.getByText(/CCNA Study Mode \/ question 1 of 20/)).toBeVisible();
+  await page.locator(".opt").first().click();
+  await expect(page.locator(".feedback").first()).toBeVisible();
+  await expect(page.locator(".feedback").first()).toContainText(/PASS|MISS|SLOW/);
+  expect(errors, "browser console/page errors").toEqual([]);
+});
+
 test("jeopardy board and scoring flow work", async ({ page }) => {
   const errors = collectPageErrors(page);
   await page.addInitScript(() => {

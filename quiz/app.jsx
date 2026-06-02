@@ -21,7 +21,7 @@ function loadPersisted() {
     const raw = localStorage.getItem(STORAGE_KEY);
     if (!raw) return null;
     const data = JSON.parse(raw);
-    if (!data || !Array.isArray(data.quizIds)) return null;
+    if (!data || (!Array.isArray(data.quizIds) && !Array.isArray(data.questionKeys))) return null;
     data.selected = new Set(data.selected || []);
     data.mastered = new Set(data.mastered || []);
     data.firstTryMastered = new Set(data.firstTryMastered || []);
@@ -51,12 +51,29 @@ const App = () => {
   const [transitionKind, setTransitionKind] = useStateA('default'); // 'default' | 'exit'
   const outgoingTimerRef = React.useRef(null);
   const [state, setState] = useStateA(null);
+  const client = useMemoA(() => window.OpenPTSync ? new window.OpenPTSync.OpenPTSyncClient() : null, []);
+  const [user, setUser] = useStateA(null);
+  const [studyDashboard, setStudyDashboard] = useStateA(null);
+  const [auth, setAuth] = useStateA({ open: false, busy: false, error: '', notice: '' });
 
   useEffectA(() => {
     document.documentElement.style.setProperty('--accent', accent.val);
     document.documentElement.style.setProperty('--accent-dim', accent.dim);
     document.documentElement.style.setProperty('--accent-soft', accent.soft);
   }, [t.accent]);
+
+  useEffectA(() => {
+    let alive = true;
+    if (!client) return;
+    client.me()
+      .then(data => {
+        if (!alive) return;
+        setUser(data.user || null);
+        if (data.user) return refreshStudyDashboard();
+      })
+      .catch(() => {});
+    return () => { alive = false; };
+  }, [client]);
 
   // Restore on mount
   useEffectA(() => {
@@ -65,7 +82,7 @@ const App = () => {
     if (saved) {
       setState(saved);
       if (saved.endedAt) setRoute('results');
-      else setRoute(saved.mode === 'quiz' ? 'quiz' : 'practice');
+      else setRoute(saved.mode === 'study' ? 'study' : saved.mode === 'quiz' ? 'quiz' : 'practice');
     }
   }, []);
 
@@ -103,12 +120,97 @@ const App = () => {
     navigate(mode === 'quiz' ? 'quiz' : 'practice');
   }
 
+  function ccnaStudyQuestionKeys() {
+    return (window.QUESTIONS || [])
+      .filter(q => q.bank?.startsWith('ccna/'))
+      .map(q => q.questionKey)
+      .filter(Boolean);
+  }
+
+  async function refreshStudyDashboard() {
+    if (!client) return null;
+    const total = ccnaStudyQuestionKeys().length;
+    const data = await client.studySummary(total);
+    setStudyDashboard(data.dashboard || null);
+    return data.dashboard || null;
+  }
+
+  async function launchStudy(knownUser = user) {
+    if (!client) {
+      setAuth({ open: true, busy: false, error: 'Study Mode needs the OpenPT sync client.', notice: '' });
+      return;
+    }
+    if (!knownUser) {
+      setAuth({ open: true, busy: false, error: '', notice: 'Sign in to save CCNA Study Mode progress.' });
+      return;
+    }
+    setAuth(a => ({ ...a, busy: true, error: '', notice: 'Starting Study Mode...' }));
+    try {
+      const keys = ccnaStudyQuestionKeys();
+      const data = await client.createStudySession(keys);
+      const session = data.session;
+      const fresh = {
+        mode: 'study',
+        sessionId: session.id,
+        questionKeys: session.questionKeys || [],
+        cursor: 0,
+        selected: new Set(),
+        answered: false,
+        attempts: {},
+        optionOrders: {},
+        activeStartedAt: Date.now(),
+        startedAt: Date.now(),
+        dashboard: session.summary || studyDashboard,
+      };
+      if (FORCE_LIBRARY && window.history?.replaceState) {
+        window.history.replaceState(null, '', window.location.pathname);
+      }
+      setState(fresh);
+      setAuth({ open: false, busy: false, error: '', notice: '' });
+      navigate('study');
+    } catch (err) {
+      setAuth({ open: true, busy: false, error: err.message || 'Could not start Study Mode.', notice: '' });
+    }
+  }
+
   function finishQuiz() { navigate('results'); }
   function exitToHome() { navigate('home', 'exit'); }
   function restartFromResults() {
     if (!state) return;
+    if (state.mode === 'study') {
+      launchStudy();
+      return;
+    }
     const first = window.QUESTIONS[state.quizIds[0]];
     launchQuiz(state.mode, state.quizIds.length, state.bankKey || first?.bank || 'ccna/sem-03/final');
+  }
+
+  async function handleAuthSubmit({ mode, email, password }) {
+    if (!client) return;
+    setAuth(a => ({ ...a, busy: true, error: '', notice: '' }));
+    try {
+      if (mode === 'register') {
+        const registered = await client.register(email, password);
+        if (registered.verification?.token) {
+          await client.verifyEmail(registered.verification.token);
+          const loggedIn = await client.login(email, password);
+          setUser(loggedIn.user);
+          await refreshStudyDashboard();
+          setAuth({ open: false, busy: false, error: '', notice: '' });
+          launchStudy(loggedIn.user);
+          return;
+        }
+        setAuth({ open: true, busy: false, error: '', notice: 'Check your email to verify the account, then sign in.' });
+        return;
+      }
+      const loggedIn = await client.login(email, password);
+      setUser(loggedIn.user);
+      await refreshStudyDashboard();
+      setAuth({ open: false, busy: false, error: '', notice: '' });
+      launchStudy(loggedIn.user);
+    } catch (err) {
+      setAuth(a => ({ ...a, busy: false, error: err.message || 'Sign in failed.', notice: '' }));
+    }
   }
 
   function renderRoute(r, ctx) {
@@ -116,9 +218,12 @@ const App = () => {
     const onFinishF = ctx.interactive ? ctx.finishQuiz : (() => {});
     const onExitF = ctx.interactive ? ctx.exitToHome : (() => {});
     const onRestartF = ctx.interactive ? ctx.restartFromResults : (() => {});
-    if (r === 'home') return <HomePage onLaunch={ctx.interactive ? ctx.launchQuiz : (() => {})} />;
+    const onStudyF = ctx.interactive ? ctx.launchStudy : (() => {});
+    if (r === 'home') return <HomePage onLaunch={ctx.interactive ? ctx.launchQuiz : (() => {})} onLaunchStudy={onStudyF} studyDashboard={ctx.studyDashboard} user={ctx.user} />;
     if (r === 'practice' && ctx.state) return <PracticeRunner state={ctx.state} setState={setStateF} onFinish={onFinishF} onExit={onExitF} />;
     if (r === 'quiz' && ctx.state) return <QuizRunner state={ctx.state} setState={setStateF} onFinish={onFinishF} onExit={onExitF} />;
+    if (r === 'study' && ctx.state) return <StudyRunner state={ctx.state} setState={setStateF} client={ctx.client} onFinish={onFinishF} onExit={onExitF} />;
+    if (r === 'results' && ctx.state?.mode === 'study') return <StudyResultsPage state={ctx.state} onRestart={onRestartF} onExit={onExitF} />;
     if (r === 'results' && ctx.state) return <ResultsPage state={ctx.state} onRestart={onRestartF} onExit={onExitF} />;
     return null;
   }
@@ -129,11 +234,11 @@ const App = () => {
         <div className="route-stack">
           {outgoingRoute && outgoingRoute !== route && (
             <div className="route-screen route-exit" key={`out-${outgoingRoute}`}>
-              {renderRoute(outgoingRoute, { state, launchQuiz, finishQuiz, exitToHome, restartFromResults, setState, interactive: false })}
+              {renderRoute(outgoingRoute, { state, launchQuiz, launchStudy, finishQuiz, exitToHome, restartFromResults, setState, client, user, studyDashboard, interactive: false })}
             </div>
           )}
           <div className="route-screen route-enter" key={`in-${route}`}>
-            {renderRoute(route, { state, launchQuiz, finishQuiz, exitToHome, restartFromResults, setState, interactive: true })}
+            {renderRoute(route, { state, launchQuiz, launchStudy, finishQuiz, exitToHome, restartFromResults, setState, client, user, studyDashboard, interactive: true })}
           </div>
         </div>
       </div>
@@ -141,6 +246,51 @@ const App = () => {
       <div className="app-version" aria-hidden="true">v0.1</div>
 
       <Tweaks tweaks={tweaks} />
+      {auth.open && (
+        <AuthModal
+          busy={auth.busy}
+          error={auth.error}
+          notice={auth.notice}
+          onClose={() => setAuth({ open: false, busy: false, error: '', notice: '' })}
+          onSubmit={handleAuthSubmit}
+        />
+      )}
+    </div>
+  );
+};
+
+const AuthModal = ({ busy, error, notice, onClose, onSubmit }) => {
+  const [mode, setMode] = useStateA('login');
+  const [email, setEmail] = useStateA('');
+  const [password, setPassword] = useStateA('');
+  return (
+    <div className="auth-backdrop" role="dialog" aria-modal="true" aria-label="Sign in for Study Mode">
+      <form className="auth-card" onSubmit={(e) => {
+        e.preventDefault();
+        onSubmit({ mode, email, password });
+      }}>
+        <button type="button" className="auth-close" onClick={onClose} aria-label="Close"><Icon name="x" size={14} /></button>
+        <div className="auth-icon"><Icon name="target" size={22} /></div>
+        <h2>CCNA Study Mode</h2>
+        <p>Sign in to save question progress, timing, confidence, and review history.</p>
+        <div className="auth-tabs">
+          <button type="button" className={mode === 'login' ? 'active' : ''} onClick={() => setMode('login')}>Sign in</button>
+          <button type="button" className={mode === 'register' ? 'active' : ''} onClick={() => setMode('register')}>Create account</button>
+        </div>
+        <label className="auth-field">
+          <span>Email</span>
+          <input type="email" value={email} onChange={e => setEmail(e.target.value)} autoComplete="email" required />
+        </label>
+        <label className="auth-field">
+          <span>Password</span>
+          <input type="password" value={password} onChange={e => setPassword(e.target.value)} autoComplete={mode === 'login' ? 'current-password' : 'new-password'} minLength={8} required />
+        </label>
+        {notice && <div className="auth-note">{notice}</div>}
+        {error && <div className="auth-error">{error}</div>}
+        <button type="submit" className="auth-submit" disabled={busy}>
+          {busy ? 'Working...' : mode === 'login' ? 'Sign in and start' : 'Create and start'}
+        </button>
+      </form>
     </div>
   );
 };

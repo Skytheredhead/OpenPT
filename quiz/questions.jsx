@@ -9,14 +9,16 @@
       const enriched = exhibitEnrichments[exhibitKey]
         ? { ...q, ...exhibitEnrichments[exhibitKey] }
         : q;
+      const bank = enriched.bank || 'ccna/sem-03/final';
       return ({
         id: idx,
+        questionKey: stableQuestionKey(enriched, bank),
         slide: enriched.s,
         question: enriched.q,
         options: enriched.o,
         answers: enriched.a,
         multi: !!enriched.m,
-        bank: enriched.bank || 'ccna/sem-03/final',
+        bank,
         examLabel: enriched.exam || 'Final exam',
         semesterLabel: enriched.semester || 'Semester 3',
         courseLabel: enriched.course || 'CCNA',
@@ -32,6 +34,22 @@
     });
     window.QUESTIONS = friendly;
     window.dispatchEvent(new Event('questions:ready'));
+  }
+
+  function stableQuestionKey(q, bank) {
+    const source = String(q.src || 'source').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
+    const sourceIndex = String(q.si || q.s || '0').replace(/[^a-z0-9-]+/gi, '');
+    return `${bank}:${source}:${sourceIndex}:${shortHash(q.q || '')}`;
+  }
+
+  function shortHash(value) {
+    let hash = 2166136261;
+    const text = String(value || '');
+    for (let i = 0; i < text.length; i++) {
+      hash ^= text.charCodeAt(i);
+      hash = Math.imul(hash, 16777619);
+    }
+    return (hash >>> 0).toString(36);
   }
   if (window.QUESTIONS_RAW) {
     inflate();

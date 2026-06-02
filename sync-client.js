@@ -203,6 +203,28 @@
     }
 
     async me() { return request("/api/me"); }
+    async studySummary(totalQuestionCount = 0) {
+      const total = Number.isFinite(Number(totalQuestionCount)) ? Number(totalQuestionCount) : 0;
+      return request(`/api/study/ccna/summary?total=${encodeURIComponent(total)}`);
+    }
+    async createStudySession(questionKeys) {
+      return request("/api/study/ccna/sessions", {
+        method: "POST",
+        body: JSON.stringify({ questionKeys })
+      });
+    }
+    async recordStudyAttempt(sessionId, attempt) {
+      return request(`/api/study/ccna/sessions/${encodeURIComponent(sessionId)}/attempts`, {
+        method: "POST",
+        body: JSON.stringify(attempt)
+      });
+    }
+    async finishStudySession(sessionId, totalQuestionCount = 0) {
+      return request(`/api/study/ccna/sessions/${encodeURIComponent(sessionId)}/finish`, {
+        method: "POST",
+        body: JSON.stringify({ totalQuestionCount })
+      });
+    }
     async register(email, password, proof = {}) {
       return request("/api/auth/register", { method: "POST", body: JSON.stringify({ email, password, clientLabel: this.clientLabel, ...proof }) });
     }

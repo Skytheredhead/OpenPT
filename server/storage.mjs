@@ -4,6 +4,7 @@ import { mkdirSync, readdirSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { applyJsonPatch, byteLength } from "./json-patch.mjs";
+import { nextProgressForAttempt, sanitizeQuestionKeys, scheduleStudySession } from "./study-scheduler.mjs";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const migrationsDir = join(__dirname, "migrations");
@@ -58,6 +59,14 @@ function addDays(days) {
 
 function publicSessionLabel(meta = {}) {
   return String(meta.clientLabel || meta.client_label || "").trim().slice(0, 120) || "Browser";
+}
+
+function parseJson(value, fallback) {
+  try {
+    return value ? JSON.parse(value) : fallback;
+  } catch (err) {
+    return fallback;
+  }
 }
 
 export class OpenPTStore {
@@ -295,6 +304,293 @@ export class OpenPTStore {
   userUsage(userId) {
     const row = this.db.prepare("SELECT COALESCE(SUM(head_bytes),0) AS bytes FROM projects WHERE user_id=? AND deleted_at IS NULL").get(userId);
     return row.bytes || 0;
+  }
+
+  studyProgressRows(userId, bankId = "ccna") {
+    return this.db.prepare("SELECT * FROM study_question_progress WHERE user_id=? AND bank_id=?").all(userId, bankId);
+  }
+
+  studySummary(userId, bankId = "ccna", totalQuestionCount = 0) {
+    const progress = this.studyProgressRows(userId, bankId);
+    const aggregate = progress.reduce((acc, row) => {
+      acc.seen += row.seen_count > 0 ? 1 : 0;
+      acc.activeWeak += (row.miss_count > 0 || row.slow_count > 0 || row.interrupted_count > 0) && !row.mastered_at ? 1 : 0;
+      acc.mastered += row.mastered_at ? 1 : 0;
+      acc.misses += row.miss_count || 0;
+      acc.slow += row.slow_count || 0;
+      acc.interrupted += row.interrupted_count || 0;
+      if (row.avg_answer_ms) {
+        acc.timingTotal += row.avg_answer_ms;
+        acc.timingRows += 1;
+      }
+      return acc;
+    }, { seen: 0, activeWeak: 0, mastered: 0, misses: 0, slow: 0, interrupted: 0, timingTotal: 0, timingRows: 0 });
+    const sessions = this.db.prepare(`
+      SELECT id, question_count, scored_count, correct_count, miss_count, slow_count, interrupted_count, avg_answer_ms, mastered_count, started_at, ended_at, summary_json
+      FROM study_sessions
+      WHERE user_id=? AND bank_id=? AND ended_at IS NOT NULL
+      ORDER BY ended_at DESC
+      LIMIT 20
+    `).all(userId, bankId);
+    const scored = sessions.filter((session) => session.scored_count > 0);
+    const averageScore = scored.length
+      ? Math.round(scored.reduce((sum, session) => sum + ((session.correct_count / session.scored_count) * 100), 0) / scored.length)
+      : null;
+    const recentScore = scored[0] ? Math.round((scored[0].correct_count / scored[0].scored_count) * 100) : null;
+    const avgAnswerMs = aggregate.timingRows
+      ? Math.round(aggregate.timingTotal / aggregate.timingRows)
+      : (scored.length ? Math.round(scored.reduce((sum, session) => sum + (session.avg_answer_ms || 0), 0) / scored.length) : 0);
+    const confidenceScore = Math.max(0, Math.min(100, Math.round(
+      (recentScore ?? averageScore ?? 0) * 0.54 +
+      (totalQuestionCount ? (aggregate.seen / totalQuestionCount) * 100 : 0) * 0.18 +
+      (aggregate.mastered / Math.max(1, aggregate.activeWeak + aggregate.mastered)) * 100 * 0.18 -
+      Math.min(20, aggregate.activeWeak * 1.5) -
+      Math.min(12, aggregate.slow * 0.7)
+    )));
+    const weakest = progress
+      .filter((row) => (row.miss_count > 0 || row.slow_count > 0 || row.interrupted_count > 0) && !row.mastered_at)
+      .sort((a, b) => (
+        b.miss_count - a.miss_count ||
+        b.slow_count - a.slow_count ||
+        b.interrupted_count - a.interrupted_count ||
+        a.review_streak - b.review_streak ||
+        String(a.last_seen_at || "").localeCompare(String(b.last_seen_at || ""))
+      ))
+      .slice(0, 10)
+      .map((row) => ({
+        questionKey: row.question_key,
+        missCount: row.miss_count,
+        slowCount: row.slow_count,
+        interruptedCount: row.interrupted_count,
+        reviewStreak: row.review_streak,
+        avgAnswerMs: row.avg_answer_ms,
+        lastSeenAt: row.last_seen_at
+      }));
+    return {
+      totalQuestionCount,
+      seenCount: aggregate.seen,
+      masteredCount: aggregate.mastered,
+      activeWeakCount: aggregate.activeWeak,
+      missCount: aggregate.misses,
+      slowCount: aggregate.slow,
+      interruptedCount: aggregate.interrupted,
+      recentScore,
+      averageScore,
+      averageAnswerMs: avgAnswerMs,
+      confidenceScore,
+      sessions: sessions.slice(0, 8).map((session) => ({
+        id: session.id,
+        score: session.scored_count ? Math.round((session.correct_count / session.scored_count) * 100) : null,
+        correctCount: session.correct_count,
+        questionCount: session.question_count,
+        scoredCount: session.scored_count,
+        missCount: session.miss_count,
+        slowCount: session.slow_count,
+        interruptedCount: session.interrupted_count,
+        masteredCount: session.mastered_count,
+        avgAnswerMs: session.avg_answer_ms,
+        startedAt: session.started_at,
+        endedAt: session.ended_at,
+        summary: parseJson(session.summary_json, null)
+      })),
+      weakest
+    };
+  }
+
+  createStudySession(userId, bankId = "ccna", questionKeys = []) {
+    const pool = sanitizeQuestionKeys(questionKeys);
+    if (pool.length < 20) {
+      const err = new Error("At least 20 study questions are required.");
+      err.statusCode = 400;
+      throw err;
+    }
+    const selected = scheduleStudySession({
+      questionKeys: pool,
+      progressRows: this.studyProgressRows(userId, bankId)
+    });
+    const now = nowIso();
+    const row = {
+      id: randomUUID(),
+      user_id: userId,
+      bank_id: bankId,
+      question_keys_json: JSON.stringify(selected),
+      question_count: selected.length,
+      started_at: now
+    };
+    this.db.prepare(`
+      INSERT INTO study_sessions (id,user_id,bank_id,question_keys_json,question_count,started_at)
+      VALUES (@id,@user_id,@bank_id,@question_keys_json,@question_count,@started_at)
+    `).run(row);
+    return {
+      id: row.id,
+      bankId,
+      questionKeys: selected,
+      startedAt: now,
+      summary: this.studySummary(userId, bankId, pool.length)
+    };
+  }
+
+  recordStudyAttempt(userId, bankId = "ccna", sessionId, body = {}) {
+    const session = this.db.prepare("SELECT * FROM study_sessions WHERE id=? AND user_id=? AND bank_id=?").get(sessionId, userId, bankId);
+    if (!session) {
+      const err = new Error("Study session not found.");
+      err.statusCode = 404;
+      throw err;
+    }
+    if (session.ended_at) {
+      const err = new Error("Study session is already finished.");
+      err.statusCode = 409;
+      throw err;
+    }
+    const questionKey = String(body.questionKey || body.question_key || "").trim().slice(0, 220);
+    const sessionKeys = new Set(parseJson(session.question_keys_json, []));
+    if (!sessionKeys.has(questionKey)) {
+      const err = new Error("Question is not part of this study session.");
+      err.statusCode = 400;
+      throw err;
+    }
+    const existing = this.db.prepare("SELECT * FROM study_attempts WHERE session_id=? AND question_key=?").get(sessionId, questionKey);
+    if (existing) return this.studyAttemptResponse(existing);
+    const selectedAnswers = Array.isArray(body.selectedAnswers) ? body.selectedAnswers : [];
+    const correct = !!body.correct;
+    const durationMs = Number.isFinite(Number(body.answerDurationMs)) ? Math.max(0, Math.round(Number(body.answerDurationMs))) : null;
+    const current = this.db.prepare("SELECT * FROM study_question_progress WHERE user_id=? AND bank_id=? AND question_key=?").get(userId, bankId, questionKey);
+    const next = nextProgressForAttempt(current, { correct, durationMs });
+    const now = nowIso();
+    const attempt = {
+      id: randomUUID(),
+      session_id: sessionId,
+      user_id: userId,
+      bank_id: bankId,
+      question_key: questionKey,
+      selected_answers_json: JSON.stringify(selectedAnswers),
+      correct: correct ? 1 : 0,
+      answer_duration_ms: next.attempt.durationMs,
+      slow: next.attempt.isSlow ? 1 : 0,
+      interrupted: next.attempt.isInterrupted ? 1 : 0,
+      is_new: next.attempt.isNew ? 1 : 0,
+      was_review: next.attempt.wasReview ? 1 : 0,
+      review_streak_after: next.attempt.reviewStreakAfter,
+      mastered_after: next.attempt.masteredAfter ? 1 : 0,
+      created_at: now
+    };
+    this.db.transaction(() => {
+      this.db.prepare(`
+        INSERT INTO study_question_progress (
+          user_id, bank_id, question_key, seen_count, correct_count, miss_count, slow_count, interrupted_count,
+          review_streak, mastered_at, next_due_at, avg_answer_ms, last_answer_ms, timed_seen_count, last_seen_at
+        )
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(user_id, bank_id, question_key) DO UPDATE SET
+          seen_count=excluded.seen_count,
+          correct_count=excluded.correct_count,
+          miss_count=excluded.miss_count,
+          slow_count=excluded.slow_count,
+          interrupted_count=excluded.interrupted_count,
+          review_streak=excluded.review_streak,
+          mastered_at=excluded.mastered_at,
+          next_due_at=excluded.next_due_at,
+          avg_answer_ms=excluded.avg_answer_ms,
+          last_answer_ms=excluded.last_answer_ms,
+          timed_seen_count=excluded.timed_seen_count,
+          last_seen_at=excluded.last_seen_at
+      `).run(
+        userId, bankId, questionKey,
+        next.progress.seen_count,
+        next.progress.correct_count,
+        next.progress.miss_count,
+        next.progress.slow_count,
+        next.progress.interrupted_count,
+        next.progress.review_streak,
+        next.progress.mastered_at,
+        next.progress.next_due_at,
+        next.progress.avg_answer_ms,
+        next.progress.last_answer_ms,
+        next.progress.timed_seen_count,
+        next.progress.last_seen_at
+      );
+      this.db.prepare(`
+        INSERT INTO study_attempts (
+          id, session_id, user_id, bank_id, question_key, selected_answers_json, correct,
+          answer_duration_ms, slow, interrupted, is_new, was_review, review_streak_after, mastered_after, created_at
+        )
+        VALUES (
+          @id, @session_id, @user_id, @bank_id, @question_key, @selected_answers_json, @correct,
+          @answer_duration_ms, @slow, @interrupted, @is_new, @was_review, @review_streak_after, @mastered_after, @created_at
+        )
+      `).run(attempt);
+    })();
+    return this.studyAttemptResponse(attempt);
+  }
+
+  studyAttemptResponse(row) {
+    return {
+      attempt: {
+        id: row.id,
+        questionKey: row.question_key,
+        selectedAnswers: parseJson(row.selected_answers_json, []),
+        correct: !!row.correct,
+        answerDurationMs: row.answer_duration_ms,
+        slow: !!row.slow,
+        interrupted: !!row.interrupted,
+        isNew: !!row.is_new,
+        wasReview: !!row.was_review,
+        reviewStreakAfter: row.review_streak_after,
+        masteredAfter: !!row.mastered_after,
+        createdAt: row.created_at
+      }
+    };
+  }
+
+  finishStudySession(userId, bankId = "ccna", sessionId, totalQuestionCount = 0) {
+    const session = this.db.prepare("SELECT * FROM study_sessions WHERE id=? AND user_id=? AND bank_id=?").get(sessionId, userId, bankId);
+    if (!session) {
+      const err = new Error("Study session not found.");
+      err.statusCode = 404;
+      throw err;
+    }
+    const attempts = this.db.prepare("SELECT * FROM study_attempts WHERE session_id=? ORDER BY created_at").all(sessionId);
+    const scoredAttempts = attempts.filter((attempt) => !attempt.interrupted);
+    const correctCount = scoredAttempts.filter((attempt) => attempt.correct).length;
+    const missCount = scoredAttempts.filter((attempt) => !attempt.correct).length;
+    const newCount = attempts.filter((attempt) => attempt.is_new).length;
+    const reviewCount = attempts.filter((attempt) => attempt.was_review).length;
+    const slowCount = attempts.filter((attempt) => attempt.slow).length;
+    const interruptedCount = attempts.filter((attempt) => attempt.interrupted).length;
+    const masteredCount = attempts.filter((attempt) => attempt.mastered_after).length;
+    const timed = attempts.filter((attempt) => attempt.answer_duration_ms != null && !attempt.interrupted);
+    const avgAnswerMs = timed.length ? Math.round(timed.reduce((sum, attempt) => sum + attempt.answer_duration_ms, 0) / timed.length) : 0;
+    const scoredCount = scoredAttempts.length;
+    const ended = session.ended_at || nowIso();
+    const summary = {
+      score: scoredCount ? Math.round((correctCount / scoredCount) * 100) : null,
+      questionCount: session.question_count,
+      answeredCount: attempts.length,
+      scoredCount,
+      correctCount,
+      missCount,
+      newCount,
+      reviewCount,
+      slowCount,
+      interruptedCount,
+      masteredCount,
+      avgAnswerMs,
+      startedAt: session.started_at,
+      endedAt: ended
+    };
+    this.db.prepare(`
+      UPDATE study_sessions
+      SET correct_count=?, miss_count=?, new_count=?, review_count=?, slow_count=?, interrupted_count=?, mastered_count=?, scored_count=?,
+          avg_answer_ms=?, summary_json=?, ended_at=?
+      WHERE id=? AND user_id=? AND bank_id=?
+    `).run(
+      correctCount, missCount, newCount, reviewCount, slowCount, interruptedCount, masteredCount, scoredCount,
+      avgAnswerMs, JSON.stringify(summary), ended, sessionId, userId, bankId
+    );
+    return {
+      session: { id: sessionId, ...summary },
+      dashboard: this.studySummary(userId, bankId, totalQuestionCount)
+    };
   }
 
   listProjects(userId) {

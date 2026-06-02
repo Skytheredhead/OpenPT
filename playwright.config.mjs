@@ -12,7 +12,7 @@ export default defineConfig({
     trace: "retain-on-failure",
   },
   webServer: {
-    command: 'OPENPT_DATA_DIR="$(mktemp -d)" HOST=127.0.0.1 PORT=5173 npm run dev',
+    command: 'OPENPT_DATA_DIR="$(mktemp -d)" OPENPT_ACCOUNT_EMAIL_DEBUG=1 HOST=127.0.0.1 PORT=5173 npm run dev',
     url: "http://127.0.0.1:5173/api/health",
     reuseExistingServer: !process.env.CI,
     timeout: 15_000,

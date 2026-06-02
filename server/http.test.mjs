@@ -250,6 +250,106 @@ test("sessions can be listed and revoked by public ids", { timeout: 15_000 }, as
   });
 });
 
+test("ccna study endpoints require auth and record timed session progress", { timeout: 15_000 }, async () => {
+  await withTestServer({}, async (baseUrl) => {
+    const anonSummary = await fetch(`${baseUrl}/api/study/ccna/summary`);
+    assert.equal(anonSummary.status, 401);
+
+    const session = await registerSession(baseUrl, "study@example.com");
+    const questionKeys = Array.from({ length: 25 }, (_, index) => `ccna/test/q-${index + 1}`);
+
+    const blockedCreate = await fetch(`${baseUrl}/api/study/ccna/sessions`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        cookie: session.cookie,
+      },
+      body: JSON.stringify({ questionKeys }),
+    });
+    assert.equal(blockedCreate.status, 403);
+
+    const create = await fetch(`${baseUrl}/api/study/ccna/sessions`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        cookie: session.cookie,
+        "x-openpt-csrf": session.csrf,
+      },
+      body: JSON.stringify({ questionKeys }),
+    });
+    assert.equal(create.status, 200);
+    const created = await create.json();
+    assert.equal(created.session.questionKeys.length, 20);
+
+    const firstKey = created.session.questionKeys[0];
+    const attempt = await fetch(`${baseUrl}/api/study/ccna/sessions/${created.session.id}/attempts`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        cookie: session.cookie,
+        "x-openpt-csrf": session.csrf,
+      },
+      body: JSON.stringify({
+        questionKey: firstKey,
+        selectedAnswers: [0],
+        correct: true,
+        answerDurationMs: 21_000,
+      }),
+    });
+    assert.equal(attempt.status, 200);
+    const attemptBody = await attempt.json();
+    assert.equal(attemptBody.attempt.correct, true);
+    assert.equal(attemptBody.attempt.slow, true);
+    assert.equal(attemptBody.attempt.interrupted, false);
+
+    const interruptedAttempt = await fetch(`${baseUrl}/api/study/ccna/sessions/${created.session.id}/attempts`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        cookie: session.cookie,
+        "x-openpt-csrf": session.csrf,
+      },
+      body: JSON.stringify({
+        questionKey: created.session.questionKeys[1],
+        selectedAnswers: [1],
+        correct: false,
+        answerDurationMs: 130_000,
+      }),
+    });
+    assert.equal(interruptedAttempt.status, 200);
+    const interruptedBody = await interruptedAttempt.json();
+    assert.equal(interruptedBody.attempt.correct, false);
+    assert.equal(interruptedBody.attempt.slow, false);
+    assert.equal(interruptedBody.attempt.interrupted, true);
+
+    const finish = await fetch(`${baseUrl}/api/study/ccna/sessions/${created.session.id}/finish`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        cookie: session.cookie,
+        "x-openpt-csrf": session.csrf,
+      },
+      body: JSON.stringify({ totalQuestionCount: questionKeys.length }),
+    });
+    assert.equal(finish.status, 200);
+    const finished = await finish.json();
+    assert.equal(finished.session.scoredCount, 1);
+    assert.equal(finished.session.score, 100);
+    assert.equal(finished.session.slowCount, 1);
+    assert.equal(finished.session.interruptedCount, 1);
+    assert.equal(finished.dashboard.slowCount, 1);
+    assert.equal(finished.dashboard.interruptedCount, 1);
+    assert.equal(finished.dashboard.activeWeakCount, 2);
+
+    const summary = await fetch(`${baseUrl}/api/study/ccna/summary?total=${questionKeys.length}`, {
+      headers: { cookie: session.cookie },
+    });
+    assert.equal(summary.status, 200);
+    const summaryBody = await summary.json();
+    assert.equal(summaryBody.dashboard.recentScore, 100);
+  });
+});
+
 test("account deletion can be scheduled and cancelled during grace period", { timeout: 15_000 }, async () => {
   await withTestServer({}, async (baseUrl) => {
     const email = "delete-me@example.com";

@@ -372,6 +372,34 @@ app.get("/api/me", async (req) => {
   return { user: publicUser(req.user), csrf: req.user.csrf, usageBytes: store.userUsage(req.user.id), limits: store.limits };
 });
 
+app.get("/api/study/ccna/summary", async (req) => {
+  const user = requireUser(req);
+  const total = Number(req.query?.total || 0);
+  return { dashboard: store.studySummary(user.id, "ccna", Number.isFinite(total) ? total : 0) };
+});
+
+app.post("/api/study/ccna/sessions", async (req) => {
+  const user = requireUser(req);
+  requireCsrf(req);
+  abuse.check("studySessionUser", user.id, { limit: 80, windowMs: 60 * 60_000 });
+  const session = store.createStudySession(user.id, "ccna", req.body?.questionKeys || []);
+  return { session };
+});
+
+app.post("/api/study/ccna/sessions/:id/attempts", async (req) => {
+  const user = requireUser(req);
+  requireCsrf(req);
+  abuse.check("studyAttemptUser", user.id, { limit: 900, windowMs: 60 * 60_000 });
+  return store.recordStudyAttempt(user.id, "ccna", req.params.id, req.body || {});
+});
+
+app.post("/api/study/ccna/sessions/:id/finish", async (req) => {
+  const user = requireUser(req);
+  requireCsrf(req);
+  const total = Number(req.body?.totalQuestionCount || 0);
+  return store.finishStudySession(user.id, "ccna", req.params.id, Number.isFinite(total) ? total : 0);
+});
+
 app.get("/api/sessions", async (req) => {
   const user = requireUser(req);
   return { sessions: store.listSessions(user.id, user.sessionId) };
