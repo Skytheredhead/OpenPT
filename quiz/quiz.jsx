@@ -28,6 +28,52 @@ const PRAISE_MESSAGES = [
   'Magnifico.', 'On rails.', 'Easy.', 'Boom.',
 ];
 
+const ANSWER_EXIT_MS = 240;
+
+const AnswerTransition = ({ transitionKey, children }) => {
+  const [layers, setLayers] = useStateR([{ key: transitionKey, phase: 'current', children }]);
+  const previousKeyRef = useRefR(transitionKey);
+  const cleanupTimerRef = useRefR(null);
+
+  useEffectR(() => {
+    if (previousKeyRef.current === transitionKey) return;
+    previousKeyRef.current = transitionKey;
+
+    if (cleanupTimerRef.current) clearTimeout(cleanupTimerRef.current);
+    setLayers(prev => [
+      ...prev.map(layer => ({ ...layer, phase: 'exit' })),
+      { key: transitionKey, phase: 'enter', children },
+    ]);
+    cleanupTimerRef.current = setTimeout(() => {
+      setLayers(prev => prev.filter(layer => layer.phase !== 'exit'));
+      cleanupTimerRef.current = null;
+    }, ANSWER_EXIT_MS + 80);
+  }, [transitionKey]);
+
+  useEffectR(() => () => {
+    if (cleanupTimerRef.current) clearTimeout(cleanupTimerRef.current);
+  }, []);
+
+  const visibleLayers = layers.map(layer => (
+    layer.key === transitionKey && layer.phase !== 'exit'
+      ? { ...layer, children }
+      : layer
+  ));
+
+  return (
+    <div className="answer-transition">
+      {visibleLayers.map(layer => (
+        <div
+          key={layer.key}
+          className={`answer-transition-layer ${layer.phase}`}
+          aria-hidden={layer.phase === 'exit' ? 'true' : undefined}>
+          {layer.children}
+        </div>
+      ))}
+    </div>
+  );
+};
+
 const PracticeRunner = ({ state, setState, onFinish, onExit }) => {
   const q = state.activeId == null ? null : window.QUESTIONS[state.activeId];
   const [celebration, setCelebration] = useStateR(null); // null | { msg, phase: 'enter'|'leave' }
@@ -77,7 +123,7 @@ const PracticeRunner = ({ state, setState, onFinish, onExit }) => {
     }
   }
   function submitMulti() {
-    if (!q || state.answered || state.selected.size === 0 || celebration) return;
+    if (!q || state.answered || state.selected.size !== q.answers.length || celebration) return;
     const graded = QuizEngine.grade(state);
     setState(graded);
     const correctSet = new Set(q.answers);
@@ -94,11 +140,11 @@ const PracticeRunner = ({ state, setState, onFinish, onExit }) => {
     setState(prev => {
       const nextSelected = new Set(prev.selected);
       for (const optIdx of [...nextSelected]) {
-        const parsed = parsePairOption(q.options[optIdx]);
+        const parsed = parsePairSelection(q, optIdx);
         if (parsed?.term === term || parsed?.description === description) nextSelected.delete(optIdx);
       }
-      const optIdx = findPairOptionIndex(q, term, description);
-      if (optIdx != null) nextSelected.add(optIdx);
+      const selection = makePairSelection(q, term, description);
+      if (selection != null) nextSelected.add(selection);
       return { ...prev, selected: nextSelected };
     });
   }
@@ -129,7 +175,10 @@ const PracticeRunner = ({ state, setState, onFinish, onExit }) => {
   const attemptCount = state.attemptsById[state.activeId] || 0;
   const isRepeat = attemptCount > 0 && !state.answered;
   const isCorrect = state.answered && sameSet(state.selected, correctSet);
-  const currentPosition = Math.min(state.totalAttempts + 1, state.quizIds.length);
+  const currentPosition = Math.min(
+    state.mastered.size + (state.mastered.has(state.activeId) ? 0 : 1),
+    state.quizIds.length
+  );
   const progress = state.quizIds.length ? currentPosition / state.quizIds.length : 0;
 
   let feedbackClass = '', feedbackLabel = '', feedbackMsg = '';
@@ -148,7 +197,7 @@ const PracticeRunner = ({ state, setState, onFinish, onExit }) => {
       <div className="run-stage">
         <div className="qcard qcard-enter">
           <div className="qcard-meta">
-            <span>{q.semesterLabel} / {q.examLabel} / question {state.totalAttempts + 1}</span>
+            <span>{q.semesterLabel} / {q.examLabel} / question {currentPosition} of {state.quizIds.length}</span>
             {attemptCount > 0 && !state.answered && <span className="tag repeat">repeat ×{attemptCount}</span>}
           </div>
 
@@ -156,35 +205,37 @@ const PracticeRunner = ({ state, setState, onFinish, onExit }) => {
 
           <QuestionExhibit q={q} />
 
-          {q.pairs ? (
-            <MatchupQuestion
-              q={q}
-              selected={state.selected}
-              answered={state.answered}
-              onChange={updateMatchup}
-            />
-          ) : (
-            <div className="opts" key={`p-opts-${state.activeId}`}>
-              {state.optionOrder.map((optIdx, displayIdx) => {
-                const isCorr = correctSet.has(optIdx);
-                const isSel = state.selected.has(optIdx);
-                let cls = 'opt';
-                if (state.answered) {
-                  if (isCorr) cls += ' correct flash';
-                  else if (isSel) cls += ' incorrect flash';
-                } else if (isSel) cls += ' selected';
-                return (
-                  <button
-                    key={optIdx} type="button" disabled={state.answered}
-                    className={cls} onClick={() => handleOption(optIdx)}>
-                    <div className="marker">{String.fromCharCode(65 + displayIdx)}</div>
-                    <div className="text">{q.options[optIdx]}</div>
-                    <div className="hk">{displayIdx + 1}</div>
-                  </button>
-                );
-              })}
-            </div>
-          )}
+          <AnswerTransition transitionKey={`practice-${state.activeId}-${q.pairs ? 'pairs' : 'opts'}`}>
+            {q.pairs ? (
+              <MatchupQuestion
+                q={q}
+                selected={state.selected}
+                answered={state.answered}
+                onChange={updateMatchup}
+              />
+            ) : (
+              <div className="opts" key={`p-opts-${state.activeId}`}>
+                {state.optionOrder.map((optIdx, displayIdx) => {
+                  const isCorr = correctSet.has(optIdx);
+                  const isSel = state.selected.has(optIdx);
+                  let cls = 'opt';
+                  if (state.answered) {
+                    if (isCorr) cls += ' correct flash';
+                    else if (isSel) cls += ' incorrect flash';
+                  } else if (isSel) cls += ' selected';
+                  return (
+                    <button
+                      key={optIdx} type="button" disabled={state.answered}
+                      className={cls} onClick={() => handleOption(optIdx)}>
+                      <div className="marker">{String.fromCharCode(65 + displayIdx)}</div>
+                      <div className="text">{q.options[optIdx]}</div>
+                      <div className="hk">{displayIdx + 1}</div>
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+          </AnswerTransition>
 
           {state.answered && !isCorrect && (
             <div className={`feedback ${feedbackClass}`}>
@@ -198,7 +249,7 @@ const PracticeRunner = ({ state, setState, onFinish, onExit }) => {
               <button
                 type="button"
                 className="qaction primary"
-                disabled={q.pairs ? state.selected.size !== q.answers.length : state.selected.size === 0}
+                disabled={state.selected.size !== q.answers.length}
                 onClick={submitMulti}>
                 Submit answer
               </button>
@@ -266,11 +317,11 @@ const QuizRunner = ({ state, setState, onFinish, onExit }) => {
       const answers = { ...(prev.answers || {}) };
       const current = new Set(answers[qid] || []);
       for (const optIdx of [...current]) {
-        const parsed = parsePairOption(q.options[optIdx]);
+        const parsed = parsePairSelection(q, optIdx);
         if (parsed?.term === term || parsed?.description === description) current.delete(optIdx);
       }
-      const optIdx = findPairOptionIndex(q, term, description);
-      if (optIdx != null) current.add(optIdx);
+      const selection = makePairSelection(q, term, description);
+      if (selection != null) current.add(selection);
       answers[qid] = [...current];
       return { ...prev, answers };
     });
@@ -318,7 +369,9 @@ const QuizRunner = ({ state, setState, onFinish, onExit }) => {
 
   const answers = state.answers || {};
   const currentSel = new Set(answers[qid] || []);
-  const answeredCount = state.quizIds.filter(id => (answers[id] || []).length > 0).length;
+  const isCompleteAnswer = id => (answers[id] || []).length === window.QUESTIONS[id].answers.length;
+  const answeredCount = state.quizIds.filter(isCompleteAnswer).length;
+  const canSubmit = answeredCount === total;
 
   // Stable display order for options (set once per question)
   const optionOrders = state.optionOrders || {};
@@ -347,7 +400,7 @@ const QuizRunner = ({ state, setState, onFinish, onExit }) => {
       if (e.key === 'ArrowRight' || e.key === 'Enter') {
         e.preventDefault();
         if (idx === total - 1) {
-          if (answeredCount === total) submit();
+          if (canSubmit) submit();
         } else nextQ();
       } else if (e.key === 'ArrowLeft') {
         prevQ();
@@ -373,30 +426,32 @@ const QuizRunner = ({ state, setState, onFinish, onExit }) => {
 
           <QuestionExhibit q={q} />
 
-          {q.pairs ? (
-            <MatchupQuestion
-              q={q}
-              selected={currentSel}
-              answered={false}
-              onChange={selectMatchup}
-            />
-          ) : (
-            <div className="opts" key={`q-opts-${qid}`}>
-              {order.map((optIdx, displayIdx) => {
-                const isSel = currentSel.has(optIdx);
-                return (
-                  <button
-                    key={optIdx} type="button"
-                    className={`opt ${isSel ? 'selected' : ''}`}
-                    onClick={() => selectOption(optIdx)}>
-                    <div className="marker">{String.fromCharCode(65 + displayIdx)}</div>
-                    <div className="text">{q.options[optIdx]}</div>
-                    <div className="hk">{displayIdx + 1}</div>
-                  </button>
-                );
-              })}
-            </div>
-          )}
+          <AnswerTransition transitionKey={`quiz-${qid}-${q.pairs ? 'pairs' : 'opts'}`}>
+            {q.pairs ? (
+              <MatchupQuestion
+                q={q}
+                selected={currentSel}
+                answered={false}
+                onChange={selectMatchup}
+              />
+            ) : (
+              <div className="opts" key={`q-opts-${qid}`}>
+                {order.map((optIdx, displayIdx) => {
+                  const isSel = currentSel.has(optIdx);
+                  return (
+                    <button
+                      key={optIdx} type="button"
+                      className={`opt ${isSel ? 'selected' : ''}`}
+                      onClick={() => selectOption(optIdx)}>
+                      <div className="marker">{String.fromCharCode(65 + displayIdx)}</div>
+                      <div className="text">{q.options[optIdx]}</div>
+                      <div className="hk">{displayIdx + 1}</div>
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+          </AnswerTransition>
 
           <div className="qaction-row linear-nav">
             <button
@@ -415,11 +470,9 @@ const QuizRunner = ({ state, setState, onFinish, onExit }) => {
             {isLast && (
               <button
                 type="button"
-                className={`qaction primary submit ${answeredCount === total ? '' : 'incomplete'}`}
-                onClick={() => {
-                  if (answeredCount === total) submit();
-                  else if (confirm(`You have ${total - answeredCount} unanswered. Submit anyway?`)) submit();
-                }}>
+                className={`qaction primary submit ${canSubmit ? '' : 'incomplete'}`}
+                disabled={!canSubmit}
+                onClick={submit}>
                 Submit quiz
                 <Icon name="check" size={14} />
               </button>
@@ -475,7 +528,7 @@ const MATCH_COLORS = [
 ];
 
 const MatchupQuestion = ({ q, selected, answered, onChange }) => {
-  const choices = getMatchChoices(q);
+  const choices = useMemoR(() => shuffleMatchChoices(getMatchChoices(q)), [q.id]);
   const terms = (q.pairs || []).map(([term]) => term);
   const selectedByTerm = selectedDescriptionsByTerm(q, selected);
   const correctByTerm = Object.fromEntries((q.pairs || []).map(([term, description]) => [term, description]));
@@ -650,26 +703,44 @@ const TopologyExhibit = ({ exhibit }) => {
   const nodes = exhibit.nodes || [];
   const byId = Object.fromEntries(nodes.map(node => [node.id, node]));
   const glyphs = window.Glyph || {};
+  const links = exhibit.links || [];
+  const linkLabels = links.flatMap((link, idx) => {
+    const a = byId[link.from];
+    const b = byId[link.to];
+    if (!a || !b || !link.label) return [];
+    return [{
+      key: `${link.from}-${link.to}-${idx}-label`,
+      label: link.label,
+      type: link.type || 'ethernet',
+      x: (a.x + b.x) / 2,
+      y: (a.y + b.y) / 2,
+    }];
+  });
   return (
     <div className="qtopology-exhibit" aria-label={exhibit.title || 'Network topology exhibit'}>
       {exhibit.title && <div className="qtopology-title">{exhibit.title}</div>}
       <svg className="qtopology-links" viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true">
-        {(exhibit.links || []).map((link, idx) => {
+        {links.map((link, idx) => {
           const a = byId[link.from];
           const b = byId[link.to];
           if (!a || !b) return null;
-          const mx = (a.x + b.x) / 2;
-          const my = (a.y + b.y) / 2;
           return (
             <g key={`${link.from}-${link.to}-${idx}`}>
               <line
                 x1={a.x} y1={a.y} x2={b.x} y2={b.y}
                 className={`qtopology-link ${link.type || 'ethernet'}`} />
-              {link.label && <text x={mx} y={my - 2} className="qtopology-link-label">{link.label}</text>}
             </g>
           );
         })}
       </svg>
+      {linkLabels.map(link => (
+        <div
+          key={link.key}
+          className={`qtopology-link-label ${link.type}`}
+          style={{ left: `${link.x}%`, top: `${link.y}%` }}>
+          {link.label}
+        </div>
+      ))}
       {nodes.map(node => {
         const GlyphComponent = glyphs[node.kind] || glyphs.pc;
         return (
@@ -710,6 +781,14 @@ function findPairOptionIndex(q, term, description) {
   });
   return idx >= 0 ? idx : null;
 }
+function makePairSelection(q, term, description) {
+  if (!description) return null;
+  const optIdx = findPairOptionIndex(q, term, description);
+  return optIdx != null ? optIdx : `${term} -> ${description}`;
+}
+function parsePairSelection(q, selection) {
+  return parsePairOption(typeof selection === 'number' ? q.options?.[selection] : selection);
+}
 function getMatchChoices(q) {
   const choices = [];
   for (const option of q.options || []) {
@@ -721,10 +800,18 @@ function getMatchChoices(q) {
   }
   return choices;
 }
+function shuffleMatchChoices(choices) {
+  const shuffled = [...choices];
+  for (let i = shuffled.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
+  }
+  return shuffled;
+}
 function selectedDescriptionsByTerm(q, selected) {
   const byTerm = {};
   for (const optIdx of selected || []) {
-    const parsed = parsePairOption(q.options?.[optIdx]);
+    const parsed = parsePairSelection(q, optIdx);
     if (parsed) byTerm[parsed.term] = parsed.description;
   }
   return byTerm;

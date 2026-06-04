@@ -739,16 +739,118 @@ ${report.notes.map((n) => `- ${n}`).join("\n")}`;
     return element ? new XMLSerializer().serializeToString(element) : "";
   }
 
-  function collectPacketTracerVariables(root) {
-    const variables = {};
+  function splitPacketTracerPoolValues(value) {
+    return String(value || "")
+      .split(";")
+      .map((entry) => entry.trim())
+      .filter((entry) => entry.length);
+  }
+
+  function collectPacketTracerVariableModel(root) {
+    const selected = {};
     const manager = root?.getElementsByTagName("VARIABLE_MANAGER")?.[0];
     const pools = pathChild(manager, ["VARIABLES_POOLS"]) || manager;
-    for (const variable of Array.from(pools?.getElementsByTagName?.("*") || [])) {
+    const seedVars = directChildren(pathChild(manager, ["SEED_POOLS"]), "SEED_VAR").map((seed) => {
+      const valueEl = directChild(seed, "VALUE");
+      const rawValue = childText(seed, "VALUE");
+      const low = Number(valueEl?.getAttribute("LOW"));
+      const high = Number(valueEl?.getAttribute("HIGH"));
+      return {
+        name: childText(seed, "NAME"),
+        type: childText(seed, "TYPE"),
+        value: Number(rawValue),
+        rawValue,
+        low: Number.isFinite(low) ? low : 0,
+        high: Number.isFinite(high) ? high : Number(rawValue),
+        indexSeed: directChild(seed, "INDEX")?.getAttribute("SEED") || "",
+        index: childText(seed, "INDEX"),
+      };
+    }).filter((seed) => seed.name);
+    const poolEntries = [
+      ...directChildren(pathChild(manager, ["STRING_POOLS"]), "STRING_POOL"),
+      ...directChildren(pathChild(manager, ["NUMBER_POOLS"]), "NUMBER_POOL"),
+      ...directChildren(pathChild(manager, ["IP_POOLS"]), "IP_POOL"),
+    ].map((pool) => ({
+      name: childText(pool, "NAME"),
+      values: splitPacketTracerPoolValues(childText(pool, "VALUES")),
+      type: pool.tagName,
+    })).filter((pool) => pool.name);
+    const poolMap = Object.fromEntries(poolEntries.map((pool) => [pool.name, pool]));
+    const variables = Array.from(pools?.children || []).map((variable) => {
       const name = childText(variable, "NAME");
       const value = childText(variable, "VALUE");
-      if (name) variables[name] = value;
-    }
-    return variables;
+      if (name) selected[name] = value;
+      return {
+        name,
+        value,
+        type: childText(variable, "TYPE"),
+        poolName: childText(variable, "POOL_NAME"),
+        indexSeed: directChild(variable, "INDEX")?.getAttribute("SEED") || "",
+        index: childText(variable, "INDEX"),
+        tagName: variable.tagName,
+      };
+    }).filter((variable) => variable.name);
+    const seedUsage = variables.reduce((acc, variable) => {
+      if (!variable.indexSeed) return acc;
+      acc[variable.indexSeed] = acc[variable.indexSeed] || [];
+      acc[variable.indexSeed].push(variable);
+      return acc;
+    }, {});
+    const seedGroups = seedVars.map((seed) => {
+      const usedVariables = seedUsage[seed.name] || [];
+      const maxPoolIndex = usedVariables.reduce((max, variable) => {
+        const values = poolMap[variable.poolName]?.values || [];
+        return Math.max(max, values.length - 1);
+      }, seed.high);
+      const low = Number.isFinite(seed.low) ? seed.low : 0;
+      const high = Math.max(Number.isFinite(seed.high) ? seed.high : maxPoolIndex, maxPoolIndex);
+      const options = [];
+      for (let index = low; index <= high; index += 1) {
+        const optionVariables = {};
+        for (const variable of usedVariables) {
+          const values = poolMap[variable.poolName]?.values || [];
+          if (Object.prototype.hasOwnProperty.call(values, index)) optionVariables[variable.name] = values[index];
+        }
+        const preview = Object.values(optionVariables).slice(0, 5).join(", ");
+        options.push({
+          index,
+          selected: index === seed.value,
+          label: preview || `Option ${index + 1}`,
+          variables: optionVariables,
+        });
+      }
+      return {
+        id: seed.name,
+        name: seed.name,
+        currentIndex: seed.value,
+        low,
+        high,
+        variableCount: usedVariables.length,
+        variables: usedVariables.map((variable) => ({
+          name: variable.name,
+          poolName: variable.poolName,
+          currentValue: variable.value,
+        })),
+        options,
+      };
+    }).filter((group) => group.options.length > 1 || group.variableCount);
+    return {
+      source: manager ? "VARIABLE_MANAGER" : "",
+      selected,
+      seeds: seedVars,
+      pools: poolEntries,
+      variables,
+      groups: seedGroups,
+      summary: {
+        selectedVariables: Object.keys(selected).length,
+        seedGroups: seedGroups.length,
+        optionCount: seedGroups.reduce((sum, group) => sum + group.options.length, 0),
+      },
+    };
+  }
+
+  function collectPacketTracerVariables(root) {
+    return collectPacketTracerVariableModel(root).selected;
   }
 
   function resolvePacketTracerTokens(text, variables = {}) {
@@ -1139,6 +1241,107 @@ ${report.notes.map((n) => `- ${n}`).join("\n")}`;
     return state;
   }
 
+  function parsePacketTracerNetworkTopology(network, variables = {}) {
+    const devicesRoot = pathChild(network, ["DEVICES"]);
+    const linksRoot = pathChild(network, ["LINKS"]);
+    const saveRefToName = {};
+    const memAddrToName = {};
+    const allDevices = directChildren(devicesRoot, "DEVICE").map((deviceEl, index) => {
+      const engine = directChild(deviceEl, "ENGINE");
+      const typeEl = directChild(engine, "TYPE");
+      const logical = pathChild(deviceEl, ["WORKSPACE", "LOGICAL"]);
+      const rawName = childText(engine, "NAME") || `PT-Device-${index + 1}`;
+      const name = resolvePacketTracerTokens(rawName, variables);
+      const saveRefId = childText(engine, "SAVE_REF_ID");
+      const devAddr = childText(logical, "DEV_ADDR");
+      if (saveRefId) saveRefToName[saveRefId] = name;
+      if (devAddr) memAddrToName[devAddr] = name;
+      const runningConfig = Array.from(engine?.getElementsByTagName("RUNNINGCONFIG")?.[0]?.children || [])
+        .filter((line) => line.tagName === "LINE")
+        .map((line) => resolvePacketTracerTokens(line.textContent, variables));
+      return {
+        name,
+        kind: (typeEl?.textContent || "Device").trim(),
+        model: typeEl?.getAttribute("model") || typeEl?.getAttribute("customModel") || "",
+        customModel: typeEl?.getAttribute("customModel") || "",
+        power: childText(engine, "POWER"),
+        x: Number(childText(logical, "X")) || 300 + index * 80,
+        y: Number(childText(logical, "Y")) || 240 + index * 60,
+        rawName,
+        saveRefId,
+        memAddr: devAddr,
+        runningConfig,
+        xml: elementOuterXml(deviceEl),
+      };
+    });
+
+    const logicalObjects = allDevices.filter((device) => /^Power Distribution Device$/i.test(device.kind || device.model || device.name || ""));
+    const devices = allDevices.filter((device) => !logicalObjects.includes(device));
+    const links = directChildren(linksRoot, "LINK").map((linkEl) => {
+      const cable = directChild(linkEl, "CABLE");
+      const ports = directChildren(cable, "PORT").map((port) => port.textContent.trim());
+      const fromRef = childText(cable, "FROM");
+      const toRef = childText(cable, "TO");
+      const fromMemAddr = childText(cable, "FROM_DEVICE_MEM_ADDR");
+      const toMemAddr = childText(cable, "TO_DEVICE_MEM_ADDR");
+      const fromDevice = saveRefToName[fromRef] || memAddrToName[fromMemAddr] || fromRef;
+      const toDevice = saveRefToName[toRef] || memAddrToName[toMemAddr] || toRef;
+      return {
+        type: childText(cable, "TYPE") || childText(linkEl, "TYPE") || "Packet Tracer Link",
+        medium: childText(linkEl, "TYPE"),
+        from: `${fromDevice}:${ports[0] || "Port"}`,
+        to: `${toDevice}:${ports[1] || "Port"}`,
+        fromRef,
+        toRef,
+        fromMemAddr,
+        toMemAddr,
+        functional: childText(cable, "FUNCTIONAL"),
+        ports,
+        xml: elementOuterXml(linkEl),
+      };
+    }).filter((link) => link.from && link.to);
+    return { allDevices, devices, logicalObjects, links };
+  }
+
+  function layoutSeedIndex(variableModel) {
+    const seed = (variableModel?.seeds || []).find((candidate) => /topo|layout|network|scenario/i.test(candidate.name || ""));
+    return Number.isFinite(seed?.value) ? seed.value : 0;
+  }
+
+  function buildTopologyVariants(networks, variables = {}, selectedIndex = 0) {
+    if (!Array.isArray(networks) || networks.length <= 1) return [];
+    return networks.map((network, index) => {
+      const topology = parsePacketTracerNetworkTopology(network, variables);
+      return {
+        id: `network-${index}`,
+        label: `Layout ${index + 1}`,
+        sourceIndex: index,
+        selected: index === selectedIndex,
+        devices: topology.devices,
+        logicalObjects: topology.logicalObjects.map((device) => ({
+          name: device.name,
+          kind: device.kind,
+          model: device.model,
+          customModel: device.customModel,
+          power: device.power,
+          x: device.x,
+          y: device.y,
+          rawName: device.rawName,
+          saveRefId: device.saveRefId,
+          memAddr: device.memAddr,
+          logicalOnly: true,
+          xml: device.xml,
+        })),
+        links: topology.links,
+        summary: {
+          devices: topology.devices.length,
+          logicalObjects: topology.logicalObjects.length,
+          links: topology.links.length,
+        },
+      };
+    });
+  }
+
   function coverageItem({ id, status = "exact", category, label, detail, source = {}, evidence = {} }) {
     return {
       id,
@@ -1173,7 +1376,7 @@ ${report.notes.map((n) => `- ${n}`).join("\n")}`;
     };
   }
 
-  function buildPacketTracerCoverage({ decoded, devices, logicalObjects, links, instructionsHtml, assessmentModel, answerCommands, packetTracerState, rawFilePreserved = false, rawFileReason = "" }) {
+  function buildPacketTracerCoverage({ decoded, devices, logicalObjects, links, instructionsHtml, assessmentModel, answerCommands, packetTracerState, variableModel, topologyVariants, rawFilePreserved = false, rawFileReason = "" }) {
     const items = [];
     const decodedXmlLength = decoded?.xmlLength || decoded?.xmlText?.length || 0;
     if (decodedXmlLength) {
@@ -1360,6 +1563,60 @@ ${report.notes.map((n) => `- ${n}`).join("\n")}`;
       }));
     }
 
+    if (variableModel?.summary?.selectedVariables) {
+      const groups = variableModel.groups || [];
+      const optionCount = groups.reduce((sum, group) => sum + (group.options?.length || 0), 0);
+      items.push(coverageItem({
+        id: "variations.variables",
+        category: "variations",
+        label: "Variable options",
+        detail: groups.length
+          ? `${variableModel.summary.selectedVariables} selected variables and ${optionCount} authored options across ${groups.length} seed group${groups.length === 1 ? "" : "s"} were decoded.`
+          : `${variableModel.summary.selectedVariables} selected variables were decoded.`,
+        source: { xmlPath: "/VARIABLE_MANAGER" },
+        evidence: {
+          groups: groups.map((group) => ({
+            id: group.id,
+            currentIndex: group.currentIndex,
+            options: group.options?.length || 0,
+            variables: group.variableCount || 0,
+          })),
+        },
+      }));
+      const layoutSeeds = groups.filter((group) => /topo|layout|network|scenario/i.test(group.name || group.id || ""));
+      for (const seed of layoutSeeds) {
+        items.push(coverageItem({
+          id: `variations.layout-seed.${seed.id}`,
+          status: (topologyVariants || []).length > 1 ? "exact" : "approx",
+          category: "variations",
+          label: `Layout seed: ${seed.name}`,
+          detail: (topologyVariants || []).length > 1
+            ? `${seed.options.length} layout seed options were matched to imported topology snapshots.`
+            : `${seed.options.length} Packet Tracer layout seed options were detected; this saved file includes the selected topology snapshot only.`,
+          source: { xmlPath: "/VARIABLE_MANAGER/SEED_POOLS", objectId: seed.id },
+        }));
+      }
+    }
+
+    if ((topologyVariants || []).length > 1) {
+      items.push(coverageItem({
+        id: "variations.topology-snapshots",
+        category: "variations",
+        label: "Topology layout variants",
+        detail: `${topologyVariants.length} Packet Tracer network layout snapshot${topologyVariants.length === 1 ? "" : "s"} imported; the selected snapshot is rendered on the canvas.`,
+        source: { xmlPath: "/PACKETTRACER/NETWORK" },
+        evidence: {
+          variants: topologyVariants.map((variant) => ({
+            id: variant.id,
+            selected: !!variant.selected,
+            devices: variant.summary?.devices || 0,
+            logicalObjects: variant.summary?.logicalObjects || 0,
+            links: variant.summary?.links || 0,
+          })),
+        },
+      }));
+    }
+
     return items;
   }
 
@@ -1368,68 +1625,18 @@ ${report.notes.map((n) => `- ${n}`).join("\n")}`;
     const doc = parsedXml.doc;
     const root = doc.documentElement;
     const packetTracer = directChild(root, "PACKETTRACER5") || directChild(root, "PACKETTRACER") || root;
-    const network = directChild(packetTracer, "NETWORK");
     const activityRoot = directChild(root, "ACTIVITY");
-    const devicesRoot = pathChild(network, ["DEVICES"]);
-    const linksRoot = pathChild(network, ["LINKS"]);
-    const variables = collectPacketTracerVariables(root);
-
-    const saveRefToName = {};
-    const memAddrToName = {};
-    const allDevices = directChildren(devicesRoot, "DEVICE").map((deviceEl, index) => {
-      const engine = directChild(deviceEl, "ENGINE");
-      const typeEl = directChild(engine, "TYPE");
-      const logical = pathChild(deviceEl, ["WORKSPACE", "LOGICAL"]);
-      const rawName = childText(engine, "NAME") || `PT-Device-${index + 1}`;
-      const name = resolvePacketTracerTokens(rawName, variables);
-      const saveRefId = childText(engine, "SAVE_REF_ID");
-      const devAddr = childText(logical, "DEV_ADDR");
-      if (saveRefId) saveRefToName[saveRefId] = name;
-      if (devAddr) memAddrToName[devAddr] = name;
-      const runningConfig = Array.from(engine?.getElementsByTagName("RUNNINGCONFIG")?.[0]?.children || [])
-        .filter((line) => line.tagName === "LINE")
-        .map((line) => line.textContent);
-      return {
-        name,
-        kind: (typeEl?.textContent || "Device").trim(),
-        model: typeEl?.getAttribute("model") || typeEl?.getAttribute("customModel") || "",
-        customModel: typeEl?.getAttribute("customModel") || "",
-        power: childText(engine, "POWER"),
-        x: Number(childText(logical, "X")) || 300 + index * 80,
-        y: Number(childText(logical, "Y")) || 240 + index * 60,
-        rawName,
-        saveRefId,
-        memAddr: devAddr,
-        runningConfig,
-        xml: elementOuterXml(deviceEl),
-      };
-    });
-
-    const logicalObjects = allDevices.filter((device) => /^Power Distribution Device$/i.test(device.kind || device.model || device.name || ""));
-    const devices = allDevices.filter((device) => !logicalObjects.includes(device));
-    const links = directChildren(linksRoot, "LINK").map((linkEl) => {
-      const cable = directChild(linkEl, "CABLE");
-      const ports = directChildren(cable, "PORT").map((port) => port.textContent.trim());
-      const fromRef = childText(cable, "FROM");
-      const toRef = childText(cable, "TO");
-      const fromMemAddr = childText(cable, "FROM_DEVICE_MEM_ADDR");
-      const toMemAddr = childText(cable, "TO_DEVICE_MEM_ADDR");
-      const fromDevice = saveRefToName[fromRef] || memAddrToName[fromMemAddr] || fromRef;
-      const toDevice = saveRefToName[toRef] || memAddrToName[toMemAddr] || toRef;
-      return {
-        type: childText(cable, "TYPE") || childText(linkEl, "TYPE") || "Packet Tracer Link",
-        medium: childText(linkEl, "TYPE"),
-        from: `${fromDevice}:${ports[0] || "Port"}`,
-        to: `${toDevice}:${ports[1] || "Port"}`,
-        fromRef,
-        toRef,
-        fromMemAddr,
-        toMemAddr,
-        functional: childText(cable, "FUNCTIONAL"),
-        ports,
-        xml: elementOuterXml(linkEl),
-      };
-    }).filter((link) => link.from && link.to);
+    const variableModel = collectPacketTracerVariableModel(root);
+    const variables = variableModel.selected;
+    const networks = directChildren(packetTracer, "NETWORK");
+    const selectedNetworkIndex = networks.length > 1 ? Math.max(0, Math.min(networks.length - 1, layoutSeedIndex(variableModel))) : 0;
+    const network = networks[selectedNetworkIndex] || networks[0] || directChild(packetTracer, "NETWORK");
+    const topology = parsePacketTracerNetworkTopology(network, variables);
+    const allDevices = topology.allDevices;
+    const devices = topology.devices;
+    const logicalObjects = topology.logicalObjects;
+    const links = topology.links;
+    const topologyVariants = buildTopologyVariants(networks, variables, selectedNetworkIndex);
 
     const instructionsHtml = (
       directChildren(pathChild(activityRoot, ["INSTRUCTIONS"]), "PAGE").map((page) => page.textContent.trim()).find(Boolean) ||
@@ -1523,7 +1730,10 @@ ${report.notes.map((n) => `- ${n}`).join("\n")}`;
         packetTracerVersion: firstDescendantText(root, "VERSION"),
         networkDeviceCount: devices.length,
         packetTracerObjectCount: allDevices.length,
+        topologyVariantCount: topologyVariants.length || networks.length || 0,
+        selectedTopologyVariant: selectedNetworkIndex,
         variables,
+        variableModel,
         componentList: parseAssessmentComponentList(root),
         visibleAssessmentComponents: Array.from(visibleComponents),
         assessmentClassification: assessmentSections.counts,
@@ -1539,6 +1749,8 @@ ${report.notes.map((n) => `- ${n}`).join("\n")}`;
       },
       reverseReport: report,
       assessmentSections,
+      variationModel: variableModel,
+      topologyVariants,
       featureCoverage: {
         rawFilePreserved: !!rawStorage.stored,
         semanticExtraction: "decoded-xml",
@@ -1552,6 +1764,8 @@ ${report.notes.map((n) => `- ${n}`).join("\n")}`;
           assessmentModel,
           answerCommands,
           packetTracerState,
+          variableModel,
+          topologyVariants,
           rawFilePreserved: !!rawStorage.stored,
           rawFileReason: rawStorage.reason || "",
         }),
