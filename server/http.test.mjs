@@ -128,24 +128,24 @@ test("production frontend origin can register against backend-only API", { timeo
     const preflight = await fetch(`${baseUrl}/api/auth/register`, {
       method: "OPTIONS",
       headers: {
-        origin: "https://openpt.skylarenns.com",
+        origin: "https://openpt.dev",
         "access-control-request-method": "POST",
         "access-control-request-headers": "content-type",
       },
     });
     assert.equal(preflight.status, 204);
-    assert.equal(preflight.headers.get("access-control-allow-origin"), "https://openpt.skylarenns.com");
+    assert.equal(preflight.headers.get("access-control-allow-origin"), "https://openpt.dev");
 
     const register = await fetch(`${baseUrl}/api/auth/register`, {
       method: "POST",
       headers: {
-        origin: "https://openpt.skylarenns.com",
+        origin: "https://openpt.dev",
         "content-type": "application/json",
       },
       body: JSON.stringify({ email: "custom-origin@example.com", password: "password123" }),
     });
     assert.equal(register.status, 202);
-    assert.equal(register.headers.get("access-control-allow-origin"), "https://openpt.skylarenns.com");
+    assert.equal(register.headers.get("access-control-allow-origin"), "https://openpt.dev");
   });
 });
 

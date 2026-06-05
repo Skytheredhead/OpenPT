@@ -26,6 +26,7 @@ const host = process.env.HOST || "127.0.0.1";
 const defaultAllowedOrigins = [
   "http://127.0.0.1:5173",
   "http://localhost:5173",
+  "https://openpt.dev",
   "https://openpt.skylarenns.com",
   "https://openpt.vercel.app",
   "https://open-pt.vercel.app"

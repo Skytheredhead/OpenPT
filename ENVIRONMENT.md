@@ -35,6 +35,8 @@ Check this file before deployment, server work, or Vercel verification.
 - Public API hostname: `openptapi.skylarenns.com`
 - Cloudflare tunnel ingress maps `openptapi.skylarenns.com` to
   `http://127.0.0.1:5173`.
+- The backend CORS allowlist must include the public frontend origin
+  `https://openpt.dev`.
 - The public tunnel uses HTTPS, so the remote service should set
   `OPENPT_SECURE_COOKIES=1`.
 - Spam proofing is handled in-process by `server/abuse-guard.mjs`: Cloudflare-aware
@@ -49,7 +51,7 @@ Check this file before deployment, server work, or Vercel verification.
   `OPENPT_MIN_SAVE_INTERVAL_MS`, `OPENPT_LEASE_TTL_MS`, and
   `OPENPT_ADMIN_TOKEN`.
 - Account email links should set `OPENPT_PUBLIC_URL` to the public frontend
-  origin, for example `https://openpt.skylarenns.com`.
+  origin, for example `https://openpt.dev`.
 - Account verification and password reset email use `OPENPT_ACCOUNT_SMTP_*`
   first, then the feedback/report SMTP env names as fallbacks. Only set
   `OPENPT_ACCOUNT_EMAIL_DEBUG=1` in local test/dev contexts; debug mode returns
