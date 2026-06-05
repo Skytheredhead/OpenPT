@@ -4069,6 +4069,7 @@ body.is-resizing-layout .server-module-resizer::before {
   border: 1px solid var(--line);
   border-radius: 8px;
   background: var(--bg-1);
+  isolation: isolate;
 }
 
 .jeopardy-header-stat {
@@ -4225,6 +4226,7 @@ body.is-resizing-layout .server-module-resizer::before {
 }
 
 .jeopardy-multiplier button {
+  position: relative;
   min-width: 38px;
   min-height: 30px;
   padding: 0 9px;
@@ -4235,6 +4237,15 @@ body.is-resizing-layout .server-module-resizer::before {
   font-weight: 700;
 }
 
+.jeopardy-multiplier button:hover {
+  z-index: 1;
+  transform: none;
+  border-color: var(--accent-dim);
+  background: color-mix(in oklab, var(--bg-3) 82%, var(--accent-soft));
+  color: var(--fg-0);
+  box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--accent-dim) 42%, transparent);
+}
+
 .jeopardy-multiplier button.final {
   min-width: 58px;
   margin-left: 4px;
@@ -4242,11 +4253,23 @@ body.is-resizing-layout .server-module-resizer::before {
   color: var(--jeopardy-gold);
 }
 
+.jeopardy-multiplier button.final:hover {
+  border-color: var(--accent-dim);
+}
+
 .jeopardy-multiplier button.active {
+  z-index: 2;
   border-color: color-mix(in oklab, var(--jeopardy-gold) 48%, transparent);
   background: var(--jeopardy-gold-soft);
   color: var(--jeopardy-gold);
   box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--jeopardy-gold) 20%, transparent);
+}
+
+.jeopardy-multiplier button.active:hover {
+  border-color: color-mix(in oklab, var(--jeopardy-gold) 58%, transparent);
+  background: color-mix(in oklab, var(--jeopardy-gold-soft) 82%, var(--bg-3));
+  color: var(--jeopardy-gold);
+  box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--jeopardy-gold) 30%, transparent);
 }
 
 .jeopardy-settings-card {
