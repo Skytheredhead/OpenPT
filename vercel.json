@@ -9,6 +9,10 @@
       "destination": "/index.html"
     },
     {
+      "source": "/home.html",
+      "destination": "/home.html"
+    },
+    {
       "source": "/wordle",
       "destination": "/wordle.html"
     },

@@ -4303,25 +4303,28 @@ body.is-resizing-layout .server-module-resizer::before {
 
 .jeopardy-stage {
   display: grid;
-  grid-template-columns: minmax(0, 1fr);
-  grid-template-rows: minmax(0, 1fr) auto;
+  grid-template-columns: minmax(218px, clamp(218px, 22vw, 286px)) minmax(0, 1fr);
+  grid-template-rows: minmax(0, 1fr);
   gap: 14px;
   min-height: 0;
   padding: 14px;
+  overflow: hidden;
 }
 
 .jeopardy-scoreboard {
-  order: 2;
+  order: 1;
   min-width: 0;
-  overflow: visible;
+  min-height: 0;
+  overflow: auto;
   display: flex;
   align-items: stretch;
-  flex-wrap: wrap;
+  flex-direction: column;
   gap: 8px;
+  padding-right: 2px;
 }
 
 .jeopardy-team {
-  flex: 1 1 170px;
+  flex: 0 0 auto;
   display: grid;
   gap: 7px;
   padding: 9px;
@@ -4384,8 +4387,8 @@ body.is-resizing-layout .server-module-resizer::before {
 }
 
 .jeopardy-add-team {
-  flex: 0 0 126px;
-  width: auto;
+  flex: 0 0 auto;
+  width: 100%;
   min-height: 42px;
   align-self: stretch;
   border-style: dashed;
@@ -4397,7 +4400,7 @@ body.is-resizing-layout .server-module-resizer::before {
 }
 
 .jeopardy-board-shell {
-  order: 1;
+  order: 2;
   min-width: 0;
   min-height: 0;
   display: grid;
@@ -5144,11 +5147,7 @@ body.is-resizing-layout .server-module-resizer::before {
 
 @media (max-width: 1080px) {
   .jeopardy-stage {
-    grid-template-columns: minmax(0, 1fr);
-    grid-template-rows: minmax(0, 1fr) auto;
-  }
-  .jeopardy-scoreboard {
-    display: flex;
+    grid-template-columns: minmax(190px, 24vw) minmax(0, 1fr);
   }
 }
 
@@ -5180,8 +5179,28 @@ body.is-resizing-layout .server-module-resizer::before {
     flex: 1;
   }
   .jeopardy-stage {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: minmax(0, 1fr) auto;
     padding: 12px;
     overflow: visible;
+  }
+  .jeopardy-scoreboard {
+    order: 2;
+    display: flex;
+    flex-direction: row;
+    flex-wrap: wrap;
+    overflow: visible;
+    padding-right: 0;
+  }
+  .jeopardy-team {
+    flex: 1 1 170px;
+  }
+  .jeopardy-add-team {
+    flex: 0 0 126px;
+    width: auto;
+  }
+  .jeopardy-board-shell {
+    order: 1;
   }
   .jeopardy-board {
     overflow-x: visible;

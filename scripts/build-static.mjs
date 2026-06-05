@@ -8,6 +8,7 @@ const outDir = join(root, "dist");
 
 const rootFiles = [
   "index.html",
+  "home.html",
   "jeopardy.html",
   "wordle.html",
   "styles.css",
