@@ -1331,6 +1331,68 @@
     transition: opacity 500ms cubic-bezier(0.4, 0, 0.2, 1) 100ms;
   }
   #root.ready { opacity: 1; }
+  html.home-start #boot { display: none; }
+  html.account-verify-start #boot { display: none; }
+  html.home-start #root {
+    opacity: 1;
+    transition: none;
+  }
+  html.account-verify-start #root {
+    opacity: 1;
+    transition: none;
+  }
+  .account-verify-page {
+    min-height: 100vh;
+    display: grid;
+    place-items: center;
+    padding: 24px;
+    background:
+      radial-gradient(circle at 50% 0%, color-mix(in oklab, var(--accent) 16%, transparent), transparent 34rem),
+      var(--bg-0);
+    color: var(--fg-0);
+    font-family: var(--font-ui);
+  }
+  .account-verify-panel {
+    width: min(420px, 100%);
+    text-align: center;
+  }
+  .account-verify-mark {
+    width: 44px;
+    height: 44px;
+    display: grid;
+    place-items: center;
+    margin: 0 auto 18px;
+    border-radius: 50%;
+    color: var(--bg-0);
+    background: var(--ok);
+    font-size: 26px;
+    font-weight: 700;
+  }
+  .account-verify-title {
+    margin: 0 0 8px;
+    font-size: 28px;
+    line-height: 1.1;
+    letter-spacing: 0;
+  }
+  .account-verify-copy {
+    margin: 0 0 20px;
+    color: var(--fg-1);
+    font-size: 14px;
+    line-height: 1.45;
+  }
+  .account-verify-action {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 38px;
+    padding: 0 16px;
+    border: 1px solid color-mix(in oklab, var(--accent) 70%, transparent);
+    border-radius: 7px;
+    color: var(--fg-0);
+    background: var(--accent-soft);
+    font-weight: 600;
+    text-decoration: none;
+  }
   #boot .boot-logo {
     width: 28px; height: 28px;
     background:
@@ -1565,6 +1627,14 @@
   }
 </style>
 <link rel="stylesheet" href="styles.css" />
+<script>
+  (function () {
+    var path = location.pathname.replace(/\/+$/, "") || "/";
+    var params = new URLSearchParams(location.search);
+    if (path === "/" && params.has("verifyEmail")) document.documentElement.classList.add("account-verify-start");
+    else if (path === "/") document.documentElement.classList.add("home-start");
+  })();
+</script>
 </head>
 <body>
 <div id="boot">
@@ -1577,6 +1647,7 @@
 <script>
   // Track real load progress by polling for each script's window-export
   (function () {
+    if (document.documentElement.classList.contains('home-start')) return;
     var modules = ['React', 'ReactDOM', 'Babel', 'useTweaks', 'Icon', 'Glyph', 'DeviceCatalog', 'OPT_Engine', 'OpenPTFormat', 'Palette', 'Topology', 'CLI', 'Inspector', 'PacketTracerImporter'];
     var fill = document.getElementById('boot-fill');
     function tick() {
@@ -1602,34 +1673,200 @@
 <script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" integrity="sha384-u6aeetuaXnQ38mYT8rp6sbXaQe3NL9t+IBXmnYxwkUI2Hw4bsp2Wvmx4yRQF1uAm" crossorigin="anonymous"></script>
 <script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" integrity="sha384-m08KidiNqLdpJqLq95G/LEi8Qvjl/xUYll3QILypMoQ65QorJ9Lvtp2RXYGBFj1y" crossorigin="anonymous"></script>
 
-<script type="text/babel" src="tweaks-panel.jsx"></script>
-<script type="text/babel" src="icons.jsx"></script>
-<script type="text/babel" src="device-glyphs.jsx"></script>
-<script type="text/babel" src="engine.jsx"></script>
-<script src="openpt-format.js"></script>
-<script type="text/babel" src="sim-services.jsx"></script>
-<script type="text/babel" src="protocol-runtime.jsx"></script>
-<script type="text/babel" src="palette.jsx"></script>
-<script type="text/babel" src="topology.jsx"></script>
-<script type="text/babel" src="cli.jsx"></script>
-<script type="text/babel" src="inspector.jsx"></script>
 <script>
-  window.OpenPTTwofishExports = {};
-  window.exports = window.OpenPTTwofishExports;
+  window.OpenPTDeferAppBoot = document.documentElement.classList.contains('home-start');
+  window.OpenPTModuleLoader = (function () {
+    var simPromise = null;
+    var jsxPlugins = ['transform-react-jsx', 'transform-block-scoping'];
+    var simModules = [
+      { src: 'tweaks-panel.jsx', jsx: true },
+      { src: 'engine.jsx', jsx: true },
+      { src: 'openpt-format.js' },
+      { src: 'sim-services.jsx', jsx: true },
+      { src: 'protocol-runtime.jsx', jsx: true },
+      { src: 'palette.jsx', jsx: true },
+      { src: 'topology.jsx', jsx: true },
+      { src: 'cli.jsx', jsx: true },
+      { src: 'inspector.jsx', jsx: true },
+      { before: function () {
+          window.OpenPTTwofishExports = {};
+          window.exports = window.OpenPTTwofishExports;
+        }
+      },
+      { src: 'vendor/twofish-ts.js' },
+      { after: function () {
+          window.OpenPTTwofish = window.OpenPTTwofishExports;
+          delete window.OpenPTTwofishExports;
+          delete window.exports;
+        }
+      },
+      { src: 'packet-tracer-importer.js' },
+      { src: 'sync-client.js' },
+      { src: 'quiz/questions-data.js' },
+      { src: 'jeopardy.jsx', jsx: true },
+      { src: 'wordle.jsx', jsx: true },
+      { src: 'app.jsx', jsx: true },
+    ];
+
+    function setBootProgress(done, total) {
+      var fill = document.getElementById('boot-fill');
+      if (fill) fill.style.width = Math.min(100, Math.round((done / total) * 100)) + '%';
+    }
+
+    function loadClassicScript(src) {
+      return new Promise(function (resolve, reject) {
+        var script = document.createElement('script');
+        script.src = src;
+        script.onload = resolve;
+        script.onerror = function () { reject(new Error('Failed to load ' + src)); };
+        document.body.appendChild(script);
+      });
+    }
+
+    async function loadJsxScript(src) {
+      var response = await fetch(src);
+      if (!response.ok) throw new Error('Failed to load ' + src);
+      var source = await response.text();
+      var compiled = Babel.transform(source, {
+        plugins: jsxPlugins,
+        sourceMaps: 'inline',
+        filename: src,
+      }).code;
+      (0, eval)(compiled + '\n//# sourceURL=' + location.origin + '/' + src);
+    }
+
+    async function runModule(mod) {
+      if (mod.before) mod.before();
+      if (mod.src) {
+        if (mod.jsx) await loadJsxScript(mod.src);
+        else await loadClassicScript(mod.src);
+      }
+      if (mod.after) mod.after();
+    }
+
+    async function loadSimulator() {
+      if (!simPromise) {
+        simPromise = (async function () {
+          for (var i = 0; i < simModules.length; i++) {
+            await runModule(simModules[i]);
+            setBootProgress(i + 1, simModules.length);
+          }
+        })();
+      }
+      return simPromise;
+    }
+
+    return { loadSimulator: loadSimulator, loadClassicScript: loadClassicScript, loadJsxScript: loadJsxScript };
+  })();
 </script>
-<script src="vendor/twofish-ts.js"></script>
 <script>
-  window.OpenPTTwofish = window.OpenPTTwofishExports;
-  delete window.OpenPTTwofishExports;
-  delete window.exports;
+  (async function () {
+    var isHomeStart = document.documentElement.classList.contains('home-start');
+    var rootEl = document.getElementById('root');
+    try {
+      await window.OpenPTModuleLoader.loadJsxScript('icons.jsx');
+      await window.OpenPTModuleLoader.loadJsxScript('device-glyphs.jsx');
+      await window.OpenPTModuleLoader.loadJsxScript('home.jsx');
+    } catch (err) {
+      console.error(err);
+      rootEl.innerHTML = '<div style="padding:24px;font-family:system-ui;color:#fca5a5">Could not load the OpenPT home screen. Refresh and try again.</div>';
+      return;
+    }
+
+    window.OpenPTRoot = window.OpenPTRoot || ReactDOM.createRoot(rootEl);
+
+    function renderFullApp(intent) {
+      if (!window.OpenPTApp) return;
+      window.OpenPTRoot.render(React.createElement(window.OpenPTApp, {
+        initialViewMode: 'app',
+        initialHomeAction: intent || 'lab'
+      }));
+    }
+
+    function renderAccountVerify(state) {
+      var copy = state === 'pending'
+        ? 'Checking your verification link.'
+        : state === 'error'
+          ? 'This verification link is invalid or expired.'
+          : 'Your OpenPT account is ready.';
+      var title = state === 'pending'
+        ? 'Verifying email...'
+        : state === 'error'
+          ? 'Verification failed'
+          : 'Email verified!';
+      var mark = state === 'error' ? '!' : state === 'pending' ? '...' : '✓';
+      var action = state === 'pending'
+        ? ''
+        : '<a class="account-verify-action" href="/">Sign in</a>';
+      rootEl.classList.add('ready');
+      rootEl.innerHTML = '<main class="account-verify-page"><section class="account-verify-panel">' +
+        '<div class="account-verify-mark">' + mark + '</div>' +
+        '<h1 class="account-verify-title">' + title + '</h1>' +
+        '<p class="account-verify-copy">' + copy + '</p>' +
+        action +
+        '</section></main>';
+    }
+
+    async function verifyAccountEmail() {
+      var params = new URLSearchParams(location.search);
+      var token = params.get('verifyEmail') || '';
+      if (!token) return;
+      renderAccountVerify('pending');
+      try {
+        await window.OpenPTModuleLoader.loadClassicScript('sync-client.js');
+        var client = new window.OpenPTSync.OpenPTSyncClient();
+        await client.verifyEmail(token);
+        params.delete('verifyEmail');
+        var nextQuery = params.toString();
+        history.replaceState(null, '', location.pathname + (nextQuery ? '?' + nextQuery : '') + (location.hash || ''));
+        renderAccountVerify('success');
+      } catch (err) {
+        console.error(err);
+        renderAccountVerify('error');
+      }
+    }
+
+    async function enterLab(intent) {
+      try {
+        await window.OpenPTModuleLoader.loadSimulator();
+        renderFullApp(intent);
+      } catch (err) {
+        console.error(err);
+        rootEl.innerHTML = '<div style="padding:24px;font-family:system-ui;color:#fca5a5">Could not load the OpenPT simulator. Refresh and try again.</div>';
+      }
+    }
+
+    if (document.documentElement.classList.contains('account-verify-start')) {
+      verifyAccountEmail();
+      return;
+    }
+
+    if (isHomeStart && window.HomePage) {
+      rootEl.classList.add('ready');
+      window.OpenPTRoot.render(React.createElement(window.HomePage, {
+        onEnterLab: function () { enterLab('lab'); },
+        onEnterStarter: function () { enterLab('starter'); },
+        onEnterImport: function () { enterLab('import'); },
+        onStartQuiz: function () { window.location.href = '/quiz/?view=library'; },
+        onStartJeopardy: function () { window.location.href = '/jeopardy'; },
+      }));
+      var preloadSimulator = function () {
+        window.OpenPTModuleLoader.loadSimulator().catch(function (err) {
+          console.error(err);
+        });
+      };
+      if ('requestIdleCallback' in window) {
+        window.requestIdleCallback(preloadSimulator, { timeout: 1200 });
+      } else {
+        window.setTimeout(preloadSimulator, 250);
+      }
+      return;
+    }
+
+    window.OpenPTDeferAppBoot = false;
+    window.OpenPTModuleLoader.loadSimulator();
+  })();
 </script>
-<script src="packet-tracer-importer.js"></script>
-<script src="sync-client.js"></script>
-<script src="quiz/questions-data.js"></script>
-<script type="text/babel" src="home.jsx"></script>
-<script type="text/babel" src="jeopardy.jsx"></script>
-<script type="text/babel" src="wordle.jsx"></script>
-<script type="text/babel" src="app.jsx"></script>
 <script defer src="/_vercel/insights/script.js"></script>
 </body>
 </html>
