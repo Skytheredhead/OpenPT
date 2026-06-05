@@ -244,6 +244,10 @@ const PracticeRunner = ({ state, setState, onFinish, onExit }) => {
             </div>
           )}
 
+          {state.answered && q.explanation && (
+            <QuestionExplanation q={q} />
+          )}
+
           <div className="qaction-row">
             {!state.answered && q.multi && (
               <button
@@ -504,8 +508,10 @@ const QuizRunner = ({ state, setState, onFinish, onExit }) => {
 // ────────────────────────────────────────────────────────────
 
 const QuestionExhibit = ({ q }) => {
-  if (q.exhibit?.type === 'topology') return <TopologyExhibit exhibit={q.exhibit} />;
-  if (q.code?.length) return <CodeExhibit lines={q.code} />;
+  const blocks = [];
+  if (q.exhibit?.type === 'topology') blocks.push(<TopologyExhibit key="topology" exhibit={q.exhibit} />);
+  if (q.code?.length) blocks.push(<CodeExhibit key="code" lines={q.code} />);
+  if (blocks.length) return <div className="q-exhibit-stack">{blocks}</div>;
   if (!q.hasExhibit) return null;
   return (
     <div className="qstage-exhibit">
@@ -514,6 +520,16 @@ const QuestionExhibit = ({ q }) => {
         <b>Exhibit attached · {q.exhibitCount} image{q.exhibitCount > 1 ? 's' : ''}</b>
         This imported item still needs a structured exhibit.
       </div>
+    </div>
+  );
+};
+
+const QuestionExplanation = ({ q }) => {
+  if (!q.explanation) return null;
+  return (
+    <div className="q-explanation">
+      <div className="q-explanation-label">Explanation</div>
+      <p>{q.explanation}</p>
     </div>
   );
 };
@@ -684,7 +700,7 @@ const MatchupQuestion = ({ q, selected, answered, onChange }) => {
         <div className="match-corrections">
           {(q.pairs || []).map(([term, correct]) => (
             selectedByTerm[term] && selectedByTerm[term] !== correct
-              ? <div key={term}>Correct: {term} -> {correct}</div>
+              ? <div key={term}>Correct: {term} {'->'} {correct}</div>
               : null
           ))}
         </div>
@@ -819,3 +835,6 @@ function selectedDescriptionsByTerm(q, selected) {
 
 window.PracticeRunner = PracticeRunner;
 window.QuizRunner = QuizRunner;
+window.QuestionExhibit = QuestionExhibit;
+window.CodeExhibit = CodeExhibit;
+window.TopologyExhibit = TopologyExhibit;

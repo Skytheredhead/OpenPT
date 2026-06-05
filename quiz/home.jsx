@@ -37,6 +37,17 @@ const CATALOG = [
       ]},
     ],
   },
+  {
+    id: 'ccna-b', label: 'CCNA-B',
+    exams: [
+      { id: 'quiz-01', label: 'Quiz 1', available: true, count: 74 },
+      { id: 'quiz-02', label: 'Quiz 2', available: true, count: 74 },
+      { id: 'quiz-03', label: 'Quiz 3', available: true, count: 74 },
+      { id: 'quiz-04', label: 'Quiz 4', available: false, count: 0 },
+      { id: 'quiz-05', label: 'Quiz 5', available: false, count: 0 },
+    ],
+    semesters: [],
+  },
 ];
 
 const QUIZ_LENGTHS = [15, 30];
@@ -57,7 +68,7 @@ function resolveLaunchSize(exam, requestedSize) {
 }
 
 const HomePage = ({ onLaunch, onLaunchStudy, studyDashboard, user }) => {
-  const [openCourses, setOpenCourses] = useState({ ccna: true });
+  const [openCourses, setOpenCourses] = useState({ ccna: true, 'ccna-b': true });
   // Open the live semester by default; collapse the rest
   const [openSems, setOpenSems] = useState({ 'ccna/sem-01': true, 'ccna/sem-02': true, 'ccna/sem-03': true });
   const [selected, setSelected] = useState('ccna/sem-01/m-1-3');
@@ -151,7 +162,7 @@ const HomePage = ({ onLaunch, onLaunchStudy, studyDashboard, user }) => {
                       </div>
                     );
                   })}
-                  {course.semesters.map(sem => {
+                  {(course.semesters || []).map(sem => {
                     const semKey = `${course.id}/${sem.id}`;
                     const semOpen = openSems[semKey];
                     return (

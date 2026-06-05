@@ -1106,6 +1106,40 @@ function vlanOnIngress(ifc) {
   return ifc?.mode === "trunk" ? (ifc.nativeVlan || 1) : (ifc?.vlan || 1);
 }
 
+function linkEndpointStatus(devices = {}, link = {}, side = "a", options = {}) {
+  const localId = side === "b" ? link.b : link.a;
+  const peerId = side === "b" ? link.a : link.b;
+  const localIface = side === "b" ? link.bi : link.ai;
+  const peerIface = side === "b" ? link.ai : link.bi;
+  const local = devices?.[localId];
+  const peer = devices?.[peerId];
+  const localIf = local?.interfaces?.[localIface];
+  const peerIf = peer?.interfaces?.[peerIface];
+  const activeIds = options.activeLinkIds;
+  const active = typeof activeIds?.has === "function"
+    ? activeIds.has(link.id)
+    : Array.isArray(activeIds) && activeIds.includes(link.id);
+  const result = (state, label, shape, color) => ({ state, label, shape, color });
+  const down = (label = "Physical link down") => result("down", label, "triangle-down", "red");
+
+  if (!link || !local || !peer || !localIface || !peerIface) return down("Missing link endpoint");
+  if (!localIf || !peerIf) return down("Missing interface");
+  if (link.up === false) return down("Physical link down");
+  if (local.powered === false || peer.powered === false) return down("Device powered off");
+  if (localIf.admUp === false || peerIf.admUp === false) return down("Interface administratively down");
+  if (localIf.up === false || peerIf.up === false) return down("Interface down");
+
+  const media = cableCompatibility(local, localIface, peer, peerIface, link.type || "auto");
+  if (!media.ok) return down(media.reason || "Wrong cable or media");
+
+  const blocked = localIf.stp?.state === "blocking" ||
+    Object.keys(local.runtime?.stp?.blocked || {}).some((key) => key.endsWith(`:${localIface}`));
+  if (isSwitchLike(local) && blocked) return result("blocking", "STP blocking", "circle", "amber");
+  if (link.type === "console") return result("console", "Console connected", "circle", "black");
+  if (active) return result("activity", "Link activity", "triangle-up", "green");
+  return result("up", "Physical link up", "triangle-up", "green");
+}
+
 function validateTopology(devices = {}, links = []) {
   const issues = [];
   const byIp = new Map();
@@ -2200,6 +2234,7 @@ window.OPT_Engine = {
   lookupIpv6Route, ifaceForIpv6Via,
   dot1qVlanForIface, parentIfaceForTaggedEgress,
   validateTopology,
+  linkEndpointStatus,
   normalizeCableType, cableTypeLabel, ifacePortInfo, cableFitsPort, recommendedCableTypeForPorts, cableCompatibility,
   isRouterLike, isSwitchLike, isHostLike,
 };

@@ -112,3 +112,39 @@ test("Packet Tracer link import resolves endpoint refs when device names contain
   assert.equal(topology.links[0].bi, "GigabitEthernet0/1");
   assert.equal(topology.links[0].packetTracer.toRef, "save-ref-id:isp");
 });
+
+test("Packet Tracer functional link status maps to OpenPT link state unless explicit", async () => {
+  const OpenPTFormat = await loadOpenPTFormat();
+  const activity = {
+    devices: [
+      { name: "Router0", rawName: "Router0", saveRefId: "r0", memAddr: "100", kind: "Router", model: "1941", x: 10, y: 20 },
+      { name: "Switch0", rawName: "Switch0", saveRefId: "s0", memAddr: "200", kind: "Switch", model: "2960-24TT", x: 30, y: 40 },
+    ],
+    links: [
+      {
+        from: "Router0:GigabitEthernet0/0",
+        to: "Switch0:FastEthernet0/1",
+        fromRef: "r0",
+        toRef: "s0",
+        type: "eStraightThrough",
+        functional: "false",
+        ports: ["GigabitEthernet0/0", "FastEthernet0/1"],
+      },
+      {
+        from: "Router0:GigabitEthernet0/1",
+        to: "Switch0:FastEthernet0/2",
+        fromRef: "r0",
+        toRef: "s0",
+        type: "eStraightThrough",
+        functional: "false",
+        up: true,
+        ports: ["GigabitEthernet0/1", "FastEthernet0/2"],
+      },
+    ],
+  };
+
+  const topology = OpenPTFormat.buildTopologyFromPacketTracer(activity);
+  assert.equal(topology.links.length, 2);
+  assert.equal(topology.links[0].up, false);
+  assert.equal(topology.links[1].up, true);
+});

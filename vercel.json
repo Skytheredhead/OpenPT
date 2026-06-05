@@ -41,6 +41,14 @@
       "destination": "/index.html"
     },
     {
+      "source": "/quiz/ccna-b-diagrams",
+      "destination": "/quiz/index.html"
+    },
+    {
+      "source": "/quiz/ccna-b-diagrams/",
+      "destination": "/quiz/index.html"
+    },
+    {
       "source": "/share/:token",
       "destination": "/index.html"
     },

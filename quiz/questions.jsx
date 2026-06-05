@@ -28,7 +28,10 @@
         hasExhibit: !!enriched.e,
         exhibit: enriched.exhibit || null,
         code: enriched.code || null,
+        explanation: enriched.x || enriched.explanation || '',
+        sourceScreenshots: enriched.sourceScreenshots || [],
         pairs: enriched.pairs || null,
+        lab: !!enriched.lab,
         page: enriched.page || null,
       });
     });

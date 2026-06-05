@@ -15,6 +15,7 @@ const accentMap = {
 
 const STORAGE_KEY = 'openpt.quiz.state.v2';
 const FORCE_LIBRARY = new URLSearchParams(window.location.search).get('view') === 'library';
+const FORCE_DIAGRAMS = window.location.pathname.replace(/\/+$/, '').endsWith('/quiz/ccna-b-diagrams');
 
 function loadPersisted() {
   try {
@@ -46,7 +47,7 @@ const App = () => {
   const [t, setTweak] = tweaks;
   const accent = accentMap[t.accent] || accentMap.cyan;
 
-  const [route, setRoute] = useStateA('home');
+  const [route, setRoute] = useStateA(FORCE_DIAGRAMS ? 'ccna-b-diagrams' : 'home');
   const [outgoingRoute, setOutgoingRoute] = useStateA(null);
   const [transitionKind, setTransitionKind] = useStateA('default'); // 'default' | 'exit'
   const outgoingTimerRef = React.useRef(null);
@@ -77,7 +78,7 @@ const App = () => {
 
   // Restore on mount
   useEffectA(() => {
-    if (FORCE_LIBRARY) return;
+    if (FORCE_LIBRARY || FORCE_DIAGRAMS) return;
     const saved = loadPersisted();
     if (saved) {
       setState(saved);
@@ -219,11 +220,21 @@ const App = () => {
     const onExitF = ctx.interactive ? ctx.exitToHome : (() => {});
     const onRestartF = ctx.interactive ? ctx.restartFromResults : (() => {});
     const onStudyF = ctx.interactive ? ctx.launchStudy : (() => {});
+    if (r === 'ccna-b-diagrams') {
+      const DiagramPage = window.CcnaBDiagramsPage;
+      return DiagramPage ? <DiagramPage onExit={onExitF} /> : null;
+    }
     if (r === 'home') return <HomePage onLaunch={ctx.interactive ? ctx.launchQuiz : (() => {})} onLaunchStudy={onStudyF} studyDashboard={ctx.studyDashboard} user={ctx.user} />;
     if (r === 'practice' && ctx.state) return <PracticeRunner state={ctx.state} setState={setStateF} onFinish={onFinishF} onExit={onExitF} />;
     if (r === 'quiz' && ctx.state) return <QuizRunner state={ctx.state} setState={setStateF} onFinish={onFinishF} onExit={onExitF} />;
-    if (r === 'study' && ctx.state) return <StudyRunner state={ctx.state} setState={setStateF} client={ctx.client} onFinish={onFinishF} onExit={onExitF} />;
-    if (r === 'results' && ctx.state?.mode === 'study') return <StudyResultsPage state={ctx.state} onRestart={onRestartF} onExit={onExitF} />;
+    if (r === 'study' && ctx.state) {
+      const Runner = window.StudyRunner;
+      return Runner ? <Runner state={ctx.state} setState={setStateF} client={ctx.client} onFinish={onFinishF} onExit={onExitF} /> : null;
+    }
+    if (r === 'results' && ctx.state?.mode === 'study') {
+      const StudyResults = window.StudyResultsPage;
+      return StudyResults ? <StudyResults state={ctx.state} onRestart={onRestartF} onExit={onExitF} /> : null;
+    }
     if (r === 'results' && ctx.state) return <ResultsPage state={ctx.state} onRestart={onRestartF} onExit={onExitF} />;
     return null;
   }

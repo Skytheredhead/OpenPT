@@ -1,4 +1,4 @@
-// jeopardy.jsx — Class-friendly Jeopardy study game backed by quiz/questions-data.js.
+// jeopardy.jsx — Class-friendly Jeopardy study game backed by quiz questions.
 // Exposes window.JeopardyPage.
 
 const { useEffect: useJeopardyEffect, useMemo: useJeopardyMemo, useRef: useJeopardyRef, useState: useJeopardyState } = React;
@@ -10,6 +10,7 @@ const JEOPARDY_MUSIC_VOLUME = 0.38;
 const JEOPARDY_SFX_VOLUME = 0.58;
 const JEOPARDY_TIMER_WARNING_VOLUME = 0.36;
 const JEOPARDY_AUDIO_FADE_MS = 520;
+const JEOPARDY_CARD_CLOSE_MS = 280;
 const JEOPARDY_SFX = {
   tileOpen: "/jeopardy-sfx/tile-open.mp3",
   correct: "/jeopardy-sfx/correct.mp3",
@@ -24,32 +25,97 @@ const JEOPARDY_TOPIC_RULES = [
   {
     id: "routing",
     title: "Routing",
-    terms: ["ospf", "eigrp", "rip", "bgp", "route", "routing", "router-id", "router id", "neighbor", "adjacency", "lsdb", "spf"],
+    terms: ["ospf", "eigrp", "rip", "bgp", "route", "routing", "router-id", "router id", "neighbor", "adjacency", "lsdb", "spf", "administrative distance", "floating static", "default route", "next-hop"],
   },
   {
     id: "security",
     title: "ACLs & Security",
-    terms: ["acl", "access-list", "access control", "permit", "deny", "ssh", "aaa", "attack", "malware", "security", "ipsec", "vpn", "ssl"],
+    terms: ["acl", "access-list", "access control", "permit", "deny", "ssh", "aaa", "attack", "malware", "security", "ipsec", "vpn", "ssl", "firewall", "authentication", "authorization", "accounting"],
   },
   {
     id: "switching",
     title: "Switching",
-    terms: ["switch", "vlan", "trunk", "stp", "spanning-tree", "etherchannel", "portfast", "native vlan", "svi", "catalyst"],
+    terms: ["switch", "vlan", "trunk", "stp", "spanning-tree", "etherchannel", "portfast", "native vlan", "svi", "catalyst", "switchport", "dtp", "vtp"],
   },
   {
     id: "addressing",
     title: "Addressing",
-    terms: ["ipv6", "ipv4", "subnet", "mask", "wildcard", "dhcp", "dns", "nat", "pat", "address", "default gateway"],
+    terms: ["ipv6", "ipv4", "subnet", "mask", "wildcard", "dhcp", "dns", "nat", "pat", "address", "default gateway", "prefix", "slaac"],
   },
   {
     id: "services",
     title: "Services",
-    terms: ["snmp", "syslog", "ntp", "tftp", "ftp", "qos", "voice", "video", "traffic", "wan", "cloud", "virtualization", "hypervisor"],
+    terms: ["snmp", "syslog", "ntp", "tftp", "ftp", "qos", "voice", "video", "traffic", "wan", "cloud", "virtualization", "hypervisor", "logging"],
   },
   {
     id: "automation",
     title: "Automation",
     terms: ["api", "rest", "json", "xml", "yaml", "sdn", "controller", "automation", "northbound", "southbound", "aci"],
+  },
+  {
+    id: "wireless",
+    title: "Wireless",
+    terms: ["wireless", "802.11", "ssid", "ap", "access point", "wlan", "channel", "roaming", "controller", "wap"],
+  },
+  {
+    id: "vlans",
+    title: "VLANs",
+    terms: ["vlan", "trunk", "native vlan", "inter-vlan", "router-on-a-stick", "switchport access", "voice vlan"],
+  },
+  {
+    id: "ports",
+    title: "Ports",
+    terms: ["port", "ports", "interface", "fastethernet", "gigabitethernet", "serial", "duplex", "speed", "err-disabled"],
+  },
+  {
+    id: "redundancy",
+    title: "Redundancy",
+    terms: ["hsrp", "vrrp", "glbp", "standby", "active router", "virtual ip", "first-hop", "redundancy"],
+  },
+  {
+    id: "etherchannel",
+    title: "EtherChannel",
+    terms: ["etherchannel", "channel-group", "pagp", "lacp", "port-channel", "bundle"],
+  },
+  {
+    id: "stp",
+    title: "STP",
+    terms: ["stp", "spanning-tree", "root bridge", "bpdu", "portfast", "blocking", "forwarding"],
+  },
+  {
+    id: "nat",
+    title: "NAT",
+    terms: ["nat", "pat", "inside local", "inside global", "outside local", "outside global", "translation", "overload"],
+  },
+  {
+    id: "qos",
+    title: "QoS",
+    terms: ["qos", "queue", "queuing", "marking", "classification", "policing", "shaping", "dscp", "cos"],
+  },
+  {
+    id: "management",
+    title: "Management",
+    terms: ["snmp", "syslog", "ntp", "cdp", "lldp", "logging", "banner", "password", "enable secret"],
+  },
+  {
+    id: "wan",
+    title: "WAN",
+    terms: ["wan", "ppp", "pppoe", "mpls", "leased line", "t1", "t3", "e1", "e3", "serial", "metro ethernet"],
+  },
+  {
+    id: "troubleshooting",
+    title: "Troubleshooting",
+    terms: ["troubleshoot", "issue", "problem", "cannot", "unable", "show", "debug", "mismatch", "fails"],
+  },
+  {
+    id: "ipv6",
+    title: "IPv6",
+    terms: ["ipv6", "link-local", "global unicast", "eui-64", "slaac", "neighbor discovery", "prefix"],
+  },
+  {
+    id: "dhcp-dns",
+    title: "DHCP & DNS",
+    terms: ["dhcp", "dns", "lease", "pool", "excluded-address", "helper-address", "domain"],
   },
 ];
 
@@ -78,21 +144,26 @@ function normalizeJeopardyQuestion(item, index) {
   const options = Array.isArray(item?.o) ? item.o.map((option) => String(option || "").trim()).filter(Boolean) : [];
   const answers = Array.isArray(item?.a) ? item.a : [item?.a].filter((value) => Number.isInteger(value));
   const answerText = answers.map((answerIndex) => options[answerIndex]).filter(Boolean);
+  const codeLines = Array.isArray(item?.code) ? item.code.map((line) => String(line || "")) : [];
   return {
-    id: `${item?.src || "quiz"}-${item?.si || item?.s || index}`,
+    id: `${item?.bank || item?.src || "quiz"}-${item?.si || item?.s || index}`,
     prompt: String(item?.q || "").trim(),
     options,
     answerIndexes: answers,
     answerText,
-    source: item?.src || "Quiz bank",
+    source: item?.src || item?.bank || "Quiz bank",
     sourceIndex: item?.si || item?.s || index + 1,
     multi: !!item?.m || answers.length > 1,
     exhibit: !!item?.e,
+    codeLines,
+    explanation: String(item?.x || item?.explanation || "").trim(),
+    course: item?.course || "",
+    exam: item?.exam || "",
   };
 }
 
 function questionTopicText(question) {
-  return `${question.prompt} ${question.options.join(" ")}`.toLowerCase();
+  return `${question.prompt} ${question.options.join(" ")} ${question.codeLines.join(" ")} ${question.explanation}`.toLowerCase();
 }
 
 function topicScore(question, topic) {
@@ -113,6 +184,20 @@ function defaultJeopardyTeams() {
   ];
 }
 
+function teamSortRank(team, index) {
+  const nameRank = String(team?.name || "").match(/^team\s+(\d+)$/i)?.[1];
+  const idRank = String(team?.id || "").match(/^team-(\d+)$/i)?.[1];
+  const rank = Number(nameRank || idRank);
+  return Number.isFinite(rank) && rank > 0 ? rank : 1000 + index;
+}
+
+function orderJeopardyTeams(teams) {
+  return teams
+    .map((team, index) => ({ team, index, rank: teamSortRank(team, index) }))
+    .sort((a, b) => a.rank - b.rank || a.index - b.index)
+    .map((item) => item.team);
+}
+
 function todaySeed() {
   const date = new Date();
   return `${date.getFullYear()}-${date.getMonth() + 1}-${date.getDate()}`;
@@ -122,50 +207,78 @@ function buildJeopardyBoard(rawQuestions, gameSeed, deckId) {
   const normalized = (rawQuestions || [])
     .map(normalizeJeopardyQuestion)
     .filter((question) => question.prompt && question.answerText.length);
-  const decked = normalized.filter((question) => deckId === "all" || String(question.source || "").includes(deckId));
-  const pool = decked.length >= 25 ? decked : normalized;
+  const decked = normalized.filter((question) => deckId === "all" || String(question.source || "") === deckId);
+  const pool = decked.length >= JEOPARDY_POINTS.length ? decked : normalized;
   const used = new Set();
-  const topics = jeopardyShuffle(JEOPARDY_TOPIC_RULES, `${gameSeed}:${deckId}:topics`).slice(0, 5);
-  const columns = topics.map((topic) => {
-    const ranked = pool
-      .filter((question) => topicScore(question, topic) > 0)
-      .sort((a, b) => questionDifficulty(a) - questionDifficulty(b));
-    const fallback = pool
-      .filter((question) => !ranked.includes(question))
-      .sort((a, b) => questionDifficulty(a) - questionDifficulty(b));
-    const candidates = jeopardyShuffle([...ranked, ...fallback], `${gameSeed}:${deckId}:${topic.id}`);
-    const selected = [];
-    for (const question of candidates) {
-      if (selected.length >= JEOPARDY_POINTS.length) break;
-      if (used.has(question.id)) continue;
-      selected.push(question);
-      used.add(question.id);
-    }
-    while (selected.length < JEOPARDY_POINTS.length && pool.length) {
-      const next = jeopardyShuffle(pool, `${gameSeed}:fill:${topic.id}:${selected.length}`).find((question) => !used.has(question.id));
-      if (!next) break;
-      selected.push(next);
-      used.add(next.id);
-    }
+  const columns = [];
+  const topics = jeopardyShuffle(JEOPARDY_TOPIC_RULES, `${gameSeed}:${deckId}:topics`);
+  const makeColumn = (topic, selected, columnIndex) => {
     const sorted = [...selected].sort((a, b) => questionDifficulty(a) - questionDifficulty(b));
     return {
       ...topic,
       clues: JEOPARDY_POINTS.map((points, index) => ({
-        id: `${topic.id}-${points}`,
+        id: `${topic.id}-${columnIndex}-${points}`,
         points,
         category: topic.title,
-        question: sorted[index] || selected[index],
+        question: sorted[index],
       })).filter((clue) => clue.question),
     };
-  }).filter((column) => column.clues.length);
-  return columns.slice(0, 5);
+  };
+
+  for (const topic of topics) {
+    const ranked = pool
+      .filter((question) => !used.has(question.id) && topicScore(question, topic) > 0)
+      .sort((a, b) => questionDifficulty(a) - questionDifficulty(b));
+    const candidates = jeopardyShuffle(ranked, `${gameSeed}:${deckId}:${topic.id}`);
+    if (candidates.length < JEOPARDY_POINTS.length) continue;
+    const selected = candidates.slice(0, JEOPARDY_POINTS.length);
+    selected.forEach((question) => used.add(question.id));
+    columns.push(makeColumn(topic, selected, columns.length));
+  }
+
+  const leftovers = jeopardyShuffle(
+    pool.filter((question) => !used.has(question.id)),
+    `${gameSeed}:${deckId}:leftovers`
+  );
+  for (let index = 0; index + JEOPARDY_POINTS.length <= leftovers.length; index += JEOPARDY_POINTS.length) {
+    const selected = leftovers.slice(index, index + JEOPARDY_POINTS.length);
+    selected.forEach((question) => used.add(question.id));
+    columns.push(makeColumn({
+      id: `mixed-${Math.floor(index / JEOPARDY_POINTS.length) + 1}`,
+      title: `Mixed Review ${Math.floor(index / JEOPARDY_POINTS.length) + 1}`,
+      terms: [],
+    }, selected, columns.length));
+  }
+
+  if (!columns.length) {
+    const fallback = jeopardyShuffle(pool, `${gameSeed}:${deckId}:fallback`);
+    for (let index = 0; index + JEOPARDY_POINTS.length <= fallback.length; index += JEOPARDY_POINTS.length) {
+      columns.push(makeColumn({
+        id: `review-${Math.floor(index / JEOPARDY_POINTS.length) + 1}`,
+        title: `Review ${Math.floor(index / JEOPARDY_POINTS.length) + 1}`,
+        terms: [],
+      }, fallback.slice(index, index + JEOPARDY_POINTS.length), columns.length));
+    }
+  }
+
+  return jeopardyShuffle(columns, `${gameSeed}:${deckId}:columns`);
+}
+
+function ccnaBVersionNumber(source) {
+  return Number(String(source || "").match(/quiz\s+(\d+)/i)?.[1] || 0);
+}
+
+function versionDeckTitle(source) {
+  const version = ccnaBVersionNumber(source);
+  return version ? `Version ${version}` : String(source || "Version");
 }
 
 function makeDeckOptions(rawQuestions) {
-  const sources = [...new Set((rawQuestions || []).map((item) => item?.src).filter(Boolean))];
+  const sources = [...new Set((rawQuestions || []).map((item) => item?.src).filter(Boolean))]
+    .sort((a, b) => ccnaBVersionNumber(a) - ccnaBVersionNumber(b) || String(a).localeCompare(String(b)));
   return [
-    { id: "all", title: "All quiz questions" },
-    ...sources.slice(0, 10).map((source) => ({ id: source, title: source })),
+    { id: "all", title: "All Versions" },
+    ...sources.map((source) => ({ id: source, title: versionDeckTitle(source) })),
   ];
 }
 
@@ -197,7 +310,9 @@ function JeopardyPage() {
     }
   });
   const [activeClue, setActiveClue] = useJeopardyState(null);
-  const [choicesShown, setChoicesShown] = useJeopardyState(false);
+  const [clueClosing, setClueClosing] = useJeopardyState(false);
+  const [settingsOpen, setSettingsOpen] = useJeopardyState(false);
+  const [deckMenuOpen, setDeckMenuOpen] = useJeopardyState(false);
   const [answerShown, setAnswerShown] = useJeopardyState(false);
   const [timer, setTimer] = useJeopardyState(30);
   const [timerRunning, setTimerRunning] = useJeopardyState(false);
@@ -220,21 +335,30 @@ function JeopardyPage() {
   const sfxRef = useJeopardyRef({});
   const audioFadeHandlesRef = useJeopardyRef(new WeakMap());
   const timerWarningPlayedRef = useJeopardyRef(false);
+  const clueCloseTimerRef = useJeopardyRef(null);
 
   const board = useJeopardyMemo(() => buildJeopardyBoard(rawQuestions, seed, deckId), [rawQuestions.length, seed, deckId]);
   const allClues = useJeopardyMemo(() => board.flatMap((column) => column.clues), [board]);
+  const orderedTeams = useJeopardyMemo(() => orderJeopardyTeams(teams), [teams]);
+  const selectedDeck = decks.find((deck) => deck.id === deckId) || decks[0] || { id: "all", title: "All Versions" };
   const finalClue = useJeopardyMemo(() => {
     const candidates = allClues.filter((clue) => !answered[clue.id]);
     return jeopardyShuffle(candidates.length ? candidates : allClues, `${seed}:final`)[0] || null;
   }, [allClues, answered, seed]);
-  const remaining = allClues.filter((clue) => !answered[clue.id]).length;
-
   useJeopardyEffect(() => {
     const root = document.getElementById("root");
     const boot = document.getElementById("boot");
     root?.classList.add("ready");
     boot?.remove();
   }, []);
+
+  useJeopardyEffect(() => () => {
+    if (clueCloseTimerRef.current) window.clearTimeout(clueCloseTimerRef.current);
+  }, []);
+
+  useJeopardyEffect(() => {
+    if (!decks.some((deck) => deck.id === deckId)) setDeckId("all");
+  }, [deckId, decks]);
 
   useJeopardyEffect(() => {
     localStorage.setItem(JEOPARDY_STORAGE_KEY, JSON.stringify({ deckId, seed, teams, answered, musicEnabled, finalScored }));
@@ -375,21 +499,32 @@ function JeopardyPage() {
 
   const openClue = (clue) => {
     if (!clue || answered[clue.id]) return;
+    setSettingsOpen(false);
+    setDeckMenuOpen(false);
+    if (clueCloseTimerRef.current) {
+      window.clearTimeout(clueCloseTimerRef.current);
+      clueCloseTimerRef.current = null;
+    }
+    setClueClosing(false);
     setActiveClue(clue);
-    setChoicesShown(false);
     setAnswerShown(false);
     setTimer(30);
-    setTimerRunning(true);
+    setTimerRunning(false);
     timerWarningPlayedRef.current = false;
     playSfx("tileOpen");
-    restartMusic();
   };
 
   const closeClue = ({ fadeSfx = true } = {}) => {
-    setActiveClue(null);
     setTimerRunning(false);
     stopMusic();
     if (fadeSfx) fadeOutSfx();
+    setClueClosing(true);
+    if (clueCloseTimerRef.current) window.clearTimeout(clueCloseTimerRef.current);
+    clueCloseTimerRef.current = window.setTimeout(() => {
+      setActiveClue(null);
+      setClueClosing(false);
+      clueCloseTimerRef.current = null;
+    }, JEOPARDY_CARD_CLOSE_MS);
   };
 
   const award = (teamId, delta, clue = activeClue) => {
@@ -423,8 +558,10 @@ function JeopardyPage() {
   };
 
   const resetBoard = () => {
+    setDeckMenuOpen(false);
     setAnswered({});
     setActiveClue(null);
+    setClueClosing(false);
     setFinalOpen(false);
     setFinalAnswerShown(false);
     setWagers({});
@@ -434,9 +571,12 @@ function JeopardyPage() {
   };
 
   const newGame = () => {
+    setSettingsOpen(false);
+    setDeckMenuOpen(false);
     setSeed(`${todaySeed()}-${Date.now()}`);
     setAnswered({});
     setActiveClue(null);
+    setClueClosing(false);
     setFinalOpen(false);
     setFinalAnswerShown(false);
     setWagers({});
@@ -448,8 +588,10 @@ function JeopardyPage() {
 
   const changeDeck = (nextDeckId) => {
     setDeckId(nextDeckId);
+    setDeckMenuOpen(false);
     setAnswered({});
     setActiveClue(null);
+    setClueClosing(false);
     setFinalOpen(false);
     setFinalAnswerShown(false);
     setWagers({});
@@ -492,38 +634,70 @@ function JeopardyPage() {
           <span>OpenPT</span>
         </a>
         <div className="jeopardy-controls">
-          <div className="jeopardy-header-stat">
-            <strong>{remaining}</strong>
-            <span>clues left</span>
-          </div>
-          <label className="jeopardy-select-wrap">
-            <span>Set</span>
-            <select value={deckId} onChange={(event) => changeDeck(event.target.value)}>
-              {decks.map((deck) => <option key={deck.id} value={deck.id}>{deck.title}</option>)}
-            </select>
-          </label>
-          <button type="button" className="jeopardy-btn" onClick={resetBoard}>Clear Board</button>
-          <button type="button" className="jeopardy-btn" onClick={resetScores}>Reset Scores</button>
-          <button type="button" className="jeopardy-btn" onClick={() => { setFinalAnswerShown(false); setFinalOpen(true); playSfx("finalSting"); restartMusic(); }}>Final Jeopardy</button>
           <button
             type="button"
-            className={`jeopardy-btn ${musicEnabled ? "active" : ""}`}
-            onClick={() => {
-              setMusicEnabled((enabled) => {
-                if (enabled) fadeOutAllAudio();
-                return !enabled;
-              });
-            }}
+            className={`jeopardy-icon-btn ${settingsOpen ? "active" : ""}`}
+            aria-label="Settings"
+            aria-expanded={settingsOpen}
+            onClick={() => setSettingsOpen((open) => !open)}
           >
-            Audio {musicEnabled ? "On" : "Off"}
+            <span aria-hidden="true">⚙</span>
           </button>
           <button type="button" className="jeopardy-btn primary" onClick={newGame}>New Game</button>
+          {settingsOpen && (
+            <div className="jeopardy-settings-card">
+              <label className="jeopardy-setting-label">Set</label>
+              <div className="jeopardy-select-wrap custom">
+                <button
+                  type="button"
+                  className="jeopardy-select-button"
+                  aria-haspopup="listbox"
+                  aria-expanded={deckMenuOpen}
+                  onClick={() => setDeckMenuOpen((open) => !open)}
+                >
+                  <span>{selectedDeck.title}</span>
+                  <span className="jeopardy-select-arrow" aria-hidden="true"/>
+                </button>
+                {deckMenuOpen && (
+                  <div className="jeopardy-select-menu" role="listbox">
+                    {decks.map((deck) => (
+                      <button
+                        type="button"
+                        role="option"
+                        aria-selected={deck.id === deckId}
+                        className={deck.id === deckId ? "selected" : ""}
+                        key={deck.id}
+                        onClick={() => changeDeck(deck.id)}
+                      >
+                        {deck.title}
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+              <button type="button" className="jeopardy-btn" onClick={resetBoard}>Clear Board</button>
+              <button type="button" className="jeopardy-btn" onClick={resetScores}>Reset Scores</button>
+              <button type="button" className="jeopardy-btn" onClick={() => { setFinalAnswerShown(false); setFinalOpen(true); playSfx("finalSting"); restartMusic(); }}>Final Jeopardy</button>
+              <button
+                type="button"
+                className={`jeopardy-btn ${musicEnabled ? "active" : ""}`}
+                onClick={() => {
+                  setMusicEnabled((enabled) => {
+                    if (enabled) fadeOutAllAudio();
+                    return !enabled;
+                  });
+                }}
+              >
+                Audio {musicEnabled ? "On" : "Off"}
+              </button>
+            </div>
+          )}
         </div>
       </header>
 
       <main className="jeopardy-stage">
         <section className="jeopardy-scoreboard" aria-label="Teams">
-          {teams.map((team) => (
+          {orderedTeams.map((team) => (
             <div className="jeopardy-team" key={team.id}>
               <input
                 aria-label={`${team.name} name`}
@@ -567,37 +741,45 @@ function JeopardyPage() {
       </main>
 
       {activeClue && (
-        <div className="jeopardy-modal-backdrop" role="dialog" aria-modal="true" aria-labelledby="jeopardy-clue-title">
-          <div className={`jeopardy-modal ${choicesShown ? "choices-visible" : ""}`}>
+        <div className={`jeopardy-modal-backdrop ${clueClosing ? "closing" : "opening"}`} role="dialog" aria-modal="true" aria-labelledby="jeopardy-clue-title">
+          <div className={`jeopardy-modal quiz-card-mode ${answerShown ? "answer-visible" : ""} ${clueClosing ? "closing" : "opening"}`}>
             <div className="jeopardy-modal-head">
               <div>
-                <div className="jeopardy-modal-kicker">{activeClue.category} for {activeClue.points}</div>
-                <h2 id="jeopardy-clue-title">{activeClue.question.prompt}</h2>
+                <h2 id="jeopardy-clue-title">{activeClue.category} for {activeClue.points}</h2>
               </div>
-              <button type="button" className="jeopardy-close" onClick={closeClue}>Close</button>
+              <button type="button" className="jeopardy-close" aria-label="Close" onClick={() => closeClue()}>
+                <span aria-hidden="true">&times;</span>
+              </button>
             </div>
 
-            <div className="jeopardy-timer-row">
-              <div className={`jeopardy-timer ${timer <= 5 ? "low" : ""}`}>
-                <span style={{ width: `${Math.max(0, timer / 30) * 100}%` }}/>
+            <div className="jeopardy-awards top">
+              {orderedTeams.map((team) => (
+                <div className="jeopardy-award-team" key={team.id}>
+                  <span>{team.name}</span>
+                  <button type="button" onClick={() => award(team.id, activeClue.points)}>Correct</button>
+                  <button type="button" onClick={() => award(team.id, -activeClue.points)}>Incorrect</button>
+                </div>
+              ))}
+              <div className="jeopardy-awards-actions">
+                <button type="button" className="jeopardy-btn primary" onClick={() => { playSfx("answerReveal"); setAnswerShown(true); stopMusic(); }}>Reveal Answer</button>
+                <button type="button" className="jeopardy-btn" onClick={() => {
+                  setAnswered((items) => ({ ...items, [activeClue.id]: { skipped: true, at: Date.now() } }));
+                  closeClue();
+                }}>No Score</button>
               </div>
-              <strong>{timer}s</strong>
-              <button type="button" onClick={() => setTimerRunning((value) => !value)}>{timerRunning ? "Pause" : "Start"}</button>
-              <button type="button" onClick={() => { setTimer(30); timerWarningPlayedRef.current = false; setTimerRunning(true); }}>Reset</button>
             </div>
 
             <div className="jeopardy-modal-body">
-              {activeClue.question.exhibit && (
-                <div className="jeopardy-note">This quiz-bank item references an exhibit from the original practice set.</div>
-              )}
-              <div className="jeopardy-reveal-row">
-                <button type="button" className="jeopardy-btn" onClick={() => setChoicesShown((value) => !value)}>
-                  {choicesShown ? "Hide Choices" : "Show Choices"}
-                </button>
-                <button type="button" className="jeopardy-btn primary" onClick={() => { playSfx("answerReveal"); setAnswerShown(true); stopMusic(); }}>Reveal Answer</button>
-              </div>
+              <div className="jeopardy-question-card">
+                <h3>{activeClue.question.prompt}</h3>
 
-              {choicesShown && (
+                {activeClue.question.exhibit && !activeClue.question.codeLines.length && (
+                  <div className="jeopardy-note">This quiz-bank item references an exhibit from the original practice set.</div>
+                )}
+                {activeClue.question.codeLines.length > 0 && (
+                  <pre className="jeopardy-code"><code>{activeClue.question.codeLines.join("\n")}</code></pre>
+                )}
+
                 <ol className="jeopardy-choice-list">
                   {activeClue.question.options.map((option, index) => (
                     <li key={`${activeClue.id}-option-${index}`} className={answerShown && activeClue.question.answerIndexes.includes(index) ? "correct" : ""}>
@@ -606,28 +788,11 @@ function JeopardyPage() {
                     </li>
                   ))}
                 </ol>
-              )}
 
-              {answerShown && (
-                <div className="jeopardy-answer">
-                  <span>Correct answer</span>
-                  <strong>{activeClue.question.answerText.join(", ")}</strong>
-                </div>
-              )}
-            </div>
-
-            <div className="jeopardy-awards">
-              {teams.map((team) => (
-                <div className="jeopardy-award-team" key={team.id}>
-                  <span>{team.name}</span>
-                  <button type="button" onClick={() => award(team.id, activeClue.points)}>Correct</button>
-                  <button type="button" onClick={() => award(team.id, -activeClue.points)}>Incorrect</button>
-                </div>
-              ))}
-              <button type="button" className="jeopardy-btn" onClick={() => {
-                setAnswered((items) => ({ ...items, [activeClue.id]: { skipped: true, at: Date.now() } }));
-                closeClue();
-              }}>No Score</button>
+                {answerShown && activeClue.question.explanation && (
+                  <div className="jeopardy-explanation">{activeClue.question.explanation}</div>
+                )}
+              </div>
             </div>
           </div>
         </div>
@@ -650,10 +815,11 @@ function JeopardyPage() {
                 <div className="jeopardy-answer">
                   <span>Correct answer</span>
                   <strong>{finalClue.question.answerText.join(", ")}</strong>
+                  {finalClue.question.explanation && <p>{finalClue.question.explanation}</p>}
                 </div>
               )}
               <div className="jeopardy-final-grid">
-                {teams.map((team) => (
+                {orderedTeams.map((team) => (
                   <div className="jeopardy-final-team" key={team.id}>
                     <span>{team.name}</span>
                     <input

@@ -99,6 +99,12 @@
 - Quiz label: `CCNA / Semester 3 / Modules 13-14 Quiz`
 - Imported count: 34 questions
 
+- Source screenshots: `/Users/skylarenns/Downloads/Screenshot 2026-06-04 at 3.25.03 PM.png` through `/Users/skylarenns/Downloads/Screenshot 2026-06-04 at 3.39.35 PM.png`
+- Destination bank: `ccna-b/quiz-01`
+- Quiz label: `CCNA-B / Quiz 1`
+- Imported count: 74 questions
+- Notes: 4 Open Lab items are documented as lab records with command answers and explanations, but no OpenPT lab-grading logic is attached yet.
+
 ## What Was Imported
 
 The PDFs are OneNote exports where most slide/question content is embedded as page images. I rendered the PDF pages and used OCR plus visual review to identify the quiz-style items. In the Semester 3 final import, meaningful content ends around page 123, and pages 124-245 are effectively blank aside from the OneNote frame/footer. The Semester 3 final bank keeps the 197 unique quiz items from the source rather than every repeated occurrence in the PDF. In the Modules 1-3 import, pages 36-69 contain no meaningful slide content beyond the OneNote frame/footer, so the import uses pages 2-35. In the Modules 4-7 import, meaningful content ends around page 53, and pages 54-105 are effectively blank aside from the OneNote frame/footer. In the Modules 8-10 import, meaningful content ends around page 47, and pages 48-95 are effectively blank aside from the OneNote frame/footer. In the Modules 11-13 import, meaningful content ends around page 53, and pages 54-107 are effectively blank aside from the OneNote frame/footer. In the Modules 14-15 import, meaningful content ends around page 46, and pages 47-91 are effectively blank aside from the OneNote frame/footer. In the Modules 16-17 import, meaningful content ends around page 44, and pages 45-87 are effectively blank aside from the OneNote frame/footer. In the Semester 1 final import, meaningful content ends around page 93, and pages 94-185 are effectively blank aside from the OneNote frame/footer.
@@ -125,6 +131,8 @@ The Semester 3 Modules 9-12 PDF is also a OneNote-image export. Meaningful conte
 
 The Semester 3 Modules 13-14 PDF is also a OneNote-image export. Meaningful content appears on pages 1-31; pages 32-63 are effectively blank aside from the OneNote frame/footer. The import uses rendered pages under `tmp/pdfs/sem3-mod13-14-pages` and Tesseract OCR under `tmp/pdfs/sem3-mod13-14-ocr`. Cloud, virtualization, SDN, controller, API, and configuration-management questions were imported when readable. A few automation questions with missing answer text were included only where the standard Cisco concept made the intended answer unambiguous; the incomplete IBN assurance item was skipped.
 
+The CCNA-B Quiz 1 import is a live screenshot import rather than a PDF import. The batch boundary is the screenshot ending at 3:39:35 PM on 2026-06-04, and the bank should contain 74 total records. The import uses the local macOS Vision OCR helper in `scripts/ocr-images.swift`, then cleans the OCR into `quiz/questions-ccna-b.js`. Multi-screenshot explanations are consolidated into each record's `x` explanation field. Network diagrams are represented as structured OpenPT topology exhibits; command outputs, tables, frame layouts, and lab answer command sets are represented as structured `code` exhibits. The Open Lab records remain playable only as documented placeholders until simulator-specific grading logic is added.
+
 The imported bank includes:
 
 - Multiple-choice questions with visible selected answers from the PDF.
@@ -139,9 +147,10 @@ The imported bank includes:
 - Semester 3 Modules 1-2, Modules 3-5, Modules 6-8, Modules 9-12, and Modules 13-14 bank data lives in `quiz/questions-sem3-mod1-2.js`, `quiz/questions-sem3-mod3-5.js`, `quiz/questions-sem3-mod6-8.js`, `quiz/questions-sem3-mod9-12.js`, and `quiz/questions-sem3-mod13-14.js`.
 - Semester 1 bank data lives in `quiz/questions-sem1-mod1-3.js`, `quiz/questions-sem1-mod4-7.js`, `quiz/questions-sem1-mod8-10.js`, `quiz/questions-sem1-mod11-13.js`, `quiz/questions-sem1-mod14-15.js`, `quiz/questions-sem1-mod16-17.js`, and `quiz/questions-sem1-final.js`.
 - Semester 2 Modules 1-4, Modules 5-6, Modules 7-9, Modules 10-13, Modules 14-16, and final bank data lives in `quiz/questions-sem2-mod1-4.js`, `quiz/questions-sem2-mod5-6.js`, `quiz/questions-sem2-mod7-9.js`, `quiz/questions-sem2-mod10-13.js`, `quiz/questions-sem2-mod14-16.js`, and `quiz/questions-sem2-final.js`.
+- CCNA-B Quiz 1 screenshot-imported data lives in `quiz/questions-ccna-b.js`.
 - `quiz/index.html` loads the original Semester 3 final bank first, then appends the Semester 3, Semester 1, and Semester 2 module banks.
 - `quiz/questions.jsx` now preserves bank metadata and optional structured exhibits.
-- `quiz/home.jsx` exposes a top-level `CCNA -> ALL Quiz` pooled quiz for every normalized imported question, the imported Semester 1 quizzes including `Semester 1 -> Final exam`, the imported Semester 2 module quizzes plus `Semester 2 -> Final exam`, and all imported Semester 3 module quizzes through `Semester 3 -> Modules 13-14 Quiz`.
+- `quiz/home.jsx` exposes a top-level `CCNA -> ALL Quiz` pooled quiz for every normalized imported question, the imported Semester 1 quizzes including `Semester 1 -> Final exam`, the imported Semester 2 module quizzes plus `Semester 2 -> Final exam`, all imported Semester 3 module quizzes through `Semester 3 -> Modules 13-14 Quiz`, and a separate `CCNA-B` section with five quiz slots.
 - `quiz/app.jsx` filters the quiz pool by the selected bank instead of launching every question globally.
 - `quiz/quiz.jsx` renders structured exhibits below the question and above the answers.
 
@@ -215,6 +224,24 @@ Multiple-choice imports use the same compact shape as the existing quiz banks:
 - Keep the option count and correct-answer intent from the source PDF unless an option is obviously duplicated or unreadable.
 - When the PDF visibly marks the answer, use that. When it does not, infer from the adjacent module content or verify before importing.
 - For matching questions, every `[term, description]` entry in `pairs` must have an exact matching option string in `o` formatted as `term -> description`; otherwise the click-to-connect UI cannot store that match.
+
+## CCNA-B Rolling Screenshot Imports
+
+Quiz 1 was imported from the June 4, 2026 Downloads screenshot batch through `Screenshot 2026-06-04 at 3.39.35 PM.png`. It is stored as `ccna-b/quiz-01` with 74 items, including lab items documented but not simulator-graded.
+
+Quiz 2 continues after that cutoff and uses the screenshots from `Screenshot 2026-06-04 at 3.42.44 PM.png` through `Screenshot 2026-06-04 at 3.51.11 PM.png`. It is stored as `ccna-b/quiz-02` with 74 items and 4 documented lab items.
+
+Quiz 3 uses the grouped Quiz C screenshots. Questions 1-41 come from the June 4, 2026 group beginning at `Screenshot 2026-06-04 at 6.29.38 PM.png` and running through the 6:34 PM batch; questions 42-74 come from the June 5, 2026 group beginning at `Screenshot 2026-06-05 at 1.41.28 PM.png` and ending at `Screenshot 2026-06-05 at 1.46.23 PM.png`. It is stored as `ccna-b/quiz-03` with 74 items and 4 documented lab items. The non-quiz screenshot groups around June 4 6:23 PM and June 5 12:36/12:41 PM were intentionally excluded.
+
+For CCNA-B Boson screenshot batches:
+
+- Continue the next quiz from the latest screenshot timestamp already imported.
+- Preserve explanations as summarized `x` text, including command notes and answer rationale.
+- Keep lab questions in the bank with `lab: true`, a placeholder answer, and the captured answer/configuration block in `code`; do not add simulator grading logic until the lab implementation is requested.
+- Build structured `topology` exhibits for diagrams instead of embedding screenshots.
+- Add table-like explanation material as `code` blocks or `pairs` so it appears on `/quiz/ccna-b-diagrams`.
+
+The `/quiz/ccna-b-diagrams` route is a review surface for every CCNA-B structured exhibit, command/table block, matching table, and lab note. Use it after each import to visually inspect diagrams and tables before tuning individual question records.
 
 ## Future Semester 1 Module Imports
 

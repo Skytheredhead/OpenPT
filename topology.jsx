@@ -17,6 +17,7 @@ function Topology(props) {
   const panRef = React.useRef(viewState?.pan || { x: 0, y: 0, k: 1 });
   const viewStateCommitRef = React.useRef(null);
   const panStateCommitRef = React.useRef(null);
+  const paletteDropRef = React.useRef(false);
   const [pan, setPan] = React.useState(viewState?.pan || { x: 0, y: 0, k: 1 });
   const [drag, setDrag] = React.useState(null);   // { id, ox, oy }
   const [linkPick, setLinkPick] = React.useState(null);  // { devId, iface }
@@ -91,6 +92,7 @@ function Topology(props) {
     const kind = e.dataTransfer.getData("text/x-openpt-device");
     if (!kind) return;
     const p = screenToWorld(e.clientX, e.clientY);
+    paletteDropRef.current = Object.keys(devices).length === 0;
     onAddDevice(kind, p.x, p.y);
     e.preventDefault();
   };
@@ -271,6 +273,9 @@ function Topology(props) {
     for (const ch of String(id || "")) hash = (hash * 31 + ch.charCodeAt(0)) >>> 0;
     return `oklch(0.77 0.14 ${Math.round((hash * 137.508) % 360)})`;
   };
+  const activeLinkIds = React.useMemo(() => {
+    return new Set((packets || []).map((p) => p.linkId).filter(Boolean));
+  }, [packets]);
 
   const isIfaceTaken = (devId, iface) => links.some(l => (l.a === devId && l.ai === iface) || (l.b === devId && l.bi === iface));
 
@@ -372,17 +377,23 @@ function Topology(props) {
       };
       const labelA = pointOnCable(slot.count > 1 ? 0.32 : 0.43);
       const labelB = pointOnCable(slot.count > 1 ? 0.68 : 0.57);
+      const statusA = pointOnCable(slot.count > 1 ? 0.17 : 0.12);
+      const statusB = pointOnCable(slot.count > 1 ? 0.83 : 0.88);
       let angle = Math.atan2(dy, dx) * 180 / Math.PI;
       if (angle > 90) angle -= 180;
       if (angle < -90) angle += 180;
+      const cableAngle = Math.atan2(dy, dx) * 180 / Math.PI;
       positions[l.id] = {
         angle,
+        cableAngle,
         line: {
           sx, sy, ex, ey,
           path: slot.count > 1 ? `M ${sx} ${sy} Q ${cx} ${cy} ${ex} ${ey}` : null,
         },
         a: { x: labelA.x + px * labelShift * 0.18, y: labelA.y + py * labelShift * 0.18 },
         b: { x: labelB.x + px * labelShift * 0.18, y: labelB.y + py * labelShift * 0.18 },
+        statusA: { x: statusA.x + px * labelShift * 0.1, y: statusA.y + py * labelShift * 0.1, angle: cableAngle + 90 },
+        statusB: { x: statusB.x + px * labelShift * 0.1, y: statusB.y + py * labelShift * 0.1, angle: cableAngle - 90 },
       };
     });
     return positions;
@@ -423,6 +434,12 @@ function Topology(props) {
     if (didFit.current) return;
     if (!wrapRef.current) return;
     if (wrapRef.current.clientWidth > 100 && Object.keys(devices).length) {
+      if (paletteDropRef.current && Object.keys(devices).length === 1) {
+        paletteDropRef.current = false;
+        didFit.current = true;
+        return;
+      }
+      paletteDropRef.current = false;
       didFit.current = true;
       // delay one frame
       requestAnimationFrame(() => fit());
@@ -600,6 +617,37 @@ function Topology(props) {
           </g>
         </svg>
 
+        {/* Packet Tracer-style link status markers */}
+        {links.map(l => {
+          const a = devices[l.a], b = devices[l.b];
+          if (!a || !b) return null;
+          const geom = linkGeometries[l.id];
+          if (!geom) return null;
+          const statusA = window.OPT_Engine.linkEndpointStatus?.(devices, l, "a", { activeLinkIds }) || { state: "up", label: "Physical link up" };
+          const statusB = window.OPT_Engine.linkEndpointStatus?.(devices, l, "b", { activeLinkIds }) || { state: "up", label: "Physical link up" };
+          const marker = (side, status, pos) => (
+            <div
+              key={`status-${l.id}-${side}`}
+              className={`link-status-marker ${status.state || "up"} ${status.shape || "triangle-up"}`}
+              data-state={status.state || "up"}
+              data-link-id={l.id}
+              aria-hidden="true"
+              title={status.label}
+              style={{
+                left: pos.x,
+                top: pos.y,
+                "--link-status-angle": `${pos.angle}deg`,
+              }}
+            />
+          );
+          return (
+            <React.Fragment key={`status-${l.id}`}>
+              {marker("a", statusA, geom.statusA)}
+              {marker("b", statusB, geom.statusB)}
+            </React.Fragment>
+          );
+        })}
+
         {/* Link labels (HTML) */}
         {links.map(l => {
           const a = devices[l.a], b = devices[l.b];
@@ -614,6 +662,8 @@ function Topology(props) {
             b: { x: (a.x + b.x) / 2 + tx * 28, y: (a.y + b.y) / 2 + ty * 28 },
           };
           const geom = labelPosition || fallback;
+          const statusA = window.OPT_Engine.linkEndpointStatus?.(devices, l, "a", { activeLinkIds }) || { label: "Physical link up" };
+          const statusB = window.OPT_Engine.linkEndpointStatus?.(devices, l, "b", { activeLinkIds }) || { label: "Physical link up" };
           return (
             <React.Fragment key={`lbl-${l.id}`}>
               <div
@@ -628,7 +678,7 @@ function Topology(props) {
                 onClick={(e) => { e.stopPropagation(); onSelectLink && onSelectLink(l.id); }}
                 onContextMenu={(e) => { e.preventDefault(); e.stopPropagation(); onLinkContextMenu && onLinkContextMenu(e, l); }}
                 onDoubleClick={() => onDeleteLink && onDeleteLink(l.id)}
-                title={`${a.hostname} ${l.ai}. Double-click to remove link.`}
+                title={`${a.hostname} ${l.ai}: ${statusA.label}. Double-click to remove link.`}
               >
                 <span title={l.ai}>{ifaceName(l.ai)}</span>
               </div>
@@ -644,7 +694,7 @@ function Topology(props) {
                 onClick={(e) => { e.stopPropagation(); onSelectLink && onSelectLink(l.id); }}
                 onContextMenu={(e) => { e.preventDefault(); e.stopPropagation(); onLinkContextMenu && onLinkContextMenu(e, l); }}
                 onDoubleClick={() => onDeleteLink && onDeleteLink(l.id)}
-                title={`${b.hostname} ${l.bi}. Double-click to remove link.`}
+                title={`${b.hostname} ${l.bi}: ${statusB.label}. Double-click to remove link.`}
               >
                 <span title={l.bi}>{ifaceName(l.bi)}</span>
               </div>

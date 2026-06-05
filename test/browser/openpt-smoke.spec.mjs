@@ -24,6 +24,144 @@ test("lab loads and starter flow creates a topology", async ({ page }) => {
   await page.getByRole("button", { name: "Starter Lab" }).click();
   await expect.poll(async () => page.locator(".node").count(), { message: "starter topology node count" }).toBeGreaterThanOrEqual(5);
   await expect(page.locator(".node-label", { hasText: "R1" })).toBeVisible();
+  await expect.poll(async () => page.locator(".link-status-marker.up").count(), { message: "healthy link status markers" }).toBeGreaterThan(0);
+  expect(errors, "browser console/page errors").toEqual([]);
+});
+
+test("topology link status markers show down, blocking, and activity states", async ({ page }) => {
+  const errors = collectPageErrors(page);
+  await page.addInitScript(() => {
+    localStorage.clear();
+    localStorage.setItem("openpt:viewMode", "app");
+    localStorage.setItem("openpt:v1", JSON.stringify({
+      tabs: [{ id: "w-0", name: "status-markers.opt" }],
+      activeWid: "w-0",
+      starterScreenVisible: false,
+      snapshots: {
+        "w-0": {
+          selectedIds: [],
+          openConsoles: [],
+          activeBottom: "events",
+          ptActivity: null,
+          ptSidebarOpen: false,
+          devices: {
+            r1: {
+              id: "r1",
+              kind: "router",
+              hostname: "R1",
+              name: "R1",
+              platform: "isr4321",
+              powered: true,
+              x: 180,
+              y: 180,
+              interfaces: {
+                "GigabitEthernet0/0/0": { up: false, admUp: false },
+              },
+            },
+            sw1: {
+              id: "sw1",
+              kind: "l2switch",
+              hostname: "SW1",
+              name: "SW1",
+              platform: "2960-24tt",
+              powered: true,
+              x: 430,
+              y: 180,
+              interfaces: {
+                "FastEthernet0/1": { up: true, admUp: true, mode: "access", vlan: 1, stp: { state: "forwarding" } },
+                "FastEthernet0/2": { up: true, admUp: true, mode: "access", vlan: 1, stp: { state: "blocking" } },
+              },
+            },
+            sw2: {
+              id: "sw2",
+              kind: "l2switch",
+              hostname: "SW2",
+              name: "SW2",
+              platform: "2960-24tt",
+              powered: true,
+              x: 680,
+              y: 180,
+              interfaces: {
+                "FastEthernet0/1": { up: true, admUp: true, mode: "access", vlan: 1, stp: { state: "forwarding" } },
+              },
+            },
+          },
+          links: [
+            { id: "down-link", a: "r1", ai: "GigabitEthernet0/0/0", b: "sw1", bi: "FastEthernet0/1", type: "copper", up: false },
+            { id: "blocking-link", a: "sw1", ai: "FastEthernet0/2", b: "sw2", bi: "FastEthernet0/1", type: "copper", up: true },
+          ],
+        },
+      },
+    }));
+  });
+
+  await page.goto("/lab/");
+  await expect(page.locator(".node-label", { hasText: "R1" })).toBeVisible();
+  await expect(page.locator('.link-status-marker.down[data-link-id="down-link"]')).toHaveCount(2);
+  await expect(page.locator('.link-status-marker.blocking[data-link-id="blocking-link"]')).toHaveCount(1);
+  expect(errors, "browser console/page errors").toEqual([]);
+});
+
+test("packet mode marks active cable endpoints as link activity", async ({ page }) => {
+  const errors = collectPageErrors(page);
+  await page.addInitScript(() => {
+    localStorage.clear();
+    localStorage.setItem("openpt:viewMode", "app");
+  });
+
+  await page.goto("/lab/");
+  await page.getByRole("button", { name: "Starter Lab" }).click();
+  await expect(page.locator(".node-label", { hasText: "PC1" })).toBeVisible();
+
+  await page.locator('.tab-tool[title="Packet mode (P)"]').click();
+  await page.locator(".node").filter({ has: page.locator(".node-label", { hasText: "PC1" }) }).click();
+  await page.locator(".node").filter({ has: page.locator(".node-label", { hasText: "PC2" }) }).click();
+  await expect.poll(async () => page.locator(".link-status-marker.activity").count(), {
+    message: "active link marker during packet animation",
+    timeout: 2500,
+  }).toBeGreaterThan(0);
+  expect(errors, "browser console/page errors").toEqual([]);
+});
+
+test("palette drop keeps the device at the release point", async ({ page }) => {
+  const errors = collectPageErrors(page);
+  await page.addInitScript(() => {
+    localStorage.clear();
+    localStorage.setItem("openpt:viewMode", "app");
+  });
+
+  await page.goto("/lab/");
+  await page.getByRole("button", { name: "New Blank" }).click();
+
+  const canvas = page.locator(".canvas-wrap");
+  await expect(canvas).toBeVisible();
+  await expect(page.locator(".node")).toHaveCount(0);
+
+  const canvasBox = await canvas.boundingBox();
+  expect(canvasBox).toBeTruthy();
+  const dropPoint = { x: 110, y: 130 };
+
+  await page.locator(".tb-menu").filter({ hasText: "Devices" }).click();
+  await expect(page.locator(".tb-dropdown")).toBeVisible();
+  await page.locator(".tb-dropdown [draggable]").first().dragTo(canvas, {
+    targetPosition: dropPoint,
+  });
+  await expect(page.locator(".node")).toHaveCount(1);
+
+  const placement = await page.locator(".node").first().evaluate((node) => {
+    const nodeRect = node.getBoundingClientRect();
+    const canvasRect = node.closest(".canvas-wrap").getBoundingClientRect();
+    return {
+      x: nodeRect.left + nodeRect.width / 2 - canvasRect.left,
+      y: nodeRect.top + nodeRect.height / 2 - canvasRect.top,
+      canvasCenterX: canvasRect.width / 2,
+      canvasCenterY: canvasRect.height / 2,
+    };
+  });
+
+  expect(Math.abs(placement.x - dropPoint.x)).toBeLessThan(35);
+  expect(Math.abs(placement.y - dropPoint.y)).toBeLessThan(35);
+  expect(Math.hypot(placement.x - placement.canvasCenterX, placement.y - placement.canvasCenterY)).toBeGreaterThan(80);
   expect(errors, "browser console/page errors").toEqual([]);
 });
 

@@ -686,6 +686,10 @@ if (!backendOnly) {
     return reply.redirect("/quiz/?view=library", 308);
   });
 
+  app.get("/quiz/ccna-b-diagrams", async (req, reply) => {
+    return reply.sendFile("quiz/index.html");
+  });
+
   app.get("/jeopardy", async (req, reply) => {
     return reply.sendFile("jeopardy.html");
   });

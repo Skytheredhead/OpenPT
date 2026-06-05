@@ -1076,7 +1076,7 @@ function makeSshLineAccessLab() {
   return { title: activity.title, fileName: "ssh-line-access", devices: { [ASW1.id]: ASW1, [ASW2.id]: ASW2, [DSW1.id]: DSW1, [DSW2.id]: DSW2, [CSW1.id]: CSW1, [CSW2.id]: CSW2, [R1.id]: R1, [R2.id]: R2, [PC1.id]: PC1, [PC2.id]: PC2 }, links, activity };
 }
 
-function App() {
+function App({ initialViewMode = null, initialHomeAction = null } = {}) {
   const [t, setTweak] = useTweaks(TWEAK_DEFAULTS);
   const dragDepth = useRef(0);
   const importFileInputRef = useRef(null);
@@ -1145,9 +1145,12 @@ function App() {
   const [ptSidebarOpen, setPtSidebarOpen] = useState(initial.ptSidebarOpen ?? !!initial.ptActivity);
   const [starterScreenVisible, setStarterScreenVisible] = useState(initial.starterScreenVisible || false);
   const [viewMode, setViewMode] = useState(() => {
+    if (initialViewMode) return initialViewMode;
+    if (appRoutePath(location.pathname) === "/") return "home";
     try { return localStorage.getItem("openpt:viewMode") || "home"; }
     catch (e) { return "home"; }
   });
+  const initialHomeActionRef = useRef(initialHomeAction);
   const [routePath, setRoutePath] = useState(() => appRoutePath(location.pathname));
   const navigateAppRoute = React.useCallback((to, options = {}) => {
     const url = new URL(to, location.origin);
@@ -2610,6 +2613,22 @@ function App() {
     }
   };
 
+  useEffect(() => {
+    const action = initialHomeActionRef.current;
+    if (!action) return;
+    initialHomeActionRef.current = null;
+    setViewMode("app");
+    if (action === "starter") {
+      newStarterTab();
+      return;
+    }
+    if (action === "import") {
+      openPacketTracerFilePicker();
+      return;
+    }
+    createEmptyProjectFromStarterScreen();
+  }, []);
+
   const isFileDrag = (e) => Array.from(e.dataTransfer?.types || []).includes("Files");
 
   const handleDragEnter = (e) => {
@@ -3462,11 +3481,19 @@ function App() {
       if (idx >= 0) stopIdx = idx;
     }
 
-    const placePacket = (pid, x, y, proto) => {
+    const linkIdBetween = (fromId, toId) => {
+      const link = links.find((item) =>
+        (item.a === fromId && item.b === toId) ||
+        (item.a === toId && item.b === fromId)
+      );
+      return link?.id || null;
+    };
+
+    const placePacket = (pid, x, y, proto, linkId = null) => {
       setPackets((arr) => {
         const exists = arr.find(p => p.id === pid);
-        if (exists) return arr.map(p => p.id === pid ? { ...p, x, y, proto } : p);
-        return [...arr, { id: pid, x, y, proto }];
+        if (exists) return arr.map(p => p.id === pid ? { ...p, x, y, proto, linkId } : p);
+        return [...arr, { id: pid, x, y, proto, linkId }];
       });
     };
 
@@ -3506,13 +3533,14 @@ function App() {
           return;
         }
         const from = seq[i], to = seq[i + 1];
+        const linkId = linkIdBetween(from.id, to.id);
         const start = performance.now();
         const animate = (now) => {
           const u = Math.min(1, (now - start) / segMs);
           const x = from.x + (to.x - from.x) * u;
           const y = from.y + (to.y - from.y) * u;
           const proto = plan.hops.find((h) => h.devId === to.id && h.proto)?.proto || plan.packets?.[0]?.proto || "icmp";
-          placePacket(pid, x, y, proto);
+          placePacket(pid, x, y, proto, linkId);
           if (u < 1) requestAnimationFrame(animate);
           else {
             setActiveHopDeviceId(to.id);
@@ -8687,7 +8715,7 @@ function PacketInspector({ events }) {
                 <div className="packet-detail-head">
                   <div>
                     <div className="packet-title">{selected.protocol.toUpperCase()} {selected.kind}</div>
-                    <div className="packet-subtitle">{selected.source} -> {selected.target || "unknown"}</div>
+                    <div className="packet-subtitle">{selected.source} {"->"} {selected.target || "unknown"}</div>
                   </div>
                   <span className={`packet-status ${selected.status}`}>{selected.status}</span>
                 </div>
@@ -8726,8 +8754,8 @@ function PacketInspector({ events }) {
                     ))}
                     {(selected.artifacts?.natTranslations || []).map((nat, index) => (
                       <div key={`nat-${index}`} className="packet-artifact">
-                        NAT {nat.insideLocal} -> {nat.insideGlobal}
-                        <span>{nat.outsideLocal || "-"} -> {nat.outsideGlobal || "-"}</span>
+                        NAT {nat.insideLocal} {"->"} {nat.insideGlobal}
+                        <span>{nat.outsideLocal || "-"} {"->"} {nat.outsideGlobal || "-"}</span>
                       </div>
                     ))}
                     {selected.artifacts?.dhcpLease && (
@@ -9080,4 +9108,9 @@ function ifaceForVia(d, via) {
   return Object.keys(d.interfaces)[0];
 }
 
-ReactDOM.createRoot(document.getElementById("root")).render(<App/>);
+window.OpenPTApp = App;
+if (!window.OpenPTDeferAppBoot) {
+  const root = window.OpenPTRoot || ReactDOM.createRoot(document.getElementById("root"));
+  window.OpenPTRoot = root;
+  root.render(<App/>);
+}

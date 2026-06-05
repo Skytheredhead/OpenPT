@@ -5,6 +5,16 @@
     return JSON.parse(JSON.stringify(value));
   }
 
+  function packetTracerFunctionalUp(value) {
+    if (value == null || value === "") return true;
+    if (typeof value === "boolean") return value;
+    if (typeof value === "number") return value !== 0;
+    const text = String(value).trim().toLowerCase();
+    if (!text) return true;
+    if (/^(false|no|0|down|off|broken|failed|failure|non[-\s]?functional|not[-\s]?functional)$/i.test(text)) return false;
+    return true;
+  }
+
   function engineOrThrow(engine) {
     const resolved = engine || global.OPT_Engine;
     if (!resolved) throw new Error("OpenPT format helpers require OPT_Engine.");
@@ -361,6 +371,8 @@
       if (!aId || !bId || !a.iface || !b.iface) continue;
       ensureIface(aId, a.iface);
       ensureIface(bId, b.iface);
+      const packetTracerState = cloneJson(Object.values(activity?.packetTracerState?.links || {}).find((link) => link.sourceIndex === srcIndex) || null);
+      const explicitUp = typeof src.up === "boolean" ? src.up : null;
       links.push({
         id: OPT_Engine.uid("l"),
         a: aId,
@@ -368,7 +380,7 @@
         b: bId,
         bi: b.iface,
         type: /serial/i.test(src.type || "") ? "serial" : "copper",
-        up: true,
+        up: explicitUp ?? packetTracerFunctionalUp(src.functional ?? packetTracerState?.functional),
         packetTracer: {
           type: src.type || null,
           medium: src.medium || null,
@@ -383,7 +395,7 @@
           functional: src.functional || null,
           ports: cloneJson(src.ports || []),
         },
-        packetTracerState: cloneJson(Object.values(activity?.packetTracerState?.links || {}).find((link) => link.sourceIndex === srcIndex) || null),
+        packetTracerState,
       });
     }
 

@@ -100,6 +100,14 @@ const ResultsPage = ({ state, onRestart, onExit, accent }) => {
                 <div className="qt">
                   <span className="src">{m.q.source} · item {m.q.sourceIndex}</span>
                   {m.q.question}
+                  <div className="missed-answer">
+                    <b>Answer:</b> {formatCorrectAnswer(m.q)}
+                  </div>
+                  {m.q.explanation && (
+                    <div className="missed-explanation">
+                      <b>Explanation:</b> {m.q.explanation}
+                    </div>
+                  )}
                 </div>
                 <div className="tag">{m.q.multi ? `multi (choose ${m.q.answers.length})` : 'single'}</div>
               </div>
@@ -110,5 +118,15 @@ const ResultsPage = ({ state, onRestart, onExit, accent }) => {
     </div>
   );
 };
+
+function formatCorrectAnswer(q) {
+  if (q.pairs?.length) {
+    return q.pairs.map(([term, description]) => `${term} -> ${description}`).join('; ');
+  }
+  return q.answers
+    .map(idx => q.options[idx])
+    .filter(Boolean)
+    .join('; ');
+}
 
 window.ResultsPage = ResultsPage;
