@@ -493,6 +493,15 @@ function serverAppTabId(wid, deviceId, appKey) {
   return `server-app:${wid}:${deviceId}:${appKey}`;
 }
 
+function isDeviceAppTabId(value) {
+  return typeof value === "string" && (value.startsWith("app:") || value.startsWith("server-app:"));
+}
+
+function appBottomTabTitle(device, app) {
+  const label = app?.label === "IP Configuration" ? "IP Config" : app?.label;
+  return `${device?.hostname || "Device"} - ${label || "App"}`;
+}
+
 function defaultServerConfig(device = {}) {
   const services = device.services || {};
   const dhcpPools = device.dhcp?.pools || {};
@@ -1146,9 +1155,9 @@ function App({ initialViewMode = null, initialHomeAction = null } = {}) {
   const [starterScreenVisible, setStarterScreenVisible] = useState(initial.starterScreenVisible || false);
   const [viewMode, setViewMode] = useState(() => {
     if (initialViewMode) return initialViewMode;
-    if (appRoutePath(location.pathname) === "/") return "home";
-    try { return localStorage.getItem("openpt:viewMode") || "home"; }
-    catch (e) { return "home"; }
+    if (appRoutePath(location.pathname) === "/") return "app";
+    try { return localStorage.getItem("openpt:viewMode") === "home" ? "app" : (localStorage.getItem("openpt:viewMode") || "app"); }
+    catch (e) { return "app"; }
   });
   const initialHomeActionRef = useRef(initialHomeAction);
   const [routePath, setRoutePath] = useState(() => appRoutePath(location.pathname));
@@ -1157,7 +1166,7 @@ function App({ initialViewMode = null, initialHomeAction = null } = {}) {
     const nextPath = appRoutePath(url.pathname);
     const nextUrl = `${nextPath}${url.search}${url.hash}`;
     const currentUrl = `${location.pathname}${location.search}${location.hash}`;
-    if (nextPath === "/") setViewMode("home");
+    if (nextPath === "/") setViewMode("app");
     if (currentUrl !== nextUrl) {
       history[options.replace ? "replaceState" : "pushState"](null, "", nextUrl);
     }
@@ -1166,7 +1175,7 @@ function App({ initialViewMode = null, initialHomeAction = null } = {}) {
   useEffect(() => {
     const onPopState = () => {
       const nextPath = appRoutePath(location.pathname);
-      if (nextPath === "/") setViewMode("home");
+      if (nextPath === "/") setViewMode("app");
       setRoutePath(nextPath);
     };
     window.addEventListener("popstate", onPopState);
@@ -1193,6 +1202,7 @@ function App({ initialViewMode = null, initialHomeAction = null } = {}) {
   const [bottomCollapsed, setBottomCollapsed] = useState(() => {
     try { return localStorage.getItem("openpt:bottom-collapsed") === "1"; } catch (e) { return false; }
   });
+  const isHomeRoute = routePath === "/";
 
   // Derived: the most-recently-selected device (used for inspector / context menu)
   const selectedId = selectedIds[selectedIds.length - 1] || null;
@@ -1228,22 +1238,21 @@ function App({ initialViewMode = null, initialHomeAction = null } = {}) {
   const [serverModuleWidth, setServerModuleWidth] = useState(() => {
     try {
       const saved = Number(localStorage.getItem("openpt:server-module-width"));
-      return Number.isFinite(saved) ? Math.max(430, Math.min(saved, 780)) : 680;
+      return Number.isFinite(saved) ? Math.max(380, Math.min(saved, 720)) : 560;
     } catch (e) {
-      return 680;
+      return 560;
     }
   });
   const [appsSidebarOpen, setAppsSidebarOpen] = useState(false);
   const [appsSidebarWidth, setAppsSidebarWidth] = useState(() => {
     try {
       const saved = Number(localStorage.getItem("openpt:apps-sidebar-width"));
-      return Number.isFinite(saved) ? Math.max(380, Math.min(saved, 560)) : 420;
+      return Number.isFinite(saved) ? Math.max(260, Math.min(saved, 420)) : 300;
     } catch (e) {
-      return 420;
+      return 300;
     }
   });
   const [openAppTabs, setOpenAppTabs] = useState([]);
-  const [activeCenterTab, setActiveCenterTab] = useState("topology");
   const [cliGhostSuggestions, setCliGhostSuggestions] = useState(() => {
     try { return localStorage.getItem("openpt:cli-ghost") !== "0"; } catch (e) { return true; }
   });
@@ -1392,7 +1401,6 @@ function App({ initialViewMode = null, initialHomeAction = null } = {}) {
     setPtSidebarOpen(snap?.ptSidebarOpen ?? !!snap?.ptActivity);
     setServerModuleOpen(false);
     setAppsSidebarOpen(false);
-    setActiveCenterTab("topology");
   };
   const newBlankTab = () => {
     setStarterScreenVisible(false);
@@ -1404,7 +1412,6 @@ function App({ initialViewMode = null, initialHomeAction = null } = {}) {
     setDevices({}); setLinks([]); setSelectedId(null); setOpenConsoles([]); setActiveBottom("events"); setPtActivity(null); setPtSidebarOpen(false);
     setServerModuleOpen(false);
     setAppsSidebarOpen(false);
-    setActiveCenterTab("topology");
     setCloudProjectId(null); setCloudVersion(0); setCloudBaseDoc(null); setCloudLease(null); setShareToken(null); setShareMode(null); setSyncStatus({ state: cloudUser ? "local" : "local", message: cloudUser ? "Signed in" : "Local only" });
   };
   const newStarterTab = () => {
@@ -1420,7 +1427,6 @@ function App({ initialViewMode = null, initialHomeAction = null } = {}) {
     setDevices(s.devices); setLinks(s.links); setSelectedId(null); setOpenConsoles([]); setActiveBottom("events"); setPtActivity(null); setPtSidebarOpen(false);
     setServerModuleOpen(false);
     setAppsSidebarOpen(false);
-    setActiveCenterTab("topology");
     setCloudProjectId(null); setCloudVersion(0); setCloudBaseDoc(null); setCloudLease(null); setShareToken(null); setShareMode(null); setSyncStatus({ state: cloudUser ? "local" : "local", message: cloudUser ? "Signed in" : "Local only" });
     setDirtyTabs((m) => ({ ...m, [id]: true }));
     pushAppUndo("opened starter lab", before);
@@ -1442,7 +1448,6 @@ function App({ initialViewMode = null, initialHomeAction = null } = {}) {
     setPacketEvents([]);
     setPtActivity(lab.activity);
     setPtSidebarOpen(true);
-    setActiveCenterTab("topology");
     setTabs((ts) => ts.map((tab) => tab.id === activeWid ? { ...tab, name: `${lab.fileName}.opt` } : tab));
     log("ok", "system", `loaded lab: ${lab.title}`);
   };
@@ -1472,7 +1477,6 @@ function App({ initialViewMode = null, initialHomeAction = null } = {}) {
       setPtActivity(snap?.ptActivity || null);
       setPtSidebarOpen(snap?.ptSidebarOpen ?? !!snap?.ptActivity);
       setAppsSidebarOpen(false);
-      setActiveCenterTab("topology");
     } else {
       delete snapshotsRef.current[id];
     }
@@ -1737,7 +1741,6 @@ function App({ initialViewMode = null, initialHomeAction = null } = {}) {
     setTopologyViewState(document?.uiState?.topologyViewState || {});
     setTerminalScrolls(document?.uiState?.terminalScrolls || {});
     setAppsSidebarOpen(false);
-    setActiveCenterTab("topology");
     if (project) setTabs((ts) => mergeProjectIntoTabs(ts, activeWid, project));
   };
 
@@ -2389,8 +2392,8 @@ function App({ initialViewMode = null, initialHomeAction = null } = {}) {
         return;
       }
       if (kind === "apps") {
-        const maxWidth = Math.max(360, Math.min(window.innerWidth * 0.44, window.innerWidth - 420));
-        setAppsSidebarWidth(Math.max(380, Math.min(maxWidth, startAppsWidth - (moveEvent.clientX - startX))));
+        const maxWidth = Math.max(300, Math.min(window.innerWidth * 0.36, window.innerWidth - 460));
+        setAppsSidebarWidth(Math.max(260, Math.min(maxWidth, startAppsWidth - (moveEvent.clientX - startX))));
         return;
       }
       const maxHeight = Math.max(180, window.innerHeight - 170);
@@ -2617,6 +2620,7 @@ function App({ initialViewMode = null, initialHomeAction = null } = {}) {
     const action = initialHomeActionRef.current;
     if (!action) return;
     initialHomeActionRef.current = null;
+    navigateAppRoute("/lab", { replace: true });
     setViewMode("app");
     if (action === "starter") {
       newStarterTab();
@@ -2732,7 +2736,6 @@ function App({ initialViewMode = null, initialHomeAction = null } = {}) {
 
   const addDeviceFromMenu = (catalogId) => {
     const p = openCanvasPointNear(visibleCanvasCenter());
-    setActiveCenterTab("topology");
     addDevice(catalogId, p.x, p.y);
   };
 
@@ -3611,6 +3614,15 @@ function App({ initialViewMode = null, initialHomeAction = null } = {}) {
     });
   };
 
+  const revealAppPanel = () => {
+    setBottomCollapsed(false);
+    setBottomPanelHeight((height) => {
+      const maxHeight = Math.max(220, window.innerHeight - 150);
+      const target = Math.min(maxHeight, Math.max(360, Math.round(window.innerHeight * 0.46)));
+      return Math.max(height, target);
+    });
+  };
+
   const reportImportError = async (activity = lastImportReport) => {
     if (!syncClient || !activity) return;
     try {
@@ -3645,13 +3657,19 @@ function App({ initialViewMode = null, initialHomeAction = null } = {}) {
     setAppsSidebarOpen(false);
     setServerModuleOpen(true);
     setServerModuleTab("config");
-    setActiveCenterTab("topology");
   };
   const openEndpointApp = (id, appKey) => {
     const device = devices[id];
     const app = endpointAppByKey(appKey);
     if (!device || !isEndpointAppsDevice(device) || !app) return;
     const tabId = endpointAppTabId(activeWid, id, app.key);
+    if (activeBottom === tabId) {
+      closeEndpointApp(tabId);
+      setSelectedId(id);
+      setServerModuleOpen(false);
+      setAppsSidebarOpen(true);
+      return;
+    }
     setSelectedId(id);
     setServerModuleOpen(false);
     setAppsSidebarOpen(true);
@@ -3660,13 +3678,21 @@ function App({ initialViewMode = null, initialHomeAction = null } = {}) {
         ? items
         : [...items, { id: tabId, wid: activeWid, deviceId: id, appKey: app.key, scope: "endpoint" }]
     ));
-    setActiveCenterTab(tabId);
+    revealAppPanel();
+    setActiveBottom(tabId);
   };
   const openServerApp = (id, appKey) => {
     const device = devices[id];
     const app = serverAppByKey(appKey);
     if (!device || device.kind !== "server" || !app) return;
     const tabId = serverAppTabId(activeWid, id, app.key);
+    if (activeBottom === tabId) {
+      closeEndpointApp(tabId);
+      setSelectedId(id);
+      setServerModuleOpen(true);
+      setServerModuleTab("desktop");
+      return;
+    }
     setSelectedId(id);
     setServerModuleOpen(true);
     setServerModuleTab("desktop");
@@ -3675,11 +3701,14 @@ function App({ initialViewMode = null, initialHomeAction = null } = {}) {
         ? items
         : [...items, { id: tabId, wid: activeWid, deviceId: id, appKey: app.key, scope: "server" }]
     ));
-    setActiveCenterTab(tabId);
+    revealAppPanel();
+    setActiveBottom(tabId);
   };
   const closeEndpointApp = (tabId) => {
-    setOpenAppTabs((items) => items.filter((item) => item.id !== tabId));
-    setActiveCenterTab((cur) => cur === tabId ? "topology" : cur);
+    const remaining = openAppTabs.filter((item) => item.id !== tabId);
+    const nextActiveApp = remaining.slice().reverse().find((item) => item.wid === activeWid && devices[item.deviceId]);
+    setOpenAppTabs(remaining);
+    setActiveBottom((cur) => cur === tabId ? (nextActiveApp?.id || "events") : cur);
   };
   const openDeviceModule = (id) => {
     const device = devices[id];
@@ -3688,7 +3717,6 @@ function App({ initialViewMode = null, initialHomeAction = null } = {}) {
       setSelectedId(id);
       setServerModuleOpen(false);
       setAppsSidebarOpen(true);
-      setActiveCenterTab("topology");
     }
     else openConsole(id);
   };
@@ -3753,7 +3781,7 @@ function App({ initialViewMode = null, initialHomeAction = null } = {}) {
   const selected = selectedId ? simulatedDevices[selectedId] : null;
   const appsSelected = selected && isEndpointAppsDevice(selected);
   const appTabsForWorkspace = openAppTabs.filter((item) => item.wid === activeWid && devices[item.deviceId]);
-  const activeAppTab = activeCenterTab === "topology" ? null : appTabsForWorkspace.find((item) => item.id === activeCenterTab);
+  const activeAppTab = appTabsForWorkspace.find((item) => item.id === activeBottom);
   const activeAppDevice = activeAppTab ? simulatedDevices[activeAppTab.deviceId] : null;
   const activeAppScope = activeAppTab?.scope || (activeAppTab?.id?.startsWith("server-app:") ? "server" : "endpoint");
   const activeEndpointApp = activeAppTab && activeAppScope === "endpoint" ? endpointAppByKey(activeAppTab.appKey) : null;
@@ -3766,8 +3794,8 @@ function App({ initialViewMode = null, initialHomeAction = null } = {}) {
       const next = items.filter((item) => item.wid !== activeWid || devices[item.deviceId]);
       return next.length === items.length ? items : next;
     });
-    if (activeCenterTab !== "topology" && !activeAppTab) setActiveCenterTab("topology");
-  }, [devices, activeWid, activeCenterTab, activeAppTab]);
+    if (isDeviceAppTabId(activeBottom) && !activeAppTab) setActiveBottom("events");
+  }, [devices, activeWid, activeBottom, activeAppTab]);
   const cnt = {
     routers: Object.values(devices).filter(d => OPT_Engine.isRouterLike?.(d) && !OPT_Engine.isSwitchLike?.(d)).length,
     switches: Object.values(devices).filter(d => OPT_Engine.isSwitchLike?.(d)).length,
@@ -3776,7 +3804,6 @@ function App({ initialViewMode = null, initialHomeAction = null } = {}) {
   };
   const validationErrorCount = validationIssues.filter((issue) => issue.severity === "err").length;
   const selectValidationIssue = (issue) => {
-    setActiveCenterTab("topology");
     if (issue.linkId) {
       setSelectedLinkId(issue.linkId);
       setSelectedIds([]);
@@ -3796,6 +3823,40 @@ function App({ initialViewMode = null, initialHomeAction = null } = {}) {
     : meaningfulChanges > 0 && (cloudProjectId || shareToken) && cloudLease
     ? `Autosave in ${Math.ceil(autosaveDueMs / 1000)}s`
     : syncStatus.message;
+  const enterLabFromHome = React.useCallback((intent = "lab") => {
+    navigateAppRoute("/lab");
+    if (intent === "starter") {
+      newStarterTab();
+      return;
+    }
+    if (intent === "import") {
+      openPacketTracerFilePicker();
+      return;
+    }
+    createEmptyProjectFromStarterScreen();
+  }, [navigateAppRoute, newStarterTab, openPacketTracerFilePicker, createEmptyProjectFromStarterScreen]);
+  useEffect(() => {
+    const onHomeAction = (event) => {
+      if (event.origin !== location.origin || event.data?.type !== "openpt:home-action") return;
+      const action = event.data.action;
+      if (action === "quiz") {
+        window.location.href = QUIZ_LIBRARY_URL;
+        return;
+      }
+      if (action === "jeopardy") {
+        navigateAppRoute(JEOPARDY_URL);
+        return;
+      }
+      if (action === "import") {
+        enterLabFromHome("import");
+        return;
+      }
+      enterLabFromHome("lab");
+    };
+    window.addEventListener("message", onHomeAction);
+    return () => window.removeEventListener("message", onHomeAction);
+  }, [enterLabFromHome, navigateAppRoute]);
+  const workspaceTabs = isHomeRoute ? [{ id: "home", name: "home.html" }] : tabs;
 
   if (routePath === JEOPARDY_URL && window.JeopardyPage) {
     return <window.JeopardyPage />;
@@ -3840,7 +3901,7 @@ function App({ initialViewMode = null, initialHomeAction = null } = {}) {
       <div className="titlebar">
         <div
           className="tb-logo"
-          onClick={() => setViewMode("home")}
+          onClick={() => navigateAppRoute("/")}
           style={{ cursor: "pointer" }}
           title="Back to home"
         >
@@ -4013,15 +4074,15 @@ function App({ initialViewMode = null, initialHomeAction = null } = {}) {
         {/* Center */}
         <div className="center-col">
           <div className="tab-bar">
-            {tabs.map((tb) => (
+            {workspaceTabs.map((tb) => (
               <div
                 key={tb.id}
-                className={`tab ${activeWid === tb.id && activeCenterTab === "topology" ? "active" : ""} ${dirtyTabs[tb.id] ? "dirty" : ""}`}
-                onClick={() => activeWid === tb.id ? setActiveCenterTab("topology") : switchTab(tb.id)}
+                className={`tab ${(isHomeRoute && tb.id === "home") || activeWid === tb.id ? "active" : ""} ${dirtyTabs[tb.id] ? "dirty" : ""}`}
+                onClick={() => !isHomeRoute && activeWid !== tb.id && switchTab(tb.id)}
               >
                 <span className="dot"/>
                 <span style={{ overflow: "hidden", textOverflow: "ellipsis" }}>{tb.name}</span>
-                {tabs.length > 1 && (
+                {!isHomeRoute && tabs.length > 1 && (
                   <span
                     className="close"
                     style={{ marginLeft: 12 }}
@@ -4030,139 +4091,95 @@ function App({ initialViewMode = null, initialHomeAction = null } = {}) {
                 )}
               </div>
             ))}
-            <div className="tab-new" title="New blank tab" onClick={newBlankTab}>+</div>
-            {appTabsForWorkspace.map((item) => {
-              const dev = devices[item.deviceId];
-              const scope = item.scope || (item.id?.startsWith("server-app:") ? "server" : "endpoint");
-              const app = scope === "server" ? serverAppByKey(item.appKey) : endpointAppByKey(item.appKey);
-              if (!dev || !app) return null;
-              return (
-                <div
-                  key={item.id}
-                  className={`tab app-page-tab ${activeCenterTab === item.id ? "active" : ""}`}
-                  onClick={() => setActiveCenterTab(item.id)}
-                  title={`${dev.hostname} - ${app.label}`}
-                >
-                  <AppLibraryIcon kind={app.key} className="tab-app-icon" />
-                  <span style={{ overflow: "hidden", textOverflow: "ellipsis" }}>{dev.hostname} - {app.label}</span>
-                  <span
-                    className="close"
-                    onClick={(e) => { e.stopPropagation(); closeEndpointApp(item.id); }}
-                    title="Close app"
-                  >×</span>
-                </div>
-              );
-            })}
+            <div className="tab-new" title="New blank tab" onClick={() => isHomeRoute ? enterLabFromHome("lab") : newBlankTab()}>+</div>
             <div className="tab-spacer"/>
-            {activeCenterTab === "topology" && <div className="tab-tools">
+            {!isHomeRoute && <div className="tab-tools">
               <div className={`tab-tool ${linkMode ? "active" : ""}`} title="Cable mode (L)" onClick={() => setLinkMode(!linkMode)}>{Icon.link()}</div>
               <div className={`tab-tool ${packetMode ? "active" : ""}`} title="Packet mode (P)" onClick={() => setPacketMode(packetMode ? null : { stage: "src" })}>{Icon.packet()}</div>
             </div>}
           </div>
 
-          {activeAppTab && activeAppDevice && activeEndpointApp ? (
-            <EndpointAppWorkspace
-              tab={activeAppTab}
-              app={activeEndpointApp}
-              device={activeAppDevice}
-              devices={simulatedDevices}
-              links={links}
-              onClose={() => closeEndpointApp(activeAppTab.id)}
-              onUpdateDevice={(mutator, message) => updateEndpointDevice(activeAppDevice.id, mutator, message)}
-              onRunSimulation={(mutator, message) => updateSimulationDevices("endpoint-app", mutator, message)}
-              onApplyCommand={(cmd) => onApplyToDevice(activeAppDevice.id, cmd)}
-              onPing={handlePing}
-              onTraceEvent={(trace) => recordPacketEvent(trace, simulatedDevices)}
-              scrollState={terminalScrolls[activeAppTab.id] || terminalScrolls[activeAppDevice.id]}
-              onScrollStateChange={(devId, state) => setTerminalScrolls((m) => ({ ...m, [activeAppTab.id]: state }))}
-              historyState={cliHistory[activeAppTab.id] || {}}
-              onHistoryChange={(history) => setCliHistory((m) => ({ ...(m && !Array.isArray(m) ? m : {}), [activeAppTab.id]: history }))}
-              ghostSuggestions={cliGhostSuggestions}
-            />
-          ) : activeAppTab && activeAppDevice && activeServerApp ? (
-            <ServerAppWorkspace
-              tab={activeAppTab}
-              app={activeServerApp}
-              device={activeAppDevice}
-              devices={devices}
-              links={links}
-              onClose={() => closeEndpointApp(activeAppTab.id)}
-              onUpdateDevice={(mutator, message) => updateServerDevice(activeAppDevice.id, mutator, message)}
-              onRunSimulation={(mutator, message) => updateSimulationDevices("server-app", mutator, message)}
-              onPing={handlePing}
-            />
+          {isHomeRoute ? (
+            <div className="home-tab-surface">
+              <iframe
+                className="home-tab-frame"
+                src="/home.html"
+                title="OpenPT home"
+                loading="eager"
+              />
+            </div>
           ) : (
-            <Topology
-              devices={simulatedDevices}
-              links={links}
-              selectedIds={selectedIds}
-              onSelect={(id, additive) => selectDevice(id, additive)}
-              selectedLinkId={selectedLinkId}
-              onSelectLink={(id) => { setSelectedLinkId(id); if (id) setSelectedIds([]); }}
-              onMarqueeSelect={(ids, additive) => {
-                setSelectedLinkId(null);
-                setSelectedIds((current) => additive ? [...new Set([...current, ...ids])] : ids);
-              }}
-              onMoveStart={() => {
-                dragStartSnapRef.current = latestTopologyRef.current;
-                suppressHistoryRef.current = true;
-              }}
-              onMoveEnd={(moved) => {
-                const start = dragStartSnapRef.current;
-                suppressHistoryRef.current = false;
-                dragStartSnapRef.current = null;
-                if (!moved || !start) {
-                  prevSnap.current = latestTopologyRef.current;
-                  return;
-                }
-                const h = undoRef.current[activeWid] || (undoRef.current[activeWid] = { past: [], future: [] });
-                h.past.push(start);
-                if (h.past.length > 80) h.past.shift();
-                h.future = [];
+          <Topology
+            devices={simulatedDevices}
+            links={links}
+            selectedIds={selectedIds}
+            onSelect={(id, additive) => selectDevice(id, additive)}
+            selectedLinkId={selectedLinkId}
+            onSelectLink={(id) => { setSelectedLinkId(id); if (id) setSelectedIds([]); }}
+            onMarqueeSelect={(ids, additive) => {
+              setSelectedLinkId(null);
+              setSelectedIds((current) => additive ? [...new Set([...current, ...ids])] : ids);
+            }}
+            onMoveStart={() => {
+              dragStartSnapRef.current = latestTopologyRef.current;
+              suppressHistoryRef.current = true;
+            }}
+            onMoveEnd={(moved) => {
+              const start = dragStartSnapRef.current;
+              suppressHistoryRef.current = false;
+              dragStartSnapRef.current = null;
+              if (!moved || !start) {
                 prevSnap.current = latestTopologyRef.current;
-                setHistoryVersion((n) => n + 1);
-              }}
-              onMoveDevices={(idDeltas) => {
-                if (!markProjectChanged("move-devices")) return;
-                setDevices((m) => {
-                  const next = { ...m };
-                  for (const { id, x, y } of idDeltas) {
-                    if (next[id]) next[id] = { ...next[id], x, y };
-                  }
-                  return next;
-                });
-              }}
-              onAddDevice={addDevice}
-              onDeleteLink={onDeleteLink}
-              linkMode={linkMode}
-              setLinkMode={setLinkMode}
-              forceLinkType={forceLinkType || "auto"}
-              packetMode={packetMode}
-              setPacketMode={setPacketMode}
-              onLinkRequest={onLinkRequest}
-              onPacketRequest={(srcId, dstId) => {
-                const dst = devices[dstId];
-                const target = Object.values(dst?.interfaces || {}).find(i => i.ip)?.ip;
-                if (!target) {
-                  const msg = `${dst?.hostname || "destination"} has no IP address. Configure an interface IP before sending a packet.`;
-                  setToast({ kind: "err", msg });
-                  return log("err", "packet", msg);
+                return;
+              }
+              const h = undoRef.current[activeWid] || (undoRef.current[activeWid] = { past: [], future: [] });
+              h.past.push(start);
+              if (h.past.length > 80) h.past.shift();
+              h.future = [];
+              prevSnap.current = latestTopologyRef.current;
+              setHistoryVersion((n) => n + 1);
+            }}
+            onMoveDevices={(idDeltas) => {
+              if (!markProjectChanged("move-devices")) return;
+              setDevices((m) => {
+                const next = { ...m };
+                for (const { id, x, y } of idDeltas) {
+                  if (next[id]) next[id] = { ...next[id], x, y };
                 }
-                handlePing(srcId, target);
-              }}
-              simRunning={simRunning}
-              packets={packets}
-              activeHopDeviceId={activeHopDeviceId}
-              viewState={topologyViewState}
-              onViewStateChange={setTopologyViewState}
-              starterScreenVisible={starterScreenVisible}
-              onCreateProject={createEmptyProjectFromStarterScreen}
-              onCreateStarter={newStarterTab}
-              onImportPacketTracer={openPacketTracerFilePicker}
-              onOpenConsole={openDeviceModule}
-              onContextMenu={(e, d) => setCtx({ x: e.clientX, y: e.clientY, devId: d.id })}
-              onLinkContextMenu={(e, l) => setCtx({ x: e.clientX, y: e.clientY, linkId: l.id })}
-            />
+                return next;
+              });
+            }}
+            onAddDevice={addDevice}
+            onDeleteLink={onDeleteLink}
+            linkMode={linkMode}
+            setLinkMode={setLinkMode}
+            forceLinkType={forceLinkType || "auto"}
+            packetMode={packetMode}
+            setPacketMode={setPacketMode}
+            onLinkRequest={onLinkRequest}
+            onPacketRequest={(srcId, dstId) => {
+              const dst = devices[dstId];
+              const target = Object.values(dst?.interfaces || {}).find(i => i.ip)?.ip;
+              if (!target) {
+                const msg = `${dst?.hostname || "destination"} has no IP address. Configure an interface IP before sending a packet.`;
+                setToast({ kind: "err", msg });
+                return log("err", "packet", msg);
+              }
+              handlePing(srcId, target);
+            }}
+            simRunning={simRunning}
+            packets={packets}
+            activeHopDeviceId={activeHopDeviceId}
+            viewState={topologyViewState}
+            onViewStateChange={setTopologyViewState}
+            starterScreenVisible={starterScreenVisible}
+            onCreateProject={createEmptyProjectFromStarterScreen}
+            onCreateStarter={newStarterTab}
+            onImportPacketTracer={openPacketTracerFilePicker}
+            onOpenConsole={openDeviceModule}
+            onContextMenu={(e, d) => setCtx({ x: e.clientX, y: e.clientY, devId: d.id })}
+            onLinkContextMenu={(e, l) => setCtx({ x: e.clientX, y: e.clientY, linkId: l.id })}
+          />
           )}
 
           <div className="bottom-panel">
@@ -4188,7 +4205,30 @@ function App({ initialViewMode = null, initialHomeAction = null } = {}) {
                   </div>
                 );
               })}
-              {openConsoles.length > 0 && <div style={{ width: 1, background: "var(--line)" }}/>}
+              {openConsoles.length > 0 && appTabsForWorkspace.length > 0 && <div style={{ width: 1, background: "var(--line)" }}/>}
+              {appTabsForWorkspace.map((item) => {
+                const dev = devices[item.deviceId];
+                const scope = item.scope || (item.id?.startsWith("server-app:") ? "server" : "endpoint");
+                const app = scope === "server" ? serverAppByKey(item.appKey) : endpointAppByKey(item.appKey);
+                if (!dev || !app) return null;
+                return (
+                  <div
+                    key={item.id}
+                    className={`bp-tab app-bottom-tab ${activeBottom === item.id ? "active" : ""}`}
+                    onClick={() => { revealAppPanel(); setActiveBottom(item.id); }}
+                    title={appBottomTabTitle(dev, app)}
+                  >
+                    <AppLibraryIcon kind={app.key} className="tab-app-icon" />
+                    <span>{appBottomTabTitle(dev, app)}</span>
+                    <span
+                      className="close-tab"
+                      onClick={(e) => { e.stopPropagation(); closeEndpointApp(item.id); }}
+                      title="Close app"
+                    >×</span>
+                  </div>
+                );
+              })}
+              {(openConsoles.length > 0 || appTabsForWorkspace.length > 0) && <div style={{ width: 1, background: "var(--line)" }}/>}
               {[
                 ["events", "Events", events.length || null],
                 ["packets", "Packets", packetEvents.length || null],
@@ -4243,7 +4283,44 @@ function App({ initialViewMode = null, initialHomeAction = null } = {}) {
                   />
                 </div>
               ))}
-              {openConsoles.length === 0 && activeBottom !== "events" && activeBottom !== "packets" && (
+              {activeAppTab && activeAppDevice && activeEndpointApp && (
+                <div style={{ position: "absolute", inset: 0, display: activeBottom === activeAppTab.id ? "block" : "none" }}>
+                  <EndpointAppWorkspace
+                    tab={activeAppTab}
+                    app={activeEndpointApp}
+                    device={activeAppDevice}
+                    devices={simulatedDevices}
+                    links={links}
+                    onClose={() => closeEndpointApp(activeAppTab.id)}
+                    onUpdateDevice={(mutator, message) => updateEndpointDevice(activeAppDevice.id, mutator, message)}
+                    onRunSimulation={(mutator, message) => updateSimulationDevices("endpoint-app", mutator, message)}
+                    onApplyCommand={(cmd) => onApplyToDevice(activeAppDevice.id, cmd)}
+                    onPing={handlePing}
+                    onTraceEvent={(trace) => recordPacketEvent(trace, simulatedDevices)}
+                    scrollState={terminalScrolls[activeAppTab.id] || terminalScrolls[activeAppDevice.id]}
+                    onScrollStateChange={(devId, state) => setTerminalScrolls((m) => ({ ...m, [activeAppTab.id]: state }))}
+                    historyState={cliHistory[activeAppTab.id] || {}}
+                    onHistoryChange={(history) => setCliHistory((m) => ({ ...(m && !Array.isArray(m) ? m : {}), [activeAppTab.id]: history }))}
+                    ghostSuggestions={cliGhostSuggestions}
+                  />
+                </div>
+              )}
+              {activeAppTab && activeAppDevice && activeServerApp && (
+                <div style={{ position: "absolute", inset: 0, display: activeBottom === activeAppTab.id ? "block" : "none" }}>
+                  <ServerAppWorkspace
+                    tab={activeAppTab}
+                    app={activeServerApp}
+                    device={activeAppDevice}
+                    devices={devices}
+                    links={links}
+                    onClose={() => closeEndpointApp(activeAppTab.id)}
+                    onUpdateDevice={(mutator, message) => updateServerDevice(activeAppDevice.id, mutator, message)}
+                    onRunSimulation={(mutator, message) => updateSimulationDevices("server-app", mutator, message)}
+                    onPing={handlePing}
+                  />
+                </div>
+              )}
+              {openConsoles.length === 0 && !activeAppTab && activeBottom !== "events" && activeBottom !== "packets" && activeBottom !== "validation" && (
                 <div style={{ position: "absolute", inset: 0, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", color: "var(--fg-3)", gap: 8 }}>
                   <div style={{ fontSize: 13, color: "var(--fg-2)" }}>No consoles open</div>
                   <div style={{ fontSize: 11.5 }}>Right-click a device on the canvas → Open Console</div>
@@ -4298,6 +4375,7 @@ function App({ initialViewMode = null, initialHomeAction = null } = {}) {
               device={selected}
               activeTab={serverModuleTab}
               activeConfig={serverConfigSection}
+              activeAppKey={activeAppTab?.deviceId === selected.id && activeAppScope === "server" ? activeAppTab.appKey : null}
               onTabChange={setServerModuleTab}
               onConfigChange={setServerConfigSection}
               onUpdate={(mutator, message) => updateServerDevice(selected.id, mutator, message)}
@@ -6637,7 +6715,7 @@ function PacketTracerAssessmentRows({ items, empty }) {
   );
 }
 
-function ServerModuleSidebar({ device, activeTab, activeConfig, onTabChange, onConfigChange, onUpdate, onOpenApp, onClose }) {
+function ServerModuleSidebar({ device, activeTab, activeConfig, activeAppKey, onTabChange, onConfigChange, onUpdate, onOpenApp, onClose }) {
   const cfg = ensureServerConfig(device);
   return (
     <aside className="server-module-sidebar" aria-label={`${device.hostname} server module`}>
@@ -6653,7 +6731,7 @@ function ServerModuleSidebar({ device, activeTab, activeConfig, onTabChange, onC
         <button type="button" className={activeTab === "desktop" ? "active" : ""} onClick={() => onTabChange("desktop")}>Desktop</button>
       </div>
       {activeTab === "desktop" ? (
-        <ServerDesktopPanel onOpenApp={onOpenApp} />
+        <ServerDesktopPanel activeAppKey={activeAppKey} onOpenApp={onOpenApp} />
       ) : (
         <ServerConfigPanel device={device} cfg={cfg} activeConfig={activeConfig} onConfigChange={onConfigChange} onUpdate={onUpdate} />
       )}
@@ -7085,7 +7163,8 @@ function AppsSidebar({ device, activeAppKey, onOpenApp, onClose }) {
             title={item.label}
           >
             <AppLibraryIcon kind={item.key} />
-            <span>{item.label}</span>
+            <span className="apps-card-label">{item.label}</span>
+            <small>{item.kind}</small>
           </button>
         ))}
       </div>
@@ -7801,7 +7880,7 @@ function endpointUtilitySpec(key) {
   ] };
 }
 
-function ServerDesktopPanel({ onOpenApp }) {
+function ServerDesktopPanel({ activeAppKey, onOpenApp }) {
   return (
     <div className="server-desktop-panel" aria-label="Server Desktop tools">
       <div className="server-desktop-list" role="table" aria-label="Server desktop applications">
@@ -7810,7 +7889,7 @@ function ServerDesktopPanel({ onOpenApp }) {
           <span>Kind</span>
         </div>
         {SERVER_DESKTOP_APPS.map((app) => (
-          <button key={app.key} type="button" className="server-desktop-row" role="row" onClick={() => onOpenApp?.(app.key)} title={app.label}>
+          <button key={app.key} type="button" className={`server-desktop-row ${activeAppKey === app.key ? "active" : ""}`} role="row" onClick={() => onOpenApp?.(app.key)} title={app.label}>
             <span className="server-desktop-name" role="cell">
               <AppLibraryIcon kind={app.key} className="server-desktop-icon" />
               <span>{app.label}</span>

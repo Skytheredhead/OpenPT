@@ -585,7 +585,6 @@ function HomePage({ onEnterLab, onEnterStarter, onEnterImport, onStartQuiz, onSt
 
   return (
     <div className="home-root">
-      {/* Nav */}
       <nav className="home-nav">
         <div className="home-nav-logo">
           <span className="home-nav-glyph"/>
@@ -619,7 +618,6 @@ function HomePage({ onEnterLab, onEnterStarter, onEnterImport, onStartQuiz, onSt
         </div>
       </section>
 
-      {/* Simulator marquee — the headline act */}
       <section className="home-marquee">
         <div className="home-marquee-head">
           <h2 className="home-h2">Ooh an interactable demo!</h2>
@@ -666,7 +664,6 @@ function HomePage({ onEnterLab, onEnterStarter, onEnterImport, onStartQuiz, onSt
             <div className="home-feat-p">Saves in-browser??? No way! Did I mention you can import <code>.pka</code> files?</div>
           </div>
         </div>
-
       </section>
 
       {/* Practice — second pillar */}

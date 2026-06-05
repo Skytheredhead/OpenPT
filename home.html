@@ -1,0 +1,164 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>OpenPT Home</title>
+<style>
+  :root {
+    --bg-0: #0d1012;
+    --bg-1: #12161a;
+    --bg-2: #171d22;
+    --line: rgba(143, 158, 173, 0.22);
+    --line-soft: rgba(143, 158, 173, 0.12);
+    --fg-0: #f2f5f7;
+    --fg-1: #c3cbd1;
+    --fg-2: #87919a;
+    --fg-3: #535e67;
+    --accent: #36c5f0;
+    --accent-dim: rgba(54, 197, 240, 0.56);
+    --accent-soft: rgba(54, 197, 240, 0.12);
+    --ok: #42d681;
+    --warn: #f0bd4f;
+    font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  }
+  * { box-sizing: border-box; }
+  html {
+    height: 100%;
+    min-height: 100%;
+    background:
+      radial-gradient(circle at 82% 8%, rgba(54, 197, 240, 0.11), transparent 34rem),
+      radial-gradient(circle at 10% 88%, rgba(66, 214, 129, 0.07), transparent 28rem),
+      var(--bg-0);
+  }
+  body {
+    margin: 0;
+    min-height: 100vh;
+    background: transparent;
+    color: var(--fg-0);
+    overflow-x: hidden;
+  }
+  main {
+    width: min(1120px, calc(100% - 48px));
+    margin: 0 auto;
+    padding: 58px 0 68px;
+    min-height: 100vh;
+  }
+  .hero {
+    display: block;
+  }
+  h1 {
+    margin: 0;
+    max-width: 820px;
+    font-size: clamp(52px, 7.5vw, 94px);
+    line-height: 0.98;
+    letter-spacing: 0;
+    font-weight: 760;
+  }
+  h1 span {
+    display: block;
+    margin-top: 10px;
+    color: var(--fg-3);
+    font-weight: 660;
+  }
+  .lede {
+    max-width: 650px;
+    margin: 28px 0 0;
+    color: var(--fg-1);
+    font-size: 16px;
+    line-height: 1.65;
+  }
+  .actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 12px;
+    margin-top: 36px;
+  }
+  button, a.button {
+    appearance: none;
+    min-height: 44px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0 18px;
+    border-radius: 7px;
+    border: 1px solid var(--line);
+    background: rgba(18, 22, 26, 0.8);
+    color: var(--fg-0);
+    font: inherit;
+    font-size: 13px;
+    font-weight: 620;
+    text-decoration: none;
+    cursor: pointer;
+  }
+  button:hover, a.button:hover {
+    border-color: rgba(195, 203, 209, 0.42);
+    background: var(--bg-2);
+  }
+  button.primary {
+    color: var(--accent);
+    border-color: var(--accent-dim);
+    background: var(--accent-soft);
+  }
+  @media (max-width: 860px) {
+    main {
+      width: min(100% - 32px, 680px);
+      padding-top: 38px;
+    }
+    .hero {
+      grid-template-columns: 1fr;
+      gap: 32px;
+    }
+    h1 {
+      font-size: clamp(42px, 12vw, 68px);
+    }
+    .actions {
+      display: grid;
+      grid-template-columns: 1fr;
+    }
+  }
+</style>
+</head>
+<body>
+<main>
+  <section class="hero">
+    <div>
+      <h1>The best packet tracing simulation.</h1>
+      <p class="lede">
+        OpenPT is a free, open source browser alternative to the packet tracer we all know and do not love.
+        Build labs, import assignments, practice real commands, and jump into quizzes without leaving the browser.
+      </p>
+      <div class="actions">
+        <button class="primary" type="button" data-action="lab">create new lab</button>
+        <button type="button" data-action="quiz">open quiz library</button>
+        <button type="button" data-action="jeopardy">Play Jeopardy</button>
+      </div>
+    </div>
+  </section>
+</main>
+
+<script>
+  (function () {
+    function direct(action) {
+      if (action === "quiz") location.href = "/quiz/?view=library";
+      else if (action === "jeopardy") location.href = "/jeopardy";
+      else if (action === "import") location.href = "/lab?import=1";
+      else location.href = "/lab";
+    }
+    function send(action) {
+      if (window.parent && window.parent !== window) {
+        window.parent.postMessage({ type: "openpt:home-action", action: action }, location.origin);
+      } else {
+        direct(action);
+      }
+    }
+    document.addEventListener("click", function (event) {
+      var button = event.target.closest("[data-action]");
+      if (!button) return;
+      event.preventDefault();
+      send(button.getAttribute("data-action"));
+    });
+  })();
+</script>
+</body>
+</html>

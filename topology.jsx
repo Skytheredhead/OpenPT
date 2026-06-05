@@ -334,6 +334,10 @@ function Topology(props) {
     }
     return Array.from(groups.entries());
   };
+  const estimateLinkLabelWidth = (text) => {
+    const chars = Math.min(String(text || "").length, 12);
+    return 24 + chars * 5.8;
+  };
   const linkGeometries = React.useMemo(() => {
     const pairGroups = new Map();
     links.forEach((l) => {
@@ -367,6 +371,14 @@ function Topology(props) {
       const ey = b.y - ty * r + py * endShift;
       const cx = (a.x + b.x) / 2 + px * curveShift;
       const cy = (a.y + b.y) / 2 + py * curveShift;
+      const cableLen = Math.hypot(ex - sx, ey - sy) || len;
+      const labelAWidth = estimateLinkLabelWidth(ifaceName(l.ai));
+      const labelBWidth = estimateLinkLabelWidth(ifaceName(l.bi));
+      const minLabelGap = 18;
+      const requiredLabelDelta = Math.min(0.7, (labelAWidth / 2 + labelBWidth / 2 + minLabelGap) / cableLen);
+      const labelDelta = Math.max(slot.count > 1 ? 0.38 : 0.44, requiredLabelDelta);
+      const labelAOffset = 0.5 - labelDelta / 2;
+      const labelBOffset = 0.5 + labelDelta / 2;
       const pointOnCable = (t) => {
         if (slot.count <= 1) return { x: sx + (ex - sx) * t, y: sy + (ey - sy) * t };
         const inv = 1 - t;
@@ -375,8 +387,8 @@ function Topology(props) {
           y: inv * inv * sy + 2 * inv * t * cy + t * t * ey,
         };
       };
-      const labelA = pointOnCable(slot.count > 1 ? 0.32 : 0.43);
-      const labelB = pointOnCable(slot.count > 1 ? 0.68 : 0.57);
+      const labelA = pointOnCable(labelAOffset);
+      const labelB = pointOnCable(labelBOffset);
       const statusA = pointOnCable(slot.count > 1 ? 0.17 : 0.12);
       const statusB = pointOnCable(slot.count > 1 ? 0.83 : 0.88);
       let angle = Math.atan2(dy, dx) * 180 / Math.PI;

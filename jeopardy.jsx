@@ -4,6 +4,8 @@
 const { useEffect: useJeopardyEffect, useMemo: useJeopardyMemo, useRef: useJeopardyRef, useState: useJeopardyState } = React;
 
 const JEOPARDY_POINTS = [100, 200, 300, 400, 500];
+const JEOPARDY_VISIBLE_COLUMNS = 5;
+const JEOPARDY_DAILY_DOUBLES = 2;
 const JEOPARDY_STORAGE_KEY = "openpt:jeopardy";
 const JEOPARDY_MUSIC_SRC = "/jeopardy-theme.m4a";
 const JEOPARDY_MUSIC_VOLUME = 0.38;
@@ -159,6 +161,7 @@ function normalizeJeopardyQuestion(item, index) {
     explanation: String(item?.x || item?.explanation || "").trim(),
     course: item?.course || "",
     exam: item?.exam || "",
+    lab: !!item?.lab,
   };
 }
 
@@ -169,6 +172,15 @@ function questionTopicText(question) {
 function topicScore(question, topic) {
   const text = questionTopicText(question);
   return topic.terms.reduce((score, term) => score + (text.includes(term) ? 1 : 0), 0);
+}
+
+function bestTopicForQuestions(questions, salt = 0) {
+  let best = null;
+  for (const topic of JEOPARDY_TOPIC_RULES) {
+    const score = questions.reduce((total, question) => total + topicScore(question, topic), 0);
+    if (!best || score > best.score) best = { topic, score };
+  }
+  return best?.score > 0 ? best.topic : JEOPARDY_TOPIC_RULES[salt % JEOPARDY_TOPIC_RULES.length];
 }
 
 function questionDifficulty(question) {
@@ -203,10 +215,10 @@ function todaySeed() {
   return `${date.getFullYear()}-${date.getMonth() + 1}-${date.getDate()}`;
 }
 
-function buildJeopardyBoard(rawQuestions, gameSeed, deckId) {
+function buildJeopardyColumns(rawQuestions, gameSeed, deckId) {
   const normalized = (rawQuestions || [])
     .map(normalizeJeopardyQuestion)
-    .filter((question) => question.prompt && question.answerText.length);
+    .filter((question) => question.prompt && question.answerText.length && !question.lab);
   const decked = normalized.filter((question) => deckId === "all" || String(question.source || "") === deckId);
   const pool = decked.length >= JEOPARDY_POINTS.length ? decked : normalized;
   const used = new Set();
@@ -243,10 +255,10 @@ function buildJeopardyBoard(rawQuestions, gameSeed, deckId) {
   for (let index = 0; index + JEOPARDY_POINTS.length <= leftovers.length; index += JEOPARDY_POINTS.length) {
     const selected = leftovers.slice(index, index + JEOPARDY_POINTS.length);
     selected.forEach((question) => used.add(question.id));
+    const topic = bestTopicForQuestions(selected, columns.length);
     columns.push(makeColumn({
-      id: `mixed-${Math.floor(index / JEOPARDY_POINTS.length) + 1}`,
-      title: `Mixed Review ${Math.floor(index / JEOPARDY_POINTS.length) + 1}`,
-      terms: [],
+      ...topic,
+      id: `${topic.id}-extra-${Math.floor(index / JEOPARDY_POINTS.length) + 1}`,
     }, selected, columns.length));
   }
 
@@ -254,14 +266,45 @@ function buildJeopardyBoard(rawQuestions, gameSeed, deckId) {
     const fallback = jeopardyShuffle(pool, `${gameSeed}:${deckId}:fallback`);
     for (let index = 0; index + JEOPARDY_POINTS.length <= fallback.length; index += JEOPARDY_POINTS.length) {
       columns.push(makeColumn({
-        id: `review-${Math.floor(index / JEOPARDY_POINTS.length) + 1}`,
-        title: `Review ${Math.floor(index / JEOPARDY_POINTS.length) + 1}`,
-        terms: [],
+        ...JEOPARDY_TOPIC_RULES[Math.floor(index / JEOPARDY_POINTS.length) % JEOPARDY_TOPIC_RULES.length],
+        id: `fallback-${Math.floor(index / JEOPARDY_POINTS.length) + 1}`,
       }, fallback.slice(index, index + JEOPARDY_POINTS.length), columns.length));
     }
   }
 
   return jeopardyShuffle(columns, `${gameSeed}:${deckId}:columns`);
+}
+
+function buildJeopardyBoard(rawQuestions, gameSeed, deckId, boardRound = 0) {
+  const columns = buildJeopardyColumns(rawQuestions, gameSeed, deckId);
+  const visibleColumns = columns.length <= JEOPARDY_VISIBLE_COLUMNS ? columns : (() => {
+    const start = (Math.max(0, Number(boardRound) || 0) * JEOPARDY_VISIBLE_COLUMNS) % columns.length;
+    const ordered = Array.from({ length: columns.length }, (_, index) => columns[(start + index) % columns.length]);
+    const titles = new Set();
+    const selected = [];
+    for (const column of ordered) {
+      if (titles.has(column.title)) continue;
+      selected.push(column);
+      titles.add(column.title);
+      if (selected.length === JEOPARDY_VISIBLE_COLUMNS) return selected;
+    }
+    for (const column of ordered) {
+      if (selected.includes(column)) continue;
+      selected.push(column);
+      if (selected.length === JEOPARDY_VISIBLE_COLUMNS) return selected;
+    }
+    return selected;
+  })();
+  const dailyDoubleIds = new Set(
+    jeopardyShuffle(
+      visibleColumns.flatMap((column) => column.clues.map((clue) => clue.id)),
+      `${gameSeed}:${deckId}:${boardRound}:daily-doubles`
+    ).slice(0, Math.min(JEOPARDY_DAILY_DOUBLES, visibleColumns.flatMap((column) => column.clues).length))
+  );
+  return visibleColumns.map((column) => ({
+    ...column,
+    clues: column.clues.map((clue) => ({ ...clue, dailyDouble: dailyDoubleIds.has(clue.id) })),
+  }));
 }
 
 function ccnaBVersionNumber(source) {
@@ -293,6 +336,10 @@ function JeopardyPage() {
     try { return JSON.parse(localStorage.getItem(JEOPARDY_STORAGE_KEY) || "{}").seed || todaySeed(); }
     catch (e) { return todaySeed(); }
   });
+  const [boardRound, setBoardRound] = useJeopardyState(() => {
+    try { return Number(JSON.parse(localStorage.getItem(JEOPARDY_STORAGE_KEY) || "{}").boardRound) || 0; }
+    catch (e) { return 0; }
+  });
   const [teams, setTeams] = useJeopardyState(() => {
     try {
       const saved = JSON.parse(localStorage.getItem(JEOPARDY_STORAGE_KEY) || "{}").teams;
@@ -314,8 +361,19 @@ function JeopardyPage() {
   const [settingsOpen, setSettingsOpen] = useJeopardyState(false);
   const [deckMenuOpen, setDeckMenuOpen] = useJeopardyState(false);
   const [answerShown, setAnswerShown] = useJeopardyState(false);
+  const [selectedAnswers, setSelectedAnswers] = useJeopardyState([]);
   const [timer, setTimer] = useJeopardyState(30);
   const [timerRunning, setTimerRunning] = useJeopardyState(false);
+  const [scoreMultiplier, setScoreMultiplier] = useJeopardyState(() => {
+    try { return Number(JSON.parse(localStorage.getItem(JEOPARDY_STORAGE_KEY) || "{}").scoreMultiplier) || 1; }
+    catch (e) { return 1; }
+  });
+  const [activeTeamId, setActiveTeamId] = useJeopardyState(() => {
+    try { return JSON.parse(localStorage.getItem(JEOPARDY_STORAGE_KEY) || "{}").activeTeamId || "team-1"; }
+    catch (e) { return "team-1"; }
+  });
+  const [dailyDoubleWager, setDailyDoubleWager] = useJeopardyState("");
+  const [boardPhase, setBoardPhase] = useJeopardyState("");
   const [finalOpen, setFinalOpen] = useJeopardyState(false);
   const [finalAnswerShown, setFinalAnswerShown] = useJeopardyState(false);
   const [musicEnabled, setMusicEnabled] = useJeopardyState(() => {
@@ -336,8 +394,9 @@ function JeopardyPage() {
   const audioFadeHandlesRef = useJeopardyRef(new WeakMap());
   const timerWarningPlayedRef = useJeopardyRef(false);
   const clueCloseTimerRef = useJeopardyRef(null);
+  const boardAdvanceTimerRef = useJeopardyRef(null);
 
-  const board = useJeopardyMemo(() => buildJeopardyBoard(rawQuestions, seed, deckId), [rawQuestions.length, seed, deckId]);
+  const board = useJeopardyMemo(() => buildJeopardyBoard(rawQuestions, seed, deckId, boardRound), [rawQuestions.length, seed, deckId, boardRound]);
   const allClues = useJeopardyMemo(() => board.flatMap((column) => column.clues), [board]);
   const orderedTeams = useJeopardyMemo(() => orderJeopardyTeams(teams), [teams]);
   const selectedDeck = decks.find((deck) => deck.id === deckId) || decks[0] || { id: "all", title: "All Versions" };
@@ -354,6 +413,7 @@ function JeopardyPage() {
 
   useJeopardyEffect(() => () => {
     if (clueCloseTimerRef.current) window.clearTimeout(clueCloseTimerRef.current);
+    if (boardAdvanceTimerRef.current) window.clearTimeout(boardAdvanceTimerRef.current);
   }, []);
 
   useJeopardyEffect(() => {
@@ -361,8 +421,55 @@ function JeopardyPage() {
   }, [deckId, decks]);
 
   useJeopardyEffect(() => {
-    localStorage.setItem(JEOPARDY_STORAGE_KEY, JSON.stringify({ deckId, seed, teams, answered, musicEnabled, finalScored }));
-  }, [deckId, seed, teams, answered, musicEnabled, finalScored]);
+    localStorage.setItem(JEOPARDY_STORAGE_KEY, JSON.stringify({ deckId, seed, boardRound, teams, answered, musicEnabled, finalScored, scoreMultiplier, activeTeamId }));
+  }, [deckId, seed, boardRound, teams, answered, musicEnabled, finalScored, scoreMultiplier, activeTeamId]);
+
+  useJeopardyEffect(() => {
+    if (!teams.some((team) => team.id === activeTeamId)) setActiveTeamId(orderedTeams[0]?.id || "team-1");
+  }, [teams, activeTeamId, orderedTeams]);
+
+  useJeopardyEffect(() => {
+    if (!allClues.length) return;
+    const complete = allClues.every((clue) => answered[clue.id]);
+    if (!complete) return;
+    if (boardAdvanceTimerRef.current) window.clearTimeout(boardAdvanceTimerRef.current);
+    boardAdvanceTimerRef.current = window.setTimeout(() => {
+      setBoardPhase("flip-out");
+      boardAdvanceTimerRef.current = window.setTimeout(() => {
+      setAnswered({});
+      setActiveClue(null);
+      setClueClosing(false);
+      setBoardRound((round) => round + 1);
+      setScoreMultiplier((multiplier) => multiplier < 2 ? 2 : multiplier < 3 ? 3 : 3);
+      setBoardPhase("flip-in");
+        boardAdvanceTimerRef.current = window.setTimeout(() => {
+          setBoardPhase("");
+          boardAdvanceTimerRef.current = null;
+        }, 420);
+      }, 320);
+    }, 520);
+    return () => {
+      if (boardAdvanceTimerRef.current) {
+        window.clearTimeout(boardAdvanceTimerRef.current);
+        boardAdvanceTimerRef.current = null;
+      }
+    };
+  }, [allClues, answered]);
+
+  useJeopardyEffect(() => {
+    if (!activeClue) return;
+    const handle = (event) => {
+      if (event.metaKey || event.ctrlKey || event.altKey) return;
+      const key = String(event.key || "").toLowerCase();
+      const index = key.length === 1 ? key.charCodeAt(0) - 97 : -1;
+      if (index >= 0 && index < activeClue.question.options.length) {
+        event.preventDefault();
+        toggleChoice(index);
+      }
+    };
+    window.addEventListener("keydown", handle);
+    return () => window.removeEventListener("keydown", handle);
+  }, [activeClue, answerShown, selectedAnswers]);
 
   useJeopardyEffect(() => {
     const music = musicRef.current;
@@ -497,6 +604,47 @@ function JeopardyPage() {
     fadeOutAudio(music);
   };
 
+  const clueValue = (clue = activeClue) => (Number(clue?.points) || 0) * scoreMultiplier;
+
+  const clueScoreDelta = (delta, clue = activeClue) => {
+    if (!clue) return 0;
+    const sign = delta < 0 ? -1 : 1;
+    const wager = Number(dailyDoubleWager);
+    const value = clue.dailyDouble && Number.isFinite(wager) && wager > 0 ? wager : clueValue(clue);
+    return sign * value;
+  };
+
+  const toggleMultiplier = (multiplier) => {
+    setScoreMultiplier(multiplier);
+  };
+
+  const openFinalJeopardy = () => {
+    setSettingsOpen(false);
+    setDeckMenuOpen(false);
+    setFinalAnswerShown(false);
+    setFinalOpen(true);
+    playSfx("finalSting");
+    restartMusic();
+  };
+
+  const revealAnswer = () => {
+    if (answerShown) return;
+    playSfx("answerReveal");
+    setAnswerShown(true);
+    stopMusic();
+  };
+
+  const toggleChoice = (index) => {
+    if (!activeClue || answerShown) return;
+    setSelectedAnswers((items) => {
+      if (activeClue.question.multi) {
+        return items.includes(index) ? items.filter((item) => item !== index) : [...items, index];
+      }
+      return [index];
+    });
+    revealAnswer();
+  };
+
   const openClue = (clue) => {
     if (!clue || answered[clue.id]) return;
     setSettingsOpen(false);
@@ -508,6 +656,8 @@ function JeopardyPage() {
     setClueClosing(false);
     setActiveClue(clue);
     setAnswerShown(false);
+    setSelectedAnswers([]);
+    setDailyDoubleWager(String(clueValue(clue)));
     setTimer(30);
     setTimerRunning(false);
     timerWarningPlayedRef.current = false;
@@ -530,8 +680,10 @@ function JeopardyPage() {
   const award = (teamId, delta, clue = activeClue) => {
     if (!teamId || !clue) return;
     playSfx(delta >= 0 ? "correct" : "incorrect");
-    setTeams((items) => items.map((team) => team.id === teamId ? { ...team, score: team.score + delta } : team));
-    setAnswered((items) => ({ ...items, [clue.id]: { teamId, delta, at: Date.now() } }));
+    const scoreDelta = clueScoreDelta(delta, clue);
+    setActiveTeamId(teamId);
+    setTeams((items) => items.map((team) => team.id === teamId ? { ...team, score: team.score + scoreDelta } : team));
+    setAnswered((items) => ({ ...items, [clue.id]: { teamId, delta: scoreDelta, dailyDouble: !!clue.dailyDouble, at: Date.now() } }));
     closeClue({ fadeSfx: false });
   };
 
@@ -543,12 +695,19 @@ function JeopardyPage() {
     setTeams((items) => {
       if (items.length >= 6) return items;
       const next = items.length + 1;
-      return [...items, { id: `team-${Date.now()}`, name: `Team ${next}`, score: 0 }];
+      const team = { id: `team-${Date.now()}`, name: `Team ${next}`, score: 0 };
+      setActiveTeamId((current) => current || team.id);
+      return [...items, team];
     });
   };
 
   const removeTeam = (teamId) => {
-    setTeams((items) => items.length <= 2 ? items : items.filter((team) => team.id !== teamId));
+    setTeams((items) => {
+      if (items.length <= 2) return items;
+      const next = items.filter((team) => team.id !== teamId);
+      if (activeTeamId === teamId) setActiveTeamId(next[0]?.id || "team-1");
+      return next;
+    });
   };
 
   const resetScores = () => {
@@ -559,9 +718,15 @@ function JeopardyPage() {
 
   const resetBoard = () => {
     setDeckMenuOpen(false);
+    if (boardAdvanceTimerRef.current) {
+      window.clearTimeout(boardAdvanceTimerRef.current);
+      boardAdvanceTimerRef.current = null;
+    }
     setAnswered({});
     setActiveClue(null);
     setClueClosing(false);
+    setSelectedAnswers([]);
+    setBoardPhase("");
     setFinalOpen(false);
     setFinalAnswerShown(false);
     setWagers({});
@@ -573,10 +738,18 @@ function JeopardyPage() {
   const newGame = () => {
     setSettingsOpen(false);
     setDeckMenuOpen(false);
+    if (boardAdvanceTimerRef.current) {
+      window.clearTimeout(boardAdvanceTimerRef.current);
+      boardAdvanceTimerRef.current = null;
+    }
     setSeed(`${todaySeed()}-${Date.now()}`);
+    setBoardRound(0);
     setAnswered({});
     setActiveClue(null);
     setClueClosing(false);
+    setSelectedAnswers([]);
+    setBoardPhase("");
+    setScoreMultiplier(1);
     setFinalOpen(false);
     setFinalAnswerShown(false);
     setWagers({});
@@ -589,9 +762,16 @@ function JeopardyPage() {
   const changeDeck = (nextDeckId) => {
     setDeckId(nextDeckId);
     setDeckMenuOpen(false);
+    if (boardAdvanceTimerRef.current) {
+      window.clearTimeout(boardAdvanceTimerRef.current);
+      boardAdvanceTimerRef.current = null;
+    }
+    setBoardRound(0);
     setAnswered({});
     setActiveClue(null);
     setClueClosing(false);
+    setSelectedAnswers([]);
+    setBoardPhase("");
     setFinalOpen(false);
     setFinalAnswerShown(false);
     setWagers({});
@@ -634,6 +814,12 @@ function JeopardyPage() {
           <span>OpenPT</span>
         </a>
         <div className="jeopardy-controls">
+          <div className="jeopardy-multiplier" aria-label="Jeopardy multiplier">
+            <button type="button" className={scoreMultiplier === 1 ? "active" : ""} onClick={() => toggleMultiplier(1)}>x1</button>
+            <button type="button" className={scoreMultiplier === 2 ? "active" : ""} onClick={() => toggleMultiplier(2)}>x2</button>
+            <button type="button" className={scoreMultiplier === 3 ? "active" : ""} onClick={() => toggleMultiplier(3)}>x3</button>
+            <button type="button" className="final" onClick={openFinalJeopardy}>Final</button>
+          </div>
           <button
             type="button"
             className={`jeopardy-icon-btn ${settingsOpen ? "active" : ""}`}
@@ -677,7 +863,6 @@ function JeopardyPage() {
               </div>
               <button type="button" className="jeopardy-btn" onClick={resetBoard}>Clear Board</button>
               <button type="button" className="jeopardy-btn" onClick={resetScores}>Reset Scores</button>
-              <button type="button" className="jeopardy-btn" onClick={() => { setFinalAnswerShown(false); setFinalOpen(true); playSfx("finalSting"); restartMusic(); }}>Final Jeopardy</button>
               <button
                 type="button"
                 className={`jeopardy-btn ${musicEnabled ? "active" : ""}`}
@@ -698,16 +883,22 @@ function JeopardyPage() {
       <main className="jeopardy-stage">
         <section className="jeopardy-scoreboard" aria-label="Teams">
           {orderedTeams.map((team) => (
-            <div className="jeopardy-team" key={team.id}>
-              <input
-                aria-label={`${team.name} name`}
-                value={team.name}
-                onChange={(event) => updateTeam(team.id, { name: event.target.value })}
-              />
-              <strong>{team.score}</strong>
+            <div className={`jeopardy-team ${team.id === activeTeamId ? "active" : ""}`} key={team.id}>
+              <div className="jeopardy-team-head">
+                <input
+                  aria-label={`${team.name} name`}
+                  value={team.name}
+                  onFocus={() => setActiveTeamId(team.id)}
+                  onChange={(event) => updateTeam(team.id, { name: event.target.value })}
+                />
+                <strong>{team.score}</strong>
+              </div>
+              <div className="jeopardy-current-turn" aria-hidden={team.id !== activeTeamId}>
+                {team.id === activeTeamId ? "Current Turn" : " "}
+              </div>
               <div className="jeopardy-team-actions">
-                <button type="button" onClick={() => { playSfx("scoreChange"); updateTeam(team.id, { score: team.score - 100 }); }}>-100</button>
-                <button type="button" onClick={() => { playSfx("scoreChange"); updateTeam(team.id, { score: team.score + 100 }); }}>+100</button>
+                <button type="button" onClick={() => { setActiveTeamId(team.id); playSfx("scoreChange"); updateTeam(team.id, { score: team.score - 100 }); }}>-100</button>
+                <button type="button" onClick={() => { setActiveTeamId(team.id); playSfx("scoreChange"); updateTeam(team.id, { score: team.score + 100 }); }}>+100</button>
                 <button type="button" disabled={teams.length <= 2} onClick={() => removeTeam(team.id)}>Remove</button>
               </div>
             </div>
@@ -716,7 +907,7 @@ function JeopardyPage() {
         </section>
 
         <section className="jeopardy-board-shell">
-          <div className="jeopardy-board" style={{ "--jeopardy-columns": board.length }}>
+          <div className={`jeopardy-board ${boardPhase}`} style={{ "--jeopardy-columns": board.length }}>
             {board.map((column) => (
               <div className="jeopardy-column" key={column.id}>
                 <div className="jeopardy-category">{column.title}</div>
@@ -728,9 +919,10 @@ function JeopardyPage() {
                       className={`jeopardy-tile ${done ? "answered" : ""}`}
                       key={clue.id}
                       disabled={done}
+                      data-daily-double={clue.dailyDouble ? "true" : undefined}
                       onClick={() => openClue(clue)}
                     >
-                      {done ? "Done" : clue.points}
+                      {done ? "Done" : clueValue(clue)}
                     </button>
                   );
                 })}
@@ -741,32 +933,28 @@ function JeopardyPage() {
       </main>
 
       {activeClue && (
-        <div className={`jeopardy-modal-backdrop ${clueClosing ? "closing" : "opening"}`} role="dialog" aria-modal="true" aria-labelledby="jeopardy-clue-title">
+        <div
+          className={`jeopardy-modal-backdrop ${clueClosing ? "closing" : "opening"}`}
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="jeopardy-clue-title"
+          onClick={(event) => {
+            if (event.target === event.currentTarget) closeClue();
+          }}
+        >
           <div className={`jeopardy-modal quiz-card-mode ${answerShown ? "answer-visible" : ""} ${clueClosing ? "closing" : "opening"}`}>
             <div className="jeopardy-modal-head">
               <div>
-                <h2 id="jeopardy-clue-title">{activeClue.category} for {activeClue.points}</h2>
+                <h2 id="jeopardy-clue-title">
+                  {activeClue.dailyDouble ? "Daily Double" : `${activeClue.category} for ${clueValue(activeClue)}`}
+                </h2>
+                {activeClue.dailyDouble && (
+                  <div className="jeopardy-modal-kicker">{activeClue.category} for {clueValue(activeClue)}</div>
+                )}
               </div>
               <button type="button" className="jeopardy-close" aria-label="Close" onClick={() => closeClue()}>
                 <span aria-hidden="true">&times;</span>
               </button>
-            </div>
-
-            <div className="jeopardy-awards top">
-              {orderedTeams.map((team) => (
-                <div className="jeopardy-award-team" key={team.id}>
-                  <span>{team.name}</span>
-                  <button type="button" onClick={() => award(team.id, activeClue.points)}>Correct</button>
-                  <button type="button" onClick={() => award(team.id, -activeClue.points)}>Incorrect</button>
-                </div>
-              ))}
-              <div className="jeopardy-awards-actions">
-                <button type="button" className="jeopardy-btn primary" onClick={() => { playSfx("answerReveal"); setAnswerShown(true); stopMusic(); }}>Reveal Answer</button>
-                <button type="button" className="jeopardy-btn" onClick={() => {
-                  setAnswered((items) => ({ ...items, [activeClue.id]: { skipped: true, at: Date.now() } }));
-                  closeClue();
-                }}>No Score</button>
-              </div>
             </div>
 
             <div className="jeopardy-modal-body">
@@ -782,9 +970,20 @@ function JeopardyPage() {
 
                 <ol className="jeopardy-choice-list">
                   {activeClue.question.options.map((option, index) => (
-                    <li key={`${activeClue.id}-option-${index}`} className={answerShown && activeClue.question.answerIndexes.includes(index) ? "correct" : ""}>
-                      <span className="jeopardy-choice-marker">{String.fromCharCode(65 + index)}</span>
-                      <span className="jeopardy-choice-text">{option}</span>
+                    <li key={`${activeClue.id}-option-${index}`}>
+                      <button
+                        type="button"
+                        className={[
+                          "jeopardy-choice",
+                          selectedAnswers.includes(index) ? "selected" : "",
+                          answerShown && activeClue.question.answerIndexes.includes(index) ? "correct" : "",
+                          answerShown && selectedAnswers.includes(index) && !activeClue.question.answerIndexes.includes(index) ? "incorrect" : "",
+                        ].filter(Boolean).join(" ")}
+                        onClick={() => toggleChoice(index)}
+                      >
+                        <span className="jeopardy-choice-marker">{String.fromCharCode(65 + index)}</span>
+                        <span className="jeopardy-choice-text">{option}</span>
+                      </button>
                     </li>
                   ))}
                 </ol>
@@ -794,12 +993,54 @@ function JeopardyPage() {
                 )}
               </div>
             </div>
+
+            <div className="jeopardy-awards bottom">
+              {activeClue.dailyDouble && (
+                <label className="jeopardy-daily-wager">
+                  <span>Daily Double Wager</span>
+                  <input
+                    type="number"
+                    min="0"
+                    step="100"
+                    value={dailyDoubleWager}
+                    onChange={(event) => setDailyDoubleWager(event.target.value)}
+                  />
+                </label>
+              )}
+              <div className="jeopardy-awards-actions">
+                <button type="button" className="jeopardy-btn primary" onClick={revealAnswer}>Reveal Answer</button>
+                <button type="button" className="jeopardy-btn" onClick={() => {
+                  setAnswered((items) => ({ ...items, [activeClue.id]: { skipped: true, at: Date.now() } }));
+                  closeClue();
+                }}>No Score</button>
+              </div>
+              <div className="jeopardy-award-teams">
+                {orderedTeams.map((team) => (
+                  <div className={`jeopardy-award-team ${team.id === activeTeamId ? "active" : ""}`} key={team.id}>
+                    <span>{team.name}</span>
+                    <button type="button" onClick={() => award(team.id, activeClue.points)}>Correct</button>
+                    <button type="button" onClick={() => award(team.id, -activeClue.points)}>Incorrect</button>
+                  </div>
+                ))}
+              </div>
+            </div>
           </div>
         </div>
       )}
 
       {finalOpen && finalClue && (
-        <div className="jeopardy-modal-backdrop" role="dialog" aria-modal="true" aria-labelledby="jeopardy-final-title">
+        <div
+          className="jeopardy-modal-backdrop"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="jeopardy-final-title"
+          onClick={(event) => {
+            if (event.target === event.currentTarget) {
+              setFinalOpen(false);
+              fadeOutAllAudio();
+            }
+          }}
+        >
           <div className="jeopardy-modal jeopardy-final-modal">
             <div className="jeopardy-modal-head">
               <div>
