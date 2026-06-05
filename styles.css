@@ -4349,8 +4349,8 @@ body.is-resizing-layout .server-module-resizer::before {
 .jeopardy-team {
   flex: 0 0 auto;
   display: grid;
-  gap: 7px;
-  padding: 9px;
+  gap: 10px;
+  padding: 12px;
   border: 1px solid var(--line);
   border-radius: 8px;
   background: var(--bg-1);
@@ -4368,38 +4368,41 @@ body.is-resizing-layout .server-module-resizer::before {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
   align-items: center;
-  gap: 7px;
+  gap: 10px;
 }
 
 .jeopardy-team input {
   width: 100%;
-  height: 29px;
-  padding: 0 8px;
+  height: 38px;
+  padding: 0 11px;
+  font-size: 15px;
 }
 
 .jeopardy-team strong {
   color: var(--jeopardy-gold);
-  font: 700 22px/1 var(--font-mono);
+  min-width: 34px;
+  text-align: right;
+  font: 700 28px/1 var(--font-mono);
   letter-spacing: -0.01em;
   text-shadow: 0 0 14px color-mix(in oklab, var(--warn) 14%, transparent);
 }
 
 .jeopardy-current-turn {
-  min-height: 14px;
+  min-height: 17px;
   color: var(--jeopardy-gold);
-  font: 700 10px var(--font-mono);
+  font: 700 12px var(--font-mono);
   letter-spacing: 0.04em;
   text-transform: uppercase;
 }
 
 .jeopardy-team-actions {
-  gap: 5px;
+  gap: 8px;
 }
 
 .jeopardy-team-actions button {
-  min-height: 25px;
-  padding: 0 6px;
-  font-size: 10px;
+  min-height: 38px;
+  padding: 0 10px;
+  font-size: 13px;
   flex: 1;
 }
 
@@ -4412,10 +4415,11 @@ body.is-resizing-layout .server-module-resizer::before {
 .jeopardy-add-team {
   flex: 0 0 auto;
   width: 100%;
-  min-height: 42px;
+  min-height: 58px;
   align-self: stretch;
   border-style: dashed;
   background: color-mix(in oklab, var(--bg-1) 70%, transparent);
+  font-size: 13px;
 }
 
 .jeopardy-add-team:disabled {

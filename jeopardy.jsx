@@ -395,6 +395,8 @@ function JeopardyPage() {
   const timerWarningPlayedRef = useJeopardyRef(false);
   const clueCloseTimerRef = useJeopardyRef(null);
   const boardAdvanceTimerRef = useJeopardyRef(null);
+  const settingsButtonRef = useJeopardyRef(null);
+  const settingsCardRef = useJeopardyRef(null);
 
   const board = useJeopardyMemo(() => buildJeopardyBoard(rawQuestions, seed, deckId, boardRound), [rawQuestions.length, seed, deckId, boardRound]);
   const allClues = useJeopardyMemo(() => board.flatMap((column) => column.clues), [board]);
@@ -427,6 +429,23 @@ function JeopardyPage() {
   useJeopardyEffect(() => {
     if (!teams.some((team) => team.id === activeTeamId)) setActiveTeamId(orderedTeams[0]?.id || "team-1");
   }, [teams, activeTeamId, orderedTeams]);
+
+  useJeopardyEffect(() => {
+    if (!settingsOpen) return;
+    const closeIfOutside = (event) => {
+      const target = event.target;
+      if (!(target instanceof Node)) return;
+      if (settingsButtonRef.current?.contains(target) || settingsCardRef.current?.contains(target)) return;
+      setSettingsOpen(false);
+      setDeckMenuOpen(false);
+    };
+    document.addEventListener("pointerdown", closeIfOutside, true);
+    document.addEventListener("focusin", closeIfOutside, true);
+    return () => {
+      document.removeEventListener("pointerdown", closeIfOutside, true);
+      document.removeEventListener("focusin", closeIfOutside, true);
+    };
+  }, [settingsOpen]);
 
   useJeopardyEffect(() => {
     if (!allClues.length) return;
@@ -821,17 +840,23 @@ function JeopardyPage() {
             <button type="button" className="final" onClick={openFinalJeopardy}>Final</button>
           </div>
           <button
+            ref={settingsButtonRef}
             type="button"
             className={`jeopardy-icon-btn ${settingsOpen ? "active" : ""}`}
             aria-label="Settings"
             aria-expanded={settingsOpen}
-            onClick={() => setSettingsOpen((open) => !open)}
+            onClick={() => {
+              setSettingsOpen((open) => {
+                if (open) setDeckMenuOpen(false);
+                return !open;
+              });
+            }}
           >
             <span aria-hidden="true">⚙</span>
           </button>
           <button type="button" className="jeopardy-btn primary" onClick={newGame}>New Game</button>
           {settingsOpen && (
-            <div className="jeopardy-settings-card">
+            <div className="jeopardy-settings-card" ref={settingsCardRef}>
               <label className="jeopardy-setting-label">Set</label>
               <div className="jeopardy-select-wrap custom">
                 <button
