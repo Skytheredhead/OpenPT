@@ -29,6 +29,33 @@ const PRAISE_MESSAGES = [
 ];
 
 const ANSWER_EXIT_MS = 240;
+const LAB_PROGRESS_KEY = 'openpt.quiz.labProgress.v1';
+
+function readLabProgress(key) {
+  if (!key) return null;
+  try {
+    const data = JSON.parse(localStorage.getItem(LAB_PROGRESS_KEY) || '{}');
+    return data[key] || null;
+  } catch (e) {
+    return null;
+  }
+}
+
+function writeLabProgress(progress) {
+  if (!progress?.labId) return;
+  try {
+    const data = JSON.parse(localStorage.getItem(LAB_PROGRESS_KEY) || '{}');
+    data[progress.labId] = progress;
+    if (progress.questionKey) data[progress.questionKey] = progress;
+    localStorage.setItem(LAB_PROGRESS_KEY, JSON.stringify(data));
+  } catch (e) {
+    /* ignore */
+  }
+}
+
+function isLabComplete(progress) {
+  return Number(progress?.percent || 0) >= 100;
+}
 
 const AnswerTransition = ({ transitionKey, children }) => {
   const [layers, setLayers] = useStateR([{ key: transitionKey, phase: 'current', children }]);
@@ -135,6 +162,15 @@ const PracticeRunner = ({ state, setState, onFinish, onExit }) => {
     setState(QuizEngine.advance(state));
   }
 
+  function submitLab(progress) {
+    if (!q || !q.hasLab || state.answered || celebration) return;
+    const complete = isLabComplete(progress);
+    const next = { ...state, selected: new Set(complete ? q.answers : []) };
+    const graded = QuizEngine.grade(next);
+    setState(graded);
+    if (complete) celebrate(graded);
+  }
+
   function updateMatchup(term, description) {
     if (!q || state.answered || celebration) return;
     setState(prev => {
@@ -203,10 +239,17 @@ const PracticeRunner = ({ state, setState, onFinish, onExit }) => {
 
           <h2 className="qcard-text">{q.question}</h2>
 
-          <QuestionExhibit q={q} />
+          {!q.hasLab && <QuestionExhibit q={q} />}
 
-          <AnswerTransition transitionKey={`practice-${state.activeId}-${q.pairs ? 'pairs' : 'opts'}`}>
-            {q.pairs ? (
+          <AnswerTransition transitionKey={`practice-${state.activeId}-${q.hasLab ? 'lab' : q.pairs ? 'pairs' : 'opts'}`}>
+            {q.hasLab ? (
+              <LabQuestionPanel
+                q={q}
+                mode="practice"
+                answered={state.answered}
+                onSubmit={submitLab}
+              />
+            ) : q.pairs ? (
               <MatchupQuestion
                 q={q}
                 selected={state.selected}
@@ -249,7 +292,7 @@ const PracticeRunner = ({ state, setState, onFinish, onExit }) => {
           )}
 
           <div className="qaction-row">
-            {!state.answered && q.multi && (
+            {!state.answered && q.multi && !q.hasLab && (
               <button
                 type="button"
                 className="qaction primary"
@@ -331,6 +374,16 @@ const QuizRunner = ({ state, setState, onFinish, onExit }) => {
     });
   }
 
+  function saveLabAttempt(progress) {
+    setState(prev => {
+      const attempts = { ...(prev.labAttempts || {}) };
+      attempts[qid] = progress || { labId: q.lab?.id, questionKey: q.questionKey, percent: 0, correct: 0, total: 0, updatedAt: Date.now() };
+      const answers = { ...(prev.answers || {}) };
+      answers[qid] = isLabComplete(attempts[qid]) ? [...q.answers] : [];
+      return { ...prev, labAttempts: attempts, answers };
+    });
+  }
+
   function jumpTo(i) {
     if (i < 0 || i >= total) return;
     setState(prev => ({ ...prev, cursor: i }));
@@ -350,9 +403,11 @@ const QuizRunner = ({ state, setState, onFinish, onExit }) => {
       const firstTryMastered = new Set();
       const mastered = new Set();
       for (const id of prev.quizIds) {
+        const question = window.QUESTIONS[id];
+        const labAttempt = prev.labAttempts?.[id] || null;
         const ans = new Set(answers[id] || []);
-        const corr = new Set(window.QUESTIONS[id].answers);
-        const isCorrect = sameSetLocal(ans, corr);
+        const corr = new Set(question.answers);
+        const isCorrect = question.hasLab ? isLabComplete(labAttempt) : sameSetLocal(ans, corr);
         if (isCorrect) { correct++; firstTryMastered.add(id); mastered.add(id); }
         history.push({ id, correct: isCorrect, ts: Date.now() });
       }
@@ -373,7 +428,11 @@ const QuizRunner = ({ state, setState, onFinish, onExit }) => {
 
   const answers = state.answers || {};
   const currentSel = new Set(answers[qid] || []);
-  const isCompleteAnswer = id => (answers[id] || []).length === window.QUESTIONS[id].answers.length;
+  const isCompleteAnswer = id => {
+    const question = window.QUESTIONS[id];
+    if (question.hasLab) return !!(state.labAttempts || {})[id];
+    return (answers[id] || []).length === question.answers.length;
+  };
   const answeredCount = state.quizIds.filter(isCompleteAnswer).length;
   const canSubmit = answeredCount === total;
 
@@ -428,10 +487,17 @@ const QuizRunner = ({ state, setState, onFinish, onExit }) => {
 
           <h2 className="qcard-text">{q.question}</h2>
 
-          <QuestionExhibit q={q} />
+          {!q.hasLab && <QuestionExhibit q={q} />}
 
-          <AnswerTransition transitionKey={`quiz-${qid}-${q.pairs ? 'pairs' : 'opts'}`}>
-            {q.pairs ? (
+          <AnswerTransition transitionKey={`quiz-${qid}-${q.hasLab ? 'lab' : q.pairs ? 'pairs' : 'opts'}`}>
+            {q.hasLab ? (
+              <LabQuestionPanel
+                q={q}
+                mode="quiz"
+                progress={(state.labAttempts || {})[qid] || null}
+                onSubmit={saveLabAttempt}
+              />
+            ) : q.pairs ? (
               <MatchupQuestion
                 q={q}
                 selected={currentSel}
@@ -520,6 +586,98 @@ const QuestionExhibit = ({ q }) => {
         <b>Exhibit attached · {q.exhibitCount} image{q.exhibitCount > 1 ? 's' : ''}</b>
         This imported item still needs a structured exhibit.
       </div>
+    </div>
+  );
+};
+
+const LabQuestionPanel = ({ q, mode, answered = false, progress = null, onSubmit }) => {
+  const [open, setOpen] = useStateR(false);
+  const [current, setCurrent] = useStateR(() => progress || readLabProgress(q.questionKey) || readLabProgress(q.lab?.id));
+  const labId = q.lab?.id;
+  const percent = Math.round(Number(current?.percent || 0));
+  const complete = isLabComplete(current);
+  const attempted = !!current;
+  const launchUrl = `/lab?lab=${encodeURIComponent(labId || '')}&embed=quiz&returnToQuiz=${encodeURIComponent(q.questionKey || '')}`;
+
+  useEffectR(() => {
+    const saved = progress || readLabProgress(q.questionKey) || readLabProgress(labId);
+    setCurrent(saved || null);
+  }, [q.id, q.questionKey, labId, progress?.updatedAt]);
+
+  useEffectR(() => {
+    const onMessage = (event) => {
+      if (event.origin !== location.origin || event.data?.type !== 'openpt:lab-progress') return;
+      if (event.data.labId !== labId && event.data.questionKey !== q.questionKey) return;
+      const next = { ...event.data, questionKey: q.questionKey, labId };
+      writeLabProgress(next);
+      setCurrent(next);
+    };
+    window.addEventListener('message', onMessage);
+    return () => window.removeEventListener('message', onMessage);
+  }, [q.questionKey, labId]);
+
+  function launchLab() {
+    if (window.matchMedia?.('(max-width: 760px)').matches) {
+      window.location.href = launchUrl;
+      return;
+    }
+    setOpen(true);
+  }
+
+  function closeLab() {
+    const saved = readLabProgress(q.questionKey) || readLabProgress(labId);
+    if (saved) setCurrent(saved);
+    setOpen(false);
+  }
+
+  function submit() {
+    const payload = current || { labId, questionKey: q.questionKey, percent: 0, correct: 0, total: 0, updatedAt: Date.now() };
+    writeLabProgress(payload);
+    onSubmit?.(payload);
+  }
+
+  return (
+    <div className="lab-question-panel">
+      <div className="lab-question-head">
+        <div>
+          <div className="lab-question-kicker">OpenPT Lab</div>
+          <h3>{q.lab?.title || 'OpenPT lab'}</h3>
+        </div>
+        {q.lab?.estimatedMinutes && <span className="lab-question-time">{q.lab.estimatedMinutes} min</span>}
+      </div>
+      {q.exhibit?.type === 'topology' && <div className="q-exhibit-stack"><TopologyExhibit exhibit={q.exhibit} /></div>}
+      <div className={`lab-progress ${complete ? 'complete' : attempted ? 'attempted' : ''}`}>
+        <div className="lab-progress-bar"><span style={{ width: `${Math.max(0, Math.min(100, percent))}%` }} /></div>
+        <div className="lab-progress-meta">
+          <strong>{complete ? 'Complete' : attempted ? 'Needs work' : 'Not started'}</strong>
+          <span>{attempted ? `${current.correct || 0}/${current.total || 0} checks · ${percent}%` : 'Launch the simulator to complete this item.'}</span>
+        </div>
+      </div>
+      <div className="lab-actions">
+        <button type="button" className="qaction primary" onClick={launchLab} disabled={!labId || answered}>
+          {attempted ? 'Continue lab' : 'Start lab'}
+          <Icon name="arrow-right" size={14} />
+        </button>
+        <button type="button" className={`qaction ${complete ? 'primary' : 'ghost'}`} onClick={submit} disabled={answered || (mode === 'quiz' && !attempted)}>
+          {mode === 'quiz' ? 'Save lab attempt' : 'Submit lab'}
+          <Icon name="check" size={14} />
+        </button>
+      </div>
+      {open && (
+        <div className="lab-embed-shell" role="dialog" aria-modal="true" aria-label={`${q.lab?.title || 'OpenPT lab'} simulator`}>
+          <div className="lab-embed-topbar">
+            <div>
+              <strong>{q.lab?.title || 'OpenPT lab'}</strong>
+              <span>{attempted ? `${percent}% complete` : 'Configure the lab, then return to quiz.'}</span>
+            </div>
+            <button type="button" className="qaction primary" onClick={closeLab}>
+              Back to quiz
+              <Icon name="arrow-left" size={14} />
+            </button>
+          </div>
+          <iframe className="lab-embed-frame" src={launchUrl} title={`${q.lab?.title || 'OpenPT lab'} simulator`} />
+        </div>
+      )}
     </div>
   );
 };

@@ -770,7 +770,7 @@ function localProjectRecord({ id, title, document, source = "local", cloudProjec
   };
 }
 
-const OPENPT_PRACTICE_LABS = [
+const OPENPT_PRACTICE_LABS = window.OpenPTLabs?.menuItems?.() || [
   { key: "etherchannel-vlan", title: "VLAN Trunks and EtherChannel", desc: "Configure access VLANs, LACP, and a trunking port-channel between two switches." },
   { key: "dhcp-routerb", title: "RouterB DHCP Pool", desc: "Build a DHCP pool with reserved addresses, gateway, DNS, domain, and NetBIOS options." },
   { key: "ospf-area0-dr", title: "OSPF Area 0 DR Election", desc: "Advertise exact subnets and tune shared-segment OSPF priorities." },
@@ -825,6 +825,8 @@ function practiceLabInstructions(title, paragraphs, tasks, notes = []) {
 }
 
 function makeOpenPtPracticeLab(key) {
+  const shared = window.OpenPTLabs?.build?.(key);
+  if (shared) return shared;
   switch (key) {
     case "etherchannel-vlan": return makeEtherchannelVlanLab();
     case "dhcp-routerb": return makeDhcpRouterBLab();
@@ -1161,6 +1163,9 @@ function App({ initialViewMode = null, initialHomeAction = null } = {}) {
   });
   const initialHomeActionRef = useRef(initialHomeAction);
   const [routePath, setRoutePath] = useState(() => appRoutePath(location.pathname));
+  const initialPracticeLabRef = useRef(new URLSearchParams(location.search).get("lab") || "");
+  const quizEmbedReturnKey = useMemo(() => new URLSearchParams(location.search).get("returnToQuiz") || "", []);
+  const quizEmbedMode = useMemo(() => new URLSearchParams(location.search).get("embed") === "quiz", []);
   const navigateAppRoute = React.useCallback((to, options = {}) => {
     const url = new URL(to, location.origin);
     const nextPath = appRoutePath(url.pathname);
@@ -1431,26 +1436,62 @@ function App({ initialViewMode = null, initialHomeAction = null } = {}) {
     setDirtyTabs((m) => ({ ...m, [id]: true }));
     pushAppUndo("opened starter lab", before);
   };
-  const loadPracticeLab = async (key) => {
+  const loadPracticeLab = async (key, options = {}) => {
     const lab = makeOpenPtPracticeLab(key);
     if (!lab) return;
-    const ok = await requestConfirm({ title: `Load ${lab.title}?`, message: "Replace the current topology with this practice lab?", confirmLabel: "Load lab", danger: true });
-    if (!ok) return;
+    const shouldConfirm = options.confirm !== false;
+    if (shouldConfirm) {
+      const ok = await requestConfirm({ title: `Load ${lab.title}?`, message: "Replace the current topology with this practice lab?", confirmLabel: "Load lab", danger: true });
+      if (!ok) return;
+    }
     if (!markProjectChanged("load-practice-lab")) return;
     const norm = OPT_Engine.normalizeTopology(lab.devices, lab.links);
+    if (options.newTab) {
+      snapshotsRef.current[activeWid] = { devices, links, selectedIds, openConsoles, activeBottom, ptActivity, ptSidebarOpen };
+      const id = `w-${Date.now()}`;
+      snapshotsRef.current[id] = {
+        devices: norm.devices,
+        links: norm.links,
+        selectedIds: [],
+        openConsoles: [],
+        activeBottom: "events",
+        ptActivity: lab.activity,
+        ptSidebarOpen: true,
+      };
+      setTabs((ts) => [...ts, { id, name: `${lab.fileName}.opt`, source: "openpt-lab" }]);
+      setActiveWid(id);
+      skipNextSnapshot.current = true;
+      setDevices(norm.devices);
+      setLinks(norm.links);
+      setSelectedIds([]);
+      setOpenConsoles([]);
+      setActiveBottom("events");
+      setPtActivity(lab.activity);
+      setPtSidebarOpen(true);
+    } else {
+      setDevices(norm.devices);
+      setLinks(norm.links);
+      setSelectedId(null);
+      setPtActivity(lab.activity);
+      setPtSidebarOpen(true);
+      setTabs((ts) => ts.map((tab) => tab.id === activeWid ? { ...tab, name: `${lab.fileName}.opt` } : tab));
+    }
     setStarterScreenVisible(false);
-    setDevices(norm.devices);
-    setLinks(norm.links);
-    setSelectedId(null);
     setSelectedLinkId(null);
     setEvents([]);
     setPackets([]);
     setPacketEvents([]);
-    setPtActivity(lab.activity);
-    setPtSidebarOpen(true);
-    setTabs((ts) => ts.map((tab) => tab.id === activeWid ? { ...tab, name: `${lab.fileName}.opt` } : tab));
     log("ok", "system", `loaded lab: ${lab.title}`);
+    return lab;
   };
+  useEffect(() => {
+    const key = initialPracticeLabRef.current;
+    if (!key) return;
+    initialPracticeLabRef.current = "";
+    navigateAppRoute(`/lab${location.search || ""}`, { replace: true });
+    setViewMode("app");
+    loadPracticeLab(key, { confirm: false, newTab: true });
+  }, []);
   const closeTab = async (id) => {
     if (dirtyTabs[id]) {
       const ok = await requestConfirm({
@@ -1693,6 +1734,29 @@ function App({ initialViewMode = null, initialHomeAction = null } = {}) {
     meaningfulChanges,
   };
   const gradedPtActivity = useMemo(() => gradePacketTracerActivity(ptActivity, devices, links), [ptActivity, devices, links]);
+  useEffect(() => {
+    if (!quizEmbedMode || !gradedPtActivity?.labKey || !gradedPtActivity?.progress) return;
+    const payload = {
+      type: "openpt:lab-progress",
+      labId: gradedPtActivity.labKey,
+      questionKey: quizEmbedReturnKey,
+      percent: Math.round(Number(gradedPtActivity.progress.percent || 0)),
+      correct: Number(gradedPtActivity.progress.counts?.correct || 0),
+      total: Number(gradedPtActivity.progress.counts?.total || 0),
+      score: gradedPtActivity.progress.score || "",
+      updatedAt: Date.now(),
+    };
+    try {
+      const key = "openpt.quiz.labProgress.v1";
+      const saved = JSON.parse(localStorage.getItem(key) || "{}");
+      saved[payload.questionKey || payload.labId] = payload;
+      saved[payload.labId] = payload;
+      localStorage.setItem(key, JSON.stringify(saved));
+    } catch (e) {}
+    try {
+      window.parent?.postMessage(payload, location.origin);
+    } catch (e) {}
+  }, [quizEmbedMode, quizEmbedReturnKey, gradedPtActivity]);
   const displayedImportReport = useMemo(() => {
     if (!lastImportReport) return null;
     const samePacketTracerImport = gradedPtActivity && (
@@ -2867,6 +2931,7 @@ function App({ initialViewMode = null, initialHomeAction = null } = {}) {
         vlans: m[devId].vlans ? { ...m[devId].vlans } : undefined,
         routes: [...(m[devId].routes || [])],
         users: { ...(m[devId].users || {}) },
+        hosts: { ...(m[devId].hosts || {}) },
         secrets: { ...(m[devId].secrets || {}) },
         services: { ...(m[devId].services || {}) },
         lines: JSON.parse(JSON.stringify(m[devId].lines || {})),
@@ -2946,6 +3011,15 @@ function App({ initialViewMode = null, initialHomeAction = null } = {}) {
         case "ip-domain-name":
           d.domainName = cmd.value;
           log("ok", d.hostname, cmd.value ? `ip domain-name ${cmd.value}` : "no ip domain-name");
+          break;
+        case "ip-host":
+          d.hosts = { ...(d.hosts || {}), [cmd.name]: cmd.ip };
+          log("ok", d.hostname, `ip host ${cmd.name} ${cmd.ip}`);
+          break;
+        case "ip-host-remove":
+          d.hosts = { ...(d.hosts || {}) };
+          delete d.hosts[cmd.name];
+          log("warn", d.hostname, `removed ip host ${cmd.name}`);
           break;
         case "wireless":
           d.wireless = d.wireless || {};
@@ -3078,6 +3152,10 @@ function App({ initialViewMode = null, initialHomeAction = null } = {}) {
           ifaces[cmd.iface] = { ...ifaces[cmd.iface], allowedVlans: cmd.value, mode: "trunk" };
           log("ok", d.hostname, `${ifaceName(cmd.iface)} trunk allowed vlan ${cmd.value}`);
           break;
+        case "switchport-nonegotiate":
+          ifaces[cmd.iface] = { ...ifaces[cmd.iface], nonegotiate: cmd.value, mode: "trunk" };
+          log("ok", d.hostname, `${ifaceName(cmd.iface)} ${cmd.value ? "switchport nonegotiate" : "DTP negotiation enabled"}`);
+          break;
         case "routed-port":
           ifaces[cmd.iface] = { ...ifaces[cmd.iface], routed: cmd.value, mode: cmd.value ? undefined : "access", vlan: cmd.value ? undefined : (ifaces[cmd.iface].vlan || 1) };
           log("ok", d.hostname, `${ifaceName(cmd.iface)} ${cmd.value ? "no switchport" : "switchport"}`);
@@ -3117,6 +3195,10 @@ function App({ initialViewMode = null, initialHomeAction = null } = {}) {
           log("ok", d.hostname, `${ifaceName(cmd.iface)} joined channel-group ${cmd.id}`);
           break;
         }
+        case "channel-protocol":
+          ifaces[cmd.iface] = { ...ifaces[cmd.iface], channelProtocol: cmd.protocol };
+          log("ok", d.hostname, `${ifaceName(cmd.iface)} channel-protocol ${cmd.protocol}`);
+          break;
         case "storm-control":
           ifaces[cmd.iface] = { ...ifaces[cmd.iface], stormControl: { ...(ifaces[cmd.iface].stormControl || {}), ...cmd } };
           delete ifaces[cmd.iface].stormControl.kind;
@@ -3230,6 +3312,13 @@ function App({ initialViewMode = null, initialHomeAction = null } = {}) {
           log("ok", d.hostname, `ospf ${cmd.pid} network ${cmd.network}`);
           break;
         }
+        case "ospf-network-remove": {
+          const ospf = d.ospf[cmd.pid] || { networks: [], passive: [] };
+          ospf.networks = (ospf.networks || []).filter(n => !(n.network === cmd.network && n.wildcard === cmd.wildcard && n.area === cmd.area));
+          d.ospf[cmd.pid] = ospf;
+          log("warn", d.hostname, `removed ospf ${cmd.pid} network ${cmd.network}`);
+          break;
+        }
         case "ospf-passive": {
           const ospf = d.ospf[cmd.pid] || { networks: [], passive: [] };
           ospf.passive = cmd.value ? [...new Set([...(ospf.passive || []), cmd.iface])] : (ospf.passive || []).filter(x => x !== cmd.iface);
@@ -3294,12 +3383,19 @@ function App({ initialViewMode = null, initialHomeAction = null } = {}) {
           d.acls[cmd.name] = d.acls[cmd.name] || { type: cmd.aclType, entries: [] };
           break;
         case "acl-entry": {
-          const entry = parseAclEntry(cmd.action, cmd.spec, cmd.aclType);
+          const entry = { ...parseAclEntry(cmd.action, cmd.spec, cmd.aclType), ...(cmd.seq != null ? { seq: cmd.seq } : {}) };
           d.acls[cmd.name] = d.acls[cmd.name] || { type: cmd.aclType, entries: [] };
+          if (cmd.seq != null) d.acls[cmd.name].entries = d.acls[cmd.name].entries.filter((existing) => Number(existing.seq) !== Number(cmd.seq));
           d.acls[cmd.name].entries.push(entry);
+          d.acls[cmd.name].entries.sort((a, b) => Number(a.seq ?? 9999) - Number(b.seq ?? 9999));
           log("ok", d.hostname, `ACL ${cmd.name} ${cmd.action}`);
           break;
         }
+        case "acl-remove-seq":
+          d.acls[cmd.name] = d.acls[cmd.name] || { type: "extended", entries: [] };
+          d.acls[cmd.name].entries = d.acls[cmd.name].entries.filter((entry) => Number(entry.seq) !== Number(cmd.seq));
+          log("warn", d.hostname, `ACL ${cmd.name} removed sequence ${cmd.seq}`);
+          break;
         case "acl-remark":
           d.acls[cmd.name] = d.acls[cmd.name] || { type: "extended", entries: [] };
           d.acls[cmd.name].entries.push({ action: "remark", spec: cmd.value });
@@ -3899,6 +3995,15 @@ function App({ initialViewMode = null, initialHomeAction = null } = {}) {
       />
       {/* Title bar */}
       <div className="titlebar">
+        {quizEmbedMode && (
+          <button
+            type="button"
+            className="tb-btn primary"
+            onClick={() => { window.location.href = "/quiz/"; }}
+          >
+            Back to quiz
+          </button>
+        )}
         <div
           className="tb-logo"
           onClick={() => navigateAppRoute("/")}
@@ -5946,6 +6051,10 @@ function packetTracerAnswerExpectations(activity, devices) {
       if (match) setForIfaces((data) => { data.nativeVlan = Number(match[1]); data.mode = "trunk"; });
       match = cmd.match(/^switchport trunk allowed vlan (.+)$/);
       if (match) setForIfaces((data) => { data.allowedVlans = match[1]; data.mode = "trunk"; });
+      match = cmd.match(/^switchport nonegotiate$/);
+      if (match) setForIfaces((data) => { data.nonegotiate = true; data.mode = "trunk"; });
+      match = cmd.match(/^channel-protocol (lacp|pagp)$/i);
+      if (match) setForIfaces((data) => { data.channelProtocol = match[1].toUpperCase(); });
       match = cmd.match(/^channel-group (\d+) mode (\S+)$/);
       if (match) setForIfaces((data) => { data.channelGroup = { id: Number(match[1]), mode: match[2] }; });
       match = cmd.match(/^ip address (\S+) (\S+)$/);

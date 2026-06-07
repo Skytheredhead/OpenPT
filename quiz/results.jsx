@@ -120,6 +120,10 @@ const ResultsPage = ({ state, onRestart, onExit, accent }) => {
 };
 
 function formatCorrectAnswer(q) {
+  if (q.hasLab) {
+    const lab = q.lab?.title || 'OpenPT lab';
+    return `${lab}: complete all authored OpenPT assessment checks.`;
+  }
   if (q.pairs?.length) {
     return q.pairs.map(([term, description]) => `${term} -> ${description}`).join('; ');
   }

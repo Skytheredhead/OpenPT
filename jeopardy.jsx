@@ -655,12 +655,19 @@ function JeopardyPage() {
 
   const toggleChoice = (index) => {
     if (!activeClue || answerShown) return;
-    setSelectedAnswers((items) => {
-      if (activeClue.question.multi) {
-        return items.includes(index) ? items.filter((item) => item !== index) : [...items, index];
-      }
-      return [index];
-    });
+    if (activeClue.question.multi) {
+      const requiredAnswers = activeClue.question.answerIndexes.length;
+      const alreadySelected = selectedAnswers.includes(index);
+      const nextAnswers = alreadySelected
+        ? selectedAnswers.filter((item) => item !== index)
+        : selectedAnswers.length >= requiredAnswers
+          ? selectedAnswers
+          : [...selectedAnswers, index];
+      setSelectedAnswers(nextAnswers);
+      if (!alreadySelected && nextAnswers.length >= requiredAnswers) revealAnswer();
+      return;
+    }
+    setSelectedAnswers([index]);
     revealAnswer();
   };
 

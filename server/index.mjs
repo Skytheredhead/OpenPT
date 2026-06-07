@@ -675,7 +675,8 @@ if (!backendOnly) {
   });
 
   app.get("/lab", async (req, reply) => {
-    return reply.redirect("/lab/", 308);
+    const query = req.url.includes("?") ? req.url.slice(req.url.indexOf("?")) : "";
+    return reply.redirect(`/lab/${query}`, 308);
   });
 
   app.get("/lab/", async (req, reply) => {

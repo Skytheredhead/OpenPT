@@ -2039,6 +2039,7 @@ function serializeConfig(d) {
   if (d.secrets?.enable) out.push(`enable secret ${d.secrets.enable}`);
   if (d.services?.passwordEncryption) out.push("service password-encryption");
   if (d.domainName) out.push(`ip domain-name ${d.domainName}`);
+  for (const [name, ip] of Object.entries(d.hosts || {})) out.push(`ip host ${name} ${ip}`);
   if (d.ipv6Routing) out.push("ipv6 unicast-routing");
   if (d.ssh?.version) out.push(`ip ssh version ${d.ssh.version}`);
   if (d.aaa?.enabled) out.push("aaa new-model");
@@ -2116,6 +2117,7 @@ function serializeConfig(d) {
     if (ifc.mode === "access" && ifc.vlan) out.push(` switchport access vlan ${ifc.vlan}`);
     if (ifc.voiceVlan) out.push(` switchport voice vlan ${ifc.voiceVlan}`);
     if (ifc.channelGroup) out.push(` channel-group ${ifc.channelGroup.id} mode ${ifc.channelGroup.mode}`);
+    if (ifc.channelProtocol) out.push(` channel-protocol ${String(ifc.channelProtocol).toLowerCase()}`);
     if (ifc.portSecurity?.enabled) out.push(" switchport port-security");
     if (ifc.portSecurity?.maximum) out.push(` switchport port-security maximum ${ifc.portSecurity.maximum}`);
     if (ifc.portSecurity?.violation) out.push(` switchport port-security violation ${ifc.portSecurity.violation}`);
@@ -2140,6 +2142,7 @@ function serializeConfig(d) {
     if (ifc.mode === "trunk") {
       if (ifc.nativeVlan && ifc.nativeVlan !== 1) out.push(` switchport trunk native vlan ${ifc.nativeVlan}`);
       if (ifc.allowedVlans && ifc.allowedVlans !== "all") out.push(` switchport trunk allowed vlan ${ifc.allowedVlans}`);
+      if (ifc.nonegotiate) out.push(" switchport nonegotiate");
     }
     if (ifc.acl?.in) out.push(` ip access-group ${ifc.acl.in} in`);
     if (ifc.acl?.out) out.push(` ip access-group ${ifc.acl.out} out`);
@@ -2153,6 +2156,7 @@ function serializeConfig(d) {
     out.push(`router ospf ${pid}`);
     if (o.routerId) out.push(` router-id ${o.routerId}`);
     for (const n of o.networks || []) out.push(` network ${n.network} ${n.wildcard} area ${n.area}`);
+    if (o.defaultOriginate) out.push(" default-information originate");
     for (const p of o.passive || []) out.push(` passive-interface ${p}`);
     out.push("!");
   }
@@ -2216,7 +2220,7 @@ function serializeConfig(d) {
   for (const [id, tr] of Object.entries(d.tracks || {})) out.push(`track ${id} ${tr.object || ""}`.trim());
   for (const [name, acl] of Object.entries(d.acls || {})) {
     out.push(`ip access-list ${acl.type} ${name}`);
-    for (const e of acl.entries || []) out.push(` ${e.action}${e.spec ? ` ${e.spec}` : ` ${e.src || "any"}${e.dst ? ` ${e.dst}` : ""}`}`);
+    for (const e of acl.entries || []) out.push(` ${e.seq != null ? `${e.seq} ` : ""}${e.action}${e.spec ? ` ${e.spec}` : ` ${e.src || "any"}${e.dst ? ` ${e.dst}` : ""}`}`);
     out.push("!");
   }
   out.push("end");

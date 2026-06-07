@@ -10,6 +10,11 @@
         ? { ...q, ...exhibitEnrichments[exhibitKey] }
         : q;
       const bank = enriched.bank || 'ccna/sem-03/final';
+      const authoredLab = enriched.lab
+        ? (typeof enriched.lab === 'object'
+          ? enriched.lab
+          : window.OpenPTLabs?.metadataForQuestion?.(bank, enriched.s))
+        : null;
       return ({
         id: idx,
         questionKey: stableQuestionKey(enriched, bank),
@@ -31,7 +36,12 @@
         explanation: enriched.x || enriched.explanation || '',
         sourceScreenshots: enriched.sourceScreenshots || [],
         pairs: enriched.pairs || null,
-        lab: !!enriched.lab,
+        lab: authoredLab ? {
+          id: authoredLab.id,
+          title: authoredLab.title,
+          estimatedMinutes: authoredLab.estimatedMinutes || null,
+        } : null,
+        hasLab: !!authoredLab,
         page: enriched.page || null,
       });
     });

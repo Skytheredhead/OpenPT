@@ -59,7 +59,7 @@ const CcnaBDiagramsPage = ({ onExit }) => {
               <span>{type}</span>
             </div>
             <h2>{q.question}</h2>
-            {q.lab && <div className="diagram-lab-flag">Lab item documented; simulator logic is not implemented yet.</div>}
+            {q.hasLab && <div className="diagram-lab-flag">OpenPT simulator lab available.</div>}
             <DiagramReviewAssets q={q} />
             {q.explanation && <p className="diagram-review-explanation">{q.explanation}</p>}
           </article>

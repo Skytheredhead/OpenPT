@@ -807,6 +807,113 @@
   line-height: 1.55;
 }
 
+.lab-question-panel {
+  display: grid;
+  gap: 14px;
+}
+.lab-question-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+}
+.lab-question-kicker,
+.lab-question-time {
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  color: var(--fg-3);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+.lab-question-head h3 {
+  margin: 4px 0 0;
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--fg-0);
+  letter-spacing: 0;
+}
+.lab-progress {
+  border: 1px solid var(--line);
+  background: var(--bg-1);
+  border-radius: 8px;
+  padding: 12px;
+  display: grid;
+  gap: 9px;
+}
+.lab-progress.complete {
+  border-color: color-mix(in oklab, var(--ok) 55%, var(--line));
+  background: var(--ok-soft);
+}
+.lab-progress.attempted:not(.complete) {
+  border-color: color-mix(in oklab, var(--warn) 55%, var(--line));
+  background: var(--warn-soft);
+}
+.lab-progress-bar {
+  height: 8px;
+  border-radius: 999px;
+  overflow: hidden;
+  background: var(--bg-3);
+}
+.lab-progress-bar span {
+  display: block;
+  height: 100%;
+  background: var(--accent);
+  transition: width 180ms ease;
+}
+.lab-progress.complete .lab-progress-bar span {
+  background: var(--ok);
+}
+.lab-progress-meta {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  color: var(--fg-2);
+  font-size: 12px;
+}
+.lab-progress-meta strong {
+  color: var(--fg-0);
+}
+.lab-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.lab-embed-shell {
+  position: fixed;
+  inset: 0;
+  z-index: 500;
+  background: var(--bg-0);
+  display: grid;
+  grid-template-rows: 48px 1fr;
+}
+.lab-embed-topbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 7px 10px 7px 16px;
+  border-bottom: 1px solid var(--line);
+  background: var(--bg-1);
+}
+.lab-embed-topbar strong {
+  display: block;
+  font-size: 13px;
+  color: var(--fg-0);
+}
+.lab-embed-topbar span {
+  display: block;
+  margin-top: 2px;
+  color: var(--fg-3);
+  font-size: 11.5px;
+}
+.lab-embed-frame {
+  width: 100%;
+  height: 100%;
+  border: 0;
+  background: var(--bg-0);
+}
+
 /* ── CCNA-B diagram review ─────────────────────────── */
 .diagram-review {
   min-height: 0;

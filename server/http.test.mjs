@@ -393,6 +393,10 @@ test("frontend serves lab and quiz path entrypoints", { timeout: 15_000 }, async
     assert.equal(labRedirect.status, 308);
     assert.equal(labRedirect.headers.get("location"), "/lab/");
 
+    const labQueryRedirect = await fetch(`${baseUrl}/lab?lab=ccna-b-q1-48-etherchannel-vlan&embed=quiz`, { redirect: "manual" });
+    assert.equal(labQueryRedirect.status, 308);
+    assert.equal(labQueryRedirect.headers.get("location"), "/lab/?lab=ccna-b-q1-48-etherchannel-vlan&embed=quiz");
+
     const lab = await fetch(`${baseUrl}/lab/`);
     assert.equal(lab.status, 200);
     const labHtml = await lab.text();
