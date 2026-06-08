@@ -64,7 +64,7 @@ for (const file of files) {
   }
 }
 
-for (const htmlFile of ["index.html", "quiz/index.html"]) {
+for (const htmlFile of ["index.html", "quiz/index.html", "ccnacasino.html"]) {
   try {
     await assertLocalScriptSourcesExist(htmlFile);
   } catch (err) {

@@ -731,6 +731,14 @@ if (!backendOnly) {
     return reply.sendFile("bomb.html");
   });
 
+  app.get("/ccnacasino", async (req, reply) => {
+    return reply.sendFile("ccnacasino.html");
+  });
+
+  app.get("/ccnacasino/", async (req, reply) => {
+    return reply.sendFile("ccnacasino.html");
+  });
+
   app.get("/share/:token", async (req, reply) => {
     return reply.sendFile("index.html");
   });

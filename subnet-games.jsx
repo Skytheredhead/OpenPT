@@ -222,11 +222,17 @@ function makeBombQuestion() {
 function SubnetGamesNav({ compact = false }) {
   return (
     <nav className={`subnet-games-nav ${compact ? "compact" : ""}`}>
-      <a href="/games">Games</a>
-      <a href="/firewall">Firewall</a>
-      <a href="/bomb">Bomb Squad</a>
-      <a href="/wordle">Wordle</a>
-      <a href="/jeopardy">Jeopardy</a>
+      <a className="subnet-games-brand-link" href="/games">
+        <span className="subnet-games-brand-glyph"></span>
+        OpenPT <b>Games</b>
+      </a>
+      <div className="subnet-games-nav-links">
+        <a href="/games">Library</a>
+        <a href="/firewall">Firewall</a>
+        <a href="/bomb">Bomb Squad</a>
+        <a href="/wordle">Wordle</a>
+        <a href="/jeopardy">Jeopardy</a>
+      </div>
     </nav>
   );
 }
@@ -239,6 +245,7 @@ function SubnetGamesPage() {
       tag: "Subnet membership",
       body: "Permit trusted packets and drop impostors before the scan bar drains.",
       stat: "Inside or outside",
+      meta: "CIDR range checks",
     },
     {
       href: "/bomb",
@@ -246,6 +253,7 @@ function SubnetGamesPage() {
       tag: "Network and broadcast",
       body: "Cut the right subnet wire under pressure: mask, block, host range, broadcast.",
       stat: "Timed defusal",
+      meta: "Broadcast drills",
     },
     {
       href: "/wordle",
@@ -253,6 +261,7 @@ function SubnetGamesPage() {
       tag: "Terms",
       body: "Guess networking vocabulary with a daily puzzle feel.",
       stat: "Vocabulary recall",
+      meta: "Term practice",
     },
     {
       href: "/jeopardy",
@@ -260,36 +269,46 @@ function SubnetGamesPage() {
       tag: "Quiz bank",
       body: "Classroom-style board play from the OpenPT CCNA question bank.",
       stat: "Team review",
+      meta: "Question bank",
     },
   ];
 
   return (
-    <main className="subnet-games-page">
-      <section className="subnet-games-hero">
-        <div>
-          <SubnetGamesNav compact />
-          <p className="subnet-games-kicker">OpenPT Arcade</p>
-          <h1>Subnet reflex training</h1>
-          <p className="subnet-games-copy">
-            Fast little games for turning CIDR, masks, block sizes, networks, broadcasts, and host ranges into muscle memory.
-          </p>
+    <main className="subnet-games-page subnet-library-page">
+      <div className="subnet-library-centered">
+        <div className="subnet-library-stack">
+          <div className="subnet-library-brand">
+            <div className="subnet-library-glyph"></div>
+            <div className="subnet-library-name">
+              OpenPT <span>Arcade</span>
+            </div>
+          </div>
+
+          <section className="subnet-library-card">
+            <header className="subnet-library-head">
+              <div className="subnet-library-title">
+                <span className="subnet-library-title-glyph"></span>
+                games
+              </div>
+              <div className="subnet-library-meta">4 trainers</div>
+            </header>
+
+            <div className="subnet-library-grid" aria-label="Game library">
+              {games.map((game) => (
+                <a className="subnet-library-game-card" href={game.href} key={game.href}>
+                  <div className="subnet-library-game-top">
+                    <span>{game.tag}</span>
+                    <b>{game.meta}</b>
+                  </div>
+                  <h2>{game.title}</h2>
+                  <p>{game.body}</p>
+                  <strong>{game.stat}</strong>
+                </a>
+              ))}
+            </div>
+          </section>
         </div>
-        <div className="subnet-games-terminal" aria-label="Subnet example">
-          <span>172.31.100.200/21</span>
-          <b>block 8 in third octet</b>
-          <strong>172.31.96.0 - 172.31.103.255</strong>
-        </div>
-      </section>
-      <section className="subnet-games-grid" aria-label="Game list">
-        {games.map((game) => (
-          <a className="subnet-game-card" href={game.href} key={game.href}>
-            <span>{game.tag}</span>
-            <h2>{game.title}</h2>
-            <p>{game.body}</p>
-            <strong>{game.stat}</strong>
-          </a>
-        ))}
-      </section>
+      </div>
     </main>
   );
 }

@@ -53,6 +53,14 @@
       "destination": "/bomb.html"
     },
     {
+      "source": "/ccnacasino",
+      "destination": "/ccnacasino.html"
+    },
+    {
+      "source": "/ccnacasino/",
+      "destination": "/ccnacasino.html"
+    },
+    {
       "source": "/jeopardy-theme.m4a",
       "destination": "/01%20Jeopardy%20%28Main%20Theme%29.m4a"
     },
