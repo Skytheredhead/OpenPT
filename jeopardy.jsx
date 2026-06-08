@@ -142,26 +142,42 @@ function jeopardyShuffle(items, seed) {
   return out;
 }
 
+const JEOPARDY_EXHIBIT_REFERENCE_RE = /\b(refer to (the )?(exhibit|topology|figure|diagram|output|configuration)|shown in the exhibit|shown by the exhibit|shown below|in the shown|as shown)\b/i;
+
+function enrichJeopardyRawQuestion(item) {
+  const enrichments = window.FINAL_STRUCTURED_EXHIBITS || {};
+  const key = `${item?.src || ""}#${item?.si || ""}`;
+  return enrichments[key] ? { ...item, ...enrichments[key] } : item;
+}
+
 function normalizeJeopardyQuestion(item, index) {
-  const options = Array.isArray(item?.o) ? item.o.map((option) => String(option || "").trim()).filter(Boolean) : [];
-  const answers = Array.isArray(item?.a) ? item.a : [item?.a].filter((value) => Number.isInteger(value));
+  const enriched = enrichJeopardyRawQuestion(item);
+  const options = Array.isArray(enriched?.o) ? enriched.o.map((option) => String(option || "").trim()).filter(Boolean) : [];
+  const answers = Array.isArray(enriched?.a) ? enriched.a : [enriched?.a].filter((value) => Number.isInteger(value));
   const answerText = answers.map((answerIndex) => options[answerIndex]).filter(Boolean);
-  const codeLines = Array.isArray(item?.code) ? item.code.map((line) => String(line || "")) : [];
+  const codeLines = Array.isArray(enriched?.code) ? enriched.code.map((line) => String(line || "")) : [];
+  const structuredExhibit = enriched?.exhibit && typeof enriched.exhibit === "object" ? enriched.exhibit : null;
+  const exhibitCount = Number(enriched?.e) || (structuredExhibit || codeLines.length ? 1 : 0);
+  const hasUsableExhibit = !!structuredExhibit || codeLines.length > 0;
   return {
-    id: `${item?.bank || item?.src || "quiz"}-${item?.si || item?.s || index}`,
-    prompt: String(item?.q || "").trim(),
+    id: `${enriched?.bank || enriched?.src || "quiz"}-${enriched?.si || enriched?.s || index}`,
+    prompt: String(enriched?.q || "").trim(),
     options,
     answerIndexes: answers,
     answerText,
-    source: item?.src || item?.bank || "Quiz bank",
-    sourceIndex: item?.si || item?.s || index + 1,
-    multi: !!item?.m || answers.length > 1,
-    exhibit: !!item?.e,
+    source: enriched?.src || enriched?.bank || "Quiz bank",
+    sourceIndex: enriched?.si || enriched?.s || index + 1,
+    multi: !!enriched?.m || answers.length > 1,
+    hasExhibit: exhibitCount > 0,
+    hasUsableExhibit,
+    missingReferencedExhibit: JEOPARDY_EXHIBIT_REFERENCE_RE.test(enriched?.q || "") && !hasUsableExhibit,
+    exhibitCount,
+    exhibit: structuredExhibit,
     codeLines,
-    explanation: String(item?.x || item?.explanation || "").trim(),
-    course: item?.course || "",
-    exam: item?.exam || "",
-    lab: !!item?.lab,
+    explanation: String(enriched?.x || enriched?.explanation || "").trim(),
+    course: enriched?.course || "",
+    exam: enriched?.exam || "",
+    lab: !!enriched?.lab,
   };
 }
 
@@ -185,7 +201,7 @@ function bestTopicForQuestions(questions, salt = 0) {
 
 function questionDifficulty(question) {
   const lengthScore = Math.min(5, Math.floor(question.prompt.length / 95));
-  return lengthScore + (question.multi ? 2 : 0) + (question.exhibit ? 1 : 0) + Math.min(2, Math.floor(question.options.length / 4));
+  return lengthScore + (question.multi ? 2 : 0) + (question.hasExhibit ? 1 : 0) + Math.min(2, Math.floor(question.options.length / 4));
 }
 
 function defaultJeopardyTeams() {
@@ -218,7 +234,7 @@ function todaySeed() {
 function buildJeopardyColumns(rawQuestions, gameSeed, deckId) {
   const normalized = (rawQuestions || [])
     .map(normalizeJeopardyQuestion)
-    .filter((question) => question.prompt && question.answerText.length && !question.lab);
+    .filter((question) => question.prompt && question.answerText.length && !question.lab && !question.missingReferencedExhibit);
   const decked = normalized.filter((question) => deckId === "all" || String(question.source || "") === deckId);
   const pool = decked.length >= JEOPARDY_POINTS.length ? decked : normalized;
   const used = new Set();
@@ -324,6 +340,98 @@ function makeDeckOptions(rawQuestions) {
     ...sources.map((source) => ({ id: source, title: versionDeckTitle(source) })),
   ];
 }
+
+function jeopardyNodeBadge(kind) {
+  switch (kind) {
+    case "router": return "R";
+    case "l2switch": return "SW";
+    case "server": return "SRV";
+    case "internet": return "NET";
+    case "cloud": return "WAN";
+    case "pc":
+    default: return "PC";
+  }
+}
+
+const JeopardyQuestionExhibit = ({ question }) => {
+  const blocks = [];
+  if (question.exhibit?.type === "topology") {
+    blocks.push(<JeopardyTopologyExhibit key="topology" exhibit={question.exhibit} />);
+  }
+  if (question.codeLines.length > 0) {
+    blocks.push(<JeopardyCodeExhibit key="code" lines={question.codeLines} />);
+  }
+  if (blocks.length) return <div className="jeopardy-exhibit-stack">{blocks}</div>;
+  if (!question.hasExhibit) return null;
+  return (
+    <div className="jeopardy-note">
+      This imported item references an exhibit from the original practice set, but no structured exhibit was found.
+    </div>
+  );
+};
+
+const JeopardyCodeExhibit = ({ lines }) => (
+  <pre className="jeopardy-code"><code>{lines.join("\n")}</code></pre>
+);
+
+const JeopardyTopologyExhibit = ({ exhibit }) => {
+  const nodes = exhibit.nodes || [];
+  const byId = Object.fromEntries(nodes.map((node) => [node.id, node]));
+  const links = exhibit.links || [];
+  const linkLabels = links.flatMap((link, index) => {
+    const a = byId[link.from];
+    const b = byId[link.to];
+    if (!a || !b || !link.label) return [];
+    return [{
+      key: `${link.from}-${link.to}-${index}-label`,
+      label: link.label,
+      type: link.type || "ethernet",
+      x: (a.x + b.x) / 2,
+      y: (a.y + b.y) / 2,
+    }];
+  });
+  return (
+    <div className="jeopardy-topology" aria-label={exhibit.title || "Network topology exhibit"}>
+      {exhibit.title && <div className="jeopardy-topology-title">{exhibit.title}</div>}
+      <svg className="jeopardy-topology-links" viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true">
+        {links.map((link, index) => {
+          const a = byId[link.from];
+          const b = byId[link.to];
+          if (!a || !b) return null;
+          return (
+            <line
+              key={`${link.from}-${link.to}-${index}`}
+              x1={a.x}
+              y1={a.y}
+              x2={b.x}
+              y2={b.y}
+              className={`jeopardy-topology-link ${link.type || "ethernet"}`}
+            />
+          );
+        })}
+      </svg>
+      {linkLabels.map((link) => (
+        <div
+          key={link.key}
+          className={`jeopardy-topology-link-label ${link.type}`}
+          style={{ left: `${link.x}%`, top: `${link.y}%` }}
+        >
+          {link.label}
+        </div>
+      ))}
+      {nodes.map((node) => (
+        <div
+          key={node.id}
+          className={`jeopardy-topology-node ${node.kind || "pc"}`}
+          style={{ left: `${node.x}%`, top: `${node.y}%` }}
+        >
+          <div className="jeopardy-topology-glyph">{jeopardyNodeBadge(node.kind)}</div>
+          <div className="jeopardy-topology-node-label">{node.label}</div>
+        </div>
+      ))}
+    </div>
+  );
+};
 
 function JeopardyPage() {
   const rawQuestions = window.QUESTIONS_RAW || [];
@@ -993,12 +1101,7 @@ function JeopardyPage() {
               <div className="jeopardy-question-card">
                 <h3>{activeClue.question.prompt}</h3>
 
-                {activeClue.question.exhibit && !activeClue.question.codeLines.length && (
-                  <div className="jeopardy-note">This quiz-bank item references an exhibit from the original practice set.</div>
-                )}
-                {activeClue.question.codeLines.length > 0 && (
-                  <pre className="jeopardy-code"><code>{activeClue.question.codeLines.join("\n")}</code></pre>
-                )}
+                <JeopardyQuestionExhibit question={activeClue.question} />
 
                 <ol className="jeopardy-choice-list">
                   {activeClue.question.options.map((option, index) => (
