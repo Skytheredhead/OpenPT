@@ -1,0 +1,69 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>OpenPT Games</title>
+<base href="/" />
+<link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Geist:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet" />
+<style>
+  :root {
+    --bg-0: oklch(0.16 0.005 240);
+    --bg-1: oklch(0.19 0.006 240);
+    --bg-2: oklch(0.23 0.007 240);
+    --bg-3: oklch(0.27 0.008 240);
+    --bg-hi: oklch(0.32 0.010 240);
+    --line: oklch(0.32 0.010 240 / 0.7);
+    --line-soft: oklch(0.32 0.010 240 / 0.3);
+    --fg-0: oklch(0.96 0.003 240);
+    --fg-1: oklch(0.78 0.005 240);
+    --fg-2: oklch(0.60 0.006 240);
+    --fg-3: oklch(0.45 0.007 240);
+    --accent: oklch(0.78 0.13 220);
+    --accent-dim: oklch(0.48 0.11 220);
+    --accent-soft: oklch(0.78 0.13 220 / 0.14);
+    --ok: oklch(0.78 0.15 150);
+    --warn: oklch(0.84 0.14 90);
+    --err: oklch(0.70 0.19 25);
+    --magenta: oklch(0.72 0.17 330);
+    --violet: oklch(0.72 0.15 290);
+    --font-ui: "Geist", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+    --font-mono: "JetBrains Mono", ui-monospace, "SF Mono", Menlo, monospace;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; min-height: 100%; background: var(--bg-0); color: var(--fg-0); font-family: var(--font-ui); -webkit-font-smoothing: antialiased; }
+  body { font-size: 13px; letter-spacing: -0.005em; }
+  button { font-family: inherit; color: inherit; }
+  #boot { position: fixed; inset: 0; display: grid; place-items: center; background: var(--bg-0); color: var(--fg-2); font: 13px var(--font-mono); z-index: 9999; }
+  #boot.fading { opacity: 0; pointer-events: none; transition: opacity 180ms ease; }
+  #root { min-height: 100vh; opacity: 0; }
+  #root.ready { opacity: 1; transition: opacity 160ms ease; }
+</style>
+<link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+<div id="boot">OpenPT Games loading...</div>
+<div id="root"></div>
+
+<script src="https://unpkg.com/react@18.3.1/umd/react.development.js" integrity="sha384-hD6/rw4ppMLGNu3tX5cjIb+uRZ7UkRJ6BPkLpg4hAu/6onKUg4lLsHAs9EBPT82L" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" integrity="sha384-u6aeetuaXnQ38mYT8rp6sbXaQe3NL9t+IBXmnYxwkUI2Hw4bsp2Wvmx4yRQF1uAm" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" integrity="sha384-m08KidiNqLdpJqLq95G/LEi8Qvjl/xUYll3QILypMoQ65QorJ9Lvtp2RXYGBFj1y" crossorigin="anonymous"></script>
+<script type="text/babel" src="subnet-games.jsx"></script>
+<script type="text/babel">
+  ReactDOM.createRoot(document.getElementById("root")).render(<window.SubnetGamesPage />);
+  requestAnimationFrame(() => {
+    const root = document.getElementById("root");
+    const boot = document.getElementById("boot");
+    if (root) root.classList.add("ready");
+    if (boot) {
+      boot.classList.add("fading");
+      setTimeout(() => boot.remove(), 220);
+    }
+  });
+</script>
+<script defer src="/_vercel/insights/script.js"></script>
+</body>
+</html>

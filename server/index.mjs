@@ -707,6 +707,30 @@ if (!backendOnly) {
     return reply.sendFile("wordle.html");
   });
 
+  app.get("/games", async (req, reply) => {
+    return reply.sendFile("games.html");
+  });
+
+  app.get("/games/", async (req, reply) => {
+    return reply.sendFile("games.html");
+  });
+
+  app.get("/firewall", async (req, reply) => {
+    return reply.sendFile("firewall.html");
+  });
+
+  app.get("/firewall/", async (req, reply) => {
+    return reply.sendFile("firewall.html");
+  });
+
+  app.get("/bomb", async (req, reply) => {
+    return reply.sendFile("bomb.html");
+  });
+
+  app.get("/bomb/", async (req, reply) => {
+    return reply.sendFile("bomb.html");
+  });
+
   app.get("/share/:token", async (req, reply) => {
     return reply.sendFile("index.html");
   });

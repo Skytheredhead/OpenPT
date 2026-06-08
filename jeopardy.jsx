@@ -6,6 +6,7 @@ const { useEffect: useJeopardyEffect, useMemo: useJeopardyMemo, useRef: useJeopa
 const JEOPARDY_POINTS = [100, 200, 300, 400, 500];
 const JEOPARDY_VISIBLE_COLUMNS = 5;
 const JEOPARDY_DAILY_DOUBLES = 2;
+const JEOPARDY_BOARD_HISTORY_LIMIT = 2;
 const JEOPARDY_STORAGE_KEY = "openpt:jeopardy";
 const JEOPARDY_MUSIC_SRC = "/jeopardy-theme.m4a";
 const JEOPARDY_MUSIC_VOLUME = 0.38;
@@ -226,9 +227,179 @@ function orderJeopardyTeams(teams) {
     .map((item) => item.team);
 }
 
+function formatJeopardyScore(value) {
+  const score = Number(value) || 0;
+  const sign = score < 0 ? "-" : "";
+  return `${sign}${Math.abs(score).toLocaleString()}`;
+}
+
+function rankedJeopardyTeams(teams) {
+  return teams
+    .map((team, index) => ({ ...team, originalIndex: index }))
+    .sort((a, b) => (Number(b.score) || 0) - (Number(a.score) || 0) || a.originalIndex - b.originalIndex)
+    .map((team, index) => ({ ...team, place: index + 1 }));
+}
+
+function buildJeopardyEndGameSnapshot(teams, answered, allClues, finalScored) {
+  const rankedTeams = rankedJeopardyTeams(teams);
+  const answeredEntries = Object.values(answered || {}).filter(Boolean);
+  const scoredEntries = answeredEntries.filter((entry) => Number.isFinite(Number(entry.delta)));
+  const finalEntries = Object.entries(finalScored || {}).map(([teamId, entry]) => ({ teamId, ...entry }));
+  const teamNames = Object.fromEntries(teams.map((team) => [team.id, team.name]));
+  const totalBoardClues = allClues.length;
+  const clearedCount = answeredEntries.length;
+  const clearedPercent = totalBoardClues ? Math.round((clearedCount / totalBoardClues) * 100) : 0;
+  const correctBuzzes = scoredEntries.filter((entry) => Number(entry.delta) > 0).length;
+  const incorrectBuzzes = scoredEntries.filter((entry) => Number(entry.delta) < 0).length;
+  const noScoreClues = answeredEntries.filter((entry) => entry.skipped).length;
+  const dailyDoubles = answeredEntries.filter((entry) => entry.dailyDouble).length;
+  const finalResolved = finalEntries.length;
+  const biggestBoardSwing = scoredEntries.reduce((best, entry) => {
+    const amount = Math.abs(Number(entry.delta) || 0);
+    return amount > best.amount ? { amount, teamId: entry.teamId } : best;
+  }, { amount: 0, teamId: "" });
+  const biggestFinalSwing = finalEntries.reduce((best, entry) => {
+    const amount = Math.abs(Number(entry.wager) || 0);
+    return amount > best.amount ? { amount, teamId: entry.teamId } : best;
+  }, { amount: 0, teamId: "" });
+  const biggestSwing = biggestFinalSwing.amount > biggestBoardSwing.amount ? biggestFinalSwing : biggestBoardSwing;
+  const positiveByTeam = scoredEntries.reduce((totals, entry) => {
+    if (Number(entry.delta) > 0) totals[entry.teamId] = (totals[entry.teamId] || 0) + Number(entry.delta);
+    return totals;
+  }, {});
+  finalEntries.forEach((entry) => {
+    if (entry.correct) positiveByTeam[entry.teamId] = (positiveByTeam[entry.teamId] || 0) + (Number(entry.wager) || 0);
+  });
+  const hottestTeam = Object.entries(positiveByTeam).sort((a, b) => b[1] - a[1])[0];
+  const winner = rankedTeams[0] || null;
+  const runnerUp = rankedTeams[1] || null;
+  const margin = winner && runnerUp ? (Number(winner.score) || 0) - (Number(runnerUp.score) || 0) : Number(winner?.score) || 0;
+  const stats = [
+    {
+      label: "Champion",
+      value: winner?.name || "No teams",
+      note: winner ? `${formatJeopardyScore(winner.score)} points on the board` : "Add teams to crown a winner",
+    },
+    {
+      label: "Winning margin",
+      value: runnerUp ? formatJeopardyScore(margin) : "Solo run",
+      note: runnerUp ? `over ${runnerUp.name}` : "No runner-up this round",
+    },
+    {
+      label: "Board cleared",
+      value: `${clearedCount}/${totalBoardClues}`,
+      note: `${clearedPercent}% of this board played`,
+    },
+    {
+      label: "Correct buzzes",
+      value: String(correctBuzzes),
+      note: `${incorrectBuzzes} incorrect swings, ${noScoreClues} no-score clues`,
+    },
+    {
+      label: "Biggest swing",
+      value: biggestSwing.amount ? formatJeopardyScore(biggestSwing.amount) : "0",
+      note: biggestSwing.teamId ? `by ${teamNames[biggestSwing.teamId] || "a team"}` : "No scored clues yet",
+    },
+    {
+      label: "Daily doubles found",
+      value: String(dailyDoubles),
+      note: finalResolved ? `${finalResolved} Final Jeopardy wagers resolved` : "Final Jeopardy still untouched",
+    },
+    {
+      label: "Point storm",
+      value: hottestTeam ? formatJeopardyScore(hottestTeam[1]) : "0",
+      note: hottestTeam ? `${teamNames[hottestTeam[0]] || "A team"} earned the most positive points` : "Waiting for a breakout run",
+    },
+  ];
+  return { rankedTeams, stats };
+}
+
 function todaySeed() {
   const date = new Date();
   return `${date.getFullYear()}-${date.getMonth() + 1}-${date.getDate()}`;
+}
+
+function columnTopicKey(column) {
+  return String(column?.topicKey || column?.id || column?.title || "");
+}
+
+function columnQuestionIds(column) {
+  return (column?.clues || [])
+    .map((clue) => clue?.question?.id)
+    .filter(Boolean);
+}
+
+function normalizeJeopardyBoardHistory(value) {
+  if (!Array.isArray(value)) return [];
+  return value
+    .map((entry) => ({
+      deckId: String(entry?.deckId || "all"),
+      topicIds: [...new Set((Array.isArray(entry?.topicIds) ? entry.topicIds : []).map(String).filter(Boolean))],
+      questionIds: [...new Set((Array.isArray(entry?.questionIds) ? entry.questionIds : []).map(String).filter(Boolean))],
+      at: Number(entry?.at) || Date.now(),
+    }))
+    .filter((entry) => entry.topicIds.length || entry.questionIds.length)
+    .slice(-JEOPARDY_BOARD_HISTORY_LIMIT);
+}
+
+function jeopardyBoardHistoryEntry(board, deckId) {
+  const columns = Array.isArray(board) ? board : [];
+  return {
+    deckId: String(deckId || "all"),
+    topicIds: [...new Set(columns.map(columnTopicKey).filter(Boolean))],
+    questionIds: [...new Set(columns.flatMap(columnQuestionIds))],
+    at: Date.now(),
+  };
+}
+
+function rememberJeopardyBoard(history, board, deckId) {
+  const normalized = normalizeJeopardyBoardHistory(history);
+  const entry = jeopardyBoardHistoryEntry(board, deckId);
+  if (!entry.topicIds.length && !entry.questionIds.length) return normalized;
+  const signature = `${entry.deckId}:${entry.topicIds.join("|")}:${entry.questionIds.join("|")}`;
+  const last = normalized[normalized.length - 1];
+  const lastSignature = last ? `${last.deckId}:${last.topicIds.join("|")}:${last.questionIds.join("|")}` : "";
+  if (signature === lastSignature) return normalized;
+  return [...normalized, entry].slice(-JEOPARDY_BOARD_HISTORY_LIMIT);
+}
+
+function selectJeopardyVisibleColumns(columns, boardRound = 0, boardHistory = []) {
+  if (columns.length <= JEOPARDY_VISIBLE_COLUMNS) return columns;
+  const round = Math.max(0, Number(boardRound) || 0);
+  const start = (round * JEOPARDY_VISIBLE_COLUMNS) % columns.length;
+  const ordered = Array.from({ length: columns.length }, (_, index) => columns[(start + index) % columns.length]);
+  const recentBoards = normalizeJeopardyBoardHistory(boardHistory);
+  const blockedTopics = new Set(recentBoards.flatMap((entry) => entry.topicIds));
+  const blockedQuestions = new Set(recentBoards.flatMap((entry) => entry.questionIds));
+  const selected = [];
+  const selectedTitles = new Set();
+
+  const addColumns = ({ allowRecentTopics, allowRecentQuestions, allowDuplicateTitles }) => {
+    for (const column of ordered) {
+      if (selected.includes(column)) continue;
+      if (!allowDuplicateTitles && selectedTitles.has(column.title)) continue;
+      if (!allowRecentTopics && blockedTopics.has(columnTopicKey(column))) continue;
+      if (!allowRecentQuestions && columnQuestionIds(column).some((id) => blockedQuestions.has(id))) continue;
+      selected.push(column);
+      selectedTitles.add(column.title);
+      if (selected.length === JEOPARDY_VISIBLE_COLUMNS) return true;
+    }
+    return false;
+  };
+
+  const passes = [
+    { allowRecentTopics: false, allowRecentQuestions: false, allowDuplicateTitles: false },
+    { allowRecentTopics: false, allowRecentQuestions: true, allowDuplicateTitles: false },
+    { allowRecentTopics: true, allowRecentQuestions: false, allowDuplicateTitles: false },
+    { allowRecentTopics: false, allowRecentQuestions: true, allowDuplicateTitles: true },
+    { allowRecentTopics: true, allowRecentQuestions: true, allowDuplicateTitles: false },
+    { allowRecentTopics: true, allowRecentQuestions: true, allowDuplicateTitles: true },
+  ];
+
+  for (const pass of passes) {
+    if (addColumns(pass)) return selected;
+  }
+  return selected;
 }
 
 function buildJeopardyColumns(rawQuestions, gameSeed, deckId) {
@@ -242,8 +413,10 @@ function buildJeopardyColumns(rawQuestions, gameSeed, deckId) {
   const topics = jeopardyShuffle(JEOPARDY_TOPIC_RULES, `${gameSeed}:${deckId}:topics`);
   const makeColumn = (topic, selected, columnIndex) => {
     const sorted = [...selected].sort((a, b) => questionDifficulty(a) - questionDifficulty(b));
+    const topicKey = String(topic.topicKey || topic.id || topic.title || "");
     return {
       ...topic,
+      topicKey,
       clues: JEOPARDY_POINTS.map((points, index) => ({
         id: `${topic.id}-${columnIndex}-${points}`,
         points,
@@ -274,6 +447,7 @@ function buildJeopardyColumns(rawQuestions, gameSeed, deckId) {
     const topic = bestTopicForQuestions(selected, columns.length);
     columns.push(makeColumn({
       ...topic,
+      topicKey: topic.id,
       id: `${topic.id}-extra-${Math.floor(index / JEOPARDY_POINTS.length) + 1}`,
     }, selected, columns.length));
   }
@@ -281,8 +455,10 @@ function buildJeopardyColumns(rawQuestions, gameSeed, deckId) {
   if (!columns.length) {
     const fallback = jeopardyShuffle(pool, `${gameSeed}:${deckId}:fallback`);
     for (let index = 0; index + JEOPARDY_POINTS.length <= fallback.length; index += JEOPARDY_POINTS.length) {
+      const fallbackTopic = JEOPARDY_TOPIC_RULES[Math.floor(index / JEOPARDY_POINTS.length) % JEOPARDY_TOPIC_RULES.length];
       columns.push(makeColumn({
-        ...JEOPARDY_TOPIC_RULES[Math.floor(index / JEOPARDY_POINTS.length) % JEOPARDY_TOPIC_RULES.length],
+        ...fallbackTopic,
+        topicKey: fallbackTopic.id,
         id: `fallback-${Math.floor(index / JEOPARDY_POINTS.length) + 1}`,
       }, fallback.slice(index, index + JEOPARDY_POINTS.length), columns.length));
     }
@@ -291,26 +467,9 @@ function buildJeopardyColumns(rawQuestions, gameSeed, deckId) {
   return jeopardyShuffle(columns, `${gameSeed}:${deckId}:columns`);
 }
 
-function buildJeopardyBoard(rawQuestions, gameSeed, deckId, boardRound = 0) {
+function buildJeopardyBoard(rawQuestions, gameSeed, deckId, boardRound = 0, boardHistory = []) {
   const columns = buildJeopardyColumns(rawQuestions, gameSeed, deckId);
-  const visibleColumns = columns.length <= JEOPARDY_VISIBLE_COLUMNS ? columns : (() => {
-    const start = (Math.max(0, Number(boardRound) || 0) * JEOPARDY_VISIBLE_COLUMNS) % columns.length;
-    const ordered = Array.from({ length: columns.length }, (_, index) => columns[(start + index) % columns.length]);
-    const titles = new Set();
-    const selected = [];
-    for (const column of ordered) {
-      if (titles.has(column.title)) continue;
-      selected.push(column);
-      titles.add(column.title);
-      if (selected.length === JEOPARDY_VISIBLE_COLUMNS) return selected;
-    }
-    for (const column of ordered) {
-      if (selected.includes(column)) continue;
-      selected.push(column);
-      if (selected.length === JEOPARDY_VISIBLE_COLUMNS) return selected;
-    }
-    return selected;
-  })();
+  const visibleColumns = selectJeopardyVisibleColumns(columns, boardRound, boardHistory);
   const dailyDoubleIds = new Set(
     jeopardyShuffle(
       visibleColumns.flatMap((column) => column.clues.map((clue) => clue.id)),
@@ -374,8 +533,26 @@ const JeopardyCodeExhibit = ({ lines }) => (
   <pre className="jeopardy-code"><code>{lines.join("\n")}</code></pre>
 );
 
+function fitJeopardyTopologyNodes(nodes) {
+  if (!nodes.length) return [];
+  const bounds = nodes.reduce((box, node) => ({
+    minX: Math.min(box.minX, Number(node.x) || 0),
+    maxX: Math.max(box.maxX, Number(node.x) || 0),
+    minY: Math.min(box.minY, Number(node.y) || 0),
+    maxY: Math.max(box.maxY, Number(node.y) || 0),
+  }), { minX: Infinity, maxX: -Infinity, minY: Infinity, maxY: -Infinity });
+  const scale = (value, min, max, low, high) => (
+    max === min ? (low + high) / 2 : low + ((Number(value) - min) / (max - min)) * (high - low)
+  );
+  return nodes.map((node) => ({
+    ...node,
+    x: scale(node.x, bounds.minX, bounds.maxX, 14, 86),
+    y: scale(node.y, bounds.minY, bounds.maxY, 24, 78),
+  }));
+}
+
 const JeopardyTopologyExhibit = ({ exhibit }) => {
-  const nodes = exhibit.nodes || [];
+  const nodes = fitJeopardyTopologyNodes(exhibit.nodes || []);
   const byId = Object.fromEntries(nodes.map((node) => [node.id, node]));
   const links = exhibit.links || [];
   const linkLabels = links.flatMap((link, index) => {
@@ -392,7 +569,6 @@ const JeopardyTopologyExhibit = ({ exhibit }) => {
   });
   return (
     <div className="jeopardy-topology" aria-label={exhibit.title || "Network topology exhibit"}>
-      {exhibit.title && <div className="jeopardy-topology-title">{exhibit.title}</div>}
       <svg className="jeopardy-topology-links" viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true">
         {links.map((link, index) => {
           const a = byId[link.from];
@@ -448,6 +624,10 @@ function JeopardyPage() {
     try { return Number(JSON.parse(localStorage.getItem(JEOPARDY_STORAGE_KEY) || "{}").boardRound) || 0; }
     catch (e) { return 0; }
   });
+  const [boardHistory, setBoardHistory] = useJeopardyState(() => {
+    try { return normalizeJeopardyBoardHistory(JSON.parse(localStorage.getItem(JEOPARDY_STORAGE_KEY) || "{}").boardHistory); }
+    catch (e) { return []; }
+  });
   const [teams, setTeams] = useJeopardyState(() => {
     try {
       const saved = JSON.parse(localStorage.getItem(JEOPARDY_STORAGE_KEY) || "{}").teams;
@@ -483,6 +663,7 @@ function JeopardyPage() {
   const [dailyDoubleWager, setDailyDoubleWager] = useJeopardyState("");
   const [boardPhase, setBoardPhase] = useJeopardyState("");
   const [finalOpen, setFinalOpen] = useJeopardyState(false);
+  const [endGameOpen, setEndGameOpen] = useJeopardyState(false);
   const [finalAnswerShown, setFinalAnswerShown] = useJeopardyState(false);
   const [musicEnabled, setMusicEnabled] = useJeopardyState(() => {
     try { return JSON.parse(localStorage.getItem(JEOPARDY_STORAGE_KEY) || "{}").musicEnabled ?? true; }
@@ -506,7 +687,7 @@ function JeopardyPage() {
   const settingsButtonRef = useJeopardyRef(null);
   const settingsCardRef = useJeopardyRef(null);
 
-  const board = useJeopardyMemo(() => buildJeopardyBoard(rawQuestions, seed, deckId, boardRound), [rawQuestions.length, seed, deckId, boardRound]);
+  const board = useJeopardyMemo(() => buildJeopardyBoard(rawQuestions, seed, deckId, boardRound, boardHistory), [rawQuestions.length, seed, deckId, boardRound, boardHistory]);
   const allClues = useJeopardyMemo(() => board.flatMap((column) => column.clues), [board]);
   const orderedTeams = useJeopardyMemo(() => orderJeopardyTeams(teams), [teams]);
   const selectedDeck = decks.find((deck) => deck.id === deckId) || decks[0] || { id: "all", title: "All Versions" };
@@ -514,6 +695,18 @@ function JeopardyPage() {
     const candidates = allClues.filter((clue) => !answered[clue.id]);
     return jeopardyShuffle(candidates.length ? candidates : allClues, `${seed}:final`)[0] || null;
   }, [allClues, answered, seed]);
+  const endGameSnapshot = useJeopardyMemo(
+    () => buildJeopardyEndGameSnapshot(orderedTeams, answered, allClues, finalScored),
+    [orderedTeams, answered, allClues, finalScored]
+  );
+  const podiumSlots = useJeopardyMemo(() => {
+    const podiumTeams = endGameSnapshot.rankedTeams.slice(0, 3);
+    return [
+      { key: "second", label: "2nd", team: podiumTeams[1] || null },
+      { key: "first", label: "1st", team: podiumTeams[0] || null },
+      { key: "third", label: "3rd", team: podiumTeams[2] || null },
+    ];
+  }, [endGameSnapshot]);
   useJeopardyEffect(() => {
     const root = document.getElementById("root");
     const boot = document.getElementById("boot");
@@ -531,8 +724,8 @@ function JeopardyPage() {
   }, [deckId, decks]);
 
   useJeopardyEffect(() => {
-    localStorage.setItem(JEOPARDY_STORAGE_KEY, JSON.stringify({ deckId, seed, boardRound, teams, answered, musicEnabled, finalScored, scoreMultiplier, activeTeamId }));
-  }, [deckId, seed, boardRound, teams, answered, musicEnabled, finalScored, scoreMultiplier, activeTeamId]);
+    localStorage.setItem(JEOPARDY_STORAGE_KEY, JSON.stringify({ deckId, seed, boardRound, boardHistory, teams, answered, musicEnabled, finalScored, scoreMultiplier, activeTeamId }));
+  }, [deckId, seed, boardRound, boardHistory, teams, answered, musicEnabled, finalScored, scoreMultiplier, activeTeamId]);
 
   useJeopardyEffect(() => {
     if (!teams.some((team) => team.id === activeTeamId)) setActiveTeamId(orderedTeams[0]?.id || "team-1");
@@ -563,12 +756,13 @@ function JeopardyPage() {
     boardAdvanceTimerRef.current = window.setTimeout(() => {
       setBoardPhase("flip-out");
       boardAdvanceTimerRef.current = window.setTimeout(() => {
-      setAnswered({});
-      setActiveClue(null);
-      setClueClosing(false);
-      setBoardRound((round) => round + 1);
-      setScoreMultiplier((multiplier) => multiplier < 2 ? 2 : multiplier < 3 ? 3 : 3);
-      setBoardPhase("flip-in");
+        setAnswered({});
+        setActiveClue(null);
+        setClueClosing(false);
+        setBoardHistory((history) => rememberJeopardyBoard(history, board, deckId));
+        setBoardRound((round) => round + 1);
+        setScoreMultiplier((multiplier) => multiplier < 2 ? 2 : multiplier < 3 ? 3 : 3);
+        setBoardPhase("flip-in");
         boardAdvanceTimerRef.current = window.setTimeout(() => {
           setBoardPhase("");
           boardAdvanceTimerRef.current = null;
@@ -581,7 +775,7 @@ function JeopardyPage() {
         boardAdvanceTimerRef.current = null;
       }
     };
-  }, [allClues, answered]);
+  }, [allClues, answered, board, deckId]);
 
   useJeopardyEffect(() => {
     if (!activeClue) return;
@@ -748,10 +942,24 @@ function JeopardyPage() {
   const openFinalJeopardy = () => {
     setSettingsOpen(false);
     setDeckMenuOpen(false);
+    setEndGameOpen(false);
     setFinalAnswerShown(false);
     setFinalOpen(true);
     playSfx("finalSting");
     restartMusic();
+  };
+
+  const openEndGame = () => {
+    setSettingsOpen(false);
+    setDeckMenuOpen(false);
+    setFinalOpen(false);
+    setFinalAnswerShown(false);
+    setTimerRunning(false);
+    setActiveClue(null);
+    setClueClosing(false);
+    setEndGameOpen(true);
+    playSfx("finalSting");
+    stopMusic();
   };
 
   const revealAnswer = () => {
@@ -862,6 +1070,7 @@ function JeopardyPage() {
     setSelectedAnswers([]);
     setBoardPhase("");
     setFinalOpen(false);
+    setEndGameOpen(false);
     setFinalAnswerShown(false);
     setWagers({});
     setFinalScored({});
@@ -876,6 +1085,7 @@ function JeopardyPage() {
       window.clearTimeout(boardAdvanceTimerRef.current);
       boardAdvanceTimerRef.current = null;
     }
+    setBoardHistory((history) => rememberJeopardyBoard(history, board, deckId));
     setSeed(`${todaySeed()}-${Date.now()}`);
     setBoardRound(0);
     setAnswered({});
@@ -885,6 +1095,7 @@ function JeopardyPage() {
     setBoardPhase("");
     setScoreMultiplier(1);
     setFinalOpen(false);
+    setEndGameOpen(false);
     setFinalAnswerShown(false);
     setWagers({});
     setFinalScored({});
@@ -907,6 +1118,7 @@ function JeopardyPage() {
     setSelectedAnswers([]);
     setBoardPhase("");
     setFinalOpen(false);
+    setEndGameOpen(false);
     setFinalAnswerShown(false);
     setWagers({});
     setFinalScored({});
@@ -970,6 +1182,7 @@ function JeopardyPage() {
             <span aria-hidden="true">⚙</span>
           </button>
           <button type="button" className="jeopardy-btn primary" onClick={newGame}>New Game</button>
+          <button type="button" className="jeopardy-btn danger" onClick={openEndGame}>End Game</button>
           {settingsOpen && (
             <div className="jeopardy-settings-card" ref={settingsCardRef}>
               <label className="jeopardy-setting-label">Set</label>
@@ -1212,6 +1425,70 @@ function JeopardyPage() {
                   </div>
                 ))}
               </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {endGameOpen && (
+        <div
+          className="jeopardy-modal-backdrop jeopardy-end-backdrop"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="jeopardy-end-title"
+          onClick={(event) => {
+            if (event.target === event.currentTarget) setEndGameOpen(false);
+          }}
+        >
+          <div className="jeopardy-end-card">
+            <div className="jeopardy-end-head">
+              <div>
+                <div className="jeopardy-modal-kicker">Game over</div>
+                <h2 id="jeopardy-end-title">Final Standings</h2>
+              </div>
+              <button type="button" className="jeopardy-close" aria-label="Close end game results" onClick={() => setEndGameOpen(false)}>
+                <span aria-hidden="true">&times;</span>
+              </button>
+            </div>
+
+            <div className="jeopardy-end-body">
+              <section className="jeopardy-podium" aria-label="Top teams">
+                {podiumSlots.map((slot) => (
+                  <div className={`jeopardy-podium-slot ${slot.key}`} key={slot.key}>
+                    <div className="jeopardy-podium-name">
+                      <span>{slot.label}</span>
+                      <strong>{slot.team?.name || "Open Slot"}</strong>
+                      <em>{slot.team ? formatJeopardyScore(slot.team.score) : "0"}</em>
+                    </div>
+                    <div className="jeopardy-podium-step">
+                      <span>{slot.team ? slot.team.place : "-"}</span>
+                    </div>
+                  </div>
+                ))}
+              </section>
+
+              <section className="jeopardy-end-standings" aria-label="All team standings">
+                <h3>All Teams</h3>
+                <div className="jeopardy-end-list">
+                  {endGameSnapshot.rankedTeams.map((team) => (
+                    <div className={`jeopardy-end-row ${team.place <= 3 ? "podium-team" : ""}`} key={team.id}>
+                      <span className="jeopardy-end-rank">#{team.place}</span>
+                      <span className="jeopardy-end-name">{team.name}</span>
+                      <strong>{formatJeopardyScore(team.score)}</strong>
+                    </div>
+                  ))}
+                </div>
+              </section>
+
+              <section className="jeopardy-end-stats" aria-label="Game stats">
+                {endGameSnapshot.stats.map((stat) => (
+                  <div className="jeopardy-end-stat" key={stat.label}>
+                    <span>{stat.label}</span>
+                    <strong>{stat.value}</strong>
+                    <p>{stat.note}</p>
+                  </div>
+                ))}
+              </section>
             </div>
           </div>
         </div>

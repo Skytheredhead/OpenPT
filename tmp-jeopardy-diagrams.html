@@ -1,0 +1,485 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Jeopardy Diagram Review</title>
+<base href="/" />
+<link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Geist:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet" />
+<style>
+  :root {
+    --bg-0: oklch(0.16 0.005 240);
+    --bg-1: oklch(0.19 0.006 240);
+    --bg-2: oklch(0.23 0.007 240);
+    --line: oklch(0.32 0.010 240 / 0.7);
+    --line-soft: oklch(0.32 0.010 240 / 0.32);
+    --fg-0: oklch(0.96 0.003 240);
+    --fg-1: oklch(0.78 0.005 240);
+    --fg-2: oklch(0.60 0.006 240);
+    --accent: oklch(0.78 0.13 220);
+    --ok: oklch(0.78 0.15 150);
+    --warn: oklch(0.84 0.14 90);
+    --magenta: oklch(0.72 0.17 330);
+    --font-ui: "Geist", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+    --font-mono: "JetBrains Mono", ui-monospace, "SF Mono", Menlo, monospace;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    min-height: 100vh;
+    background:
+      radial-gradient(circle at center, oklch(0.42 0.012 240 / 0.18) 0.8px, transparent 1px),
+      var(--bg-0);
+    background-size: 24px 24px, auto;
+    color: var(--fg-0);
+    font-family: var(--font-ui);
+    font-size: 13px;
+  }
+  .page {
+    width: min(1500px, calc(100vw - 32px));
+    margin: 0 auto;
+    padding: 28px 0 48px;
+  }
+  header {
+    display: flex;
+    align-items: end;
+    justify-content: space-between;
+    gap: 16px;
+    margin-bottom: 20px;
+  }
+  h1 {
+    margin: 0 0 8px;
+    font-size: clamp(28px, 5vw, 56px);
+    line-height: .95;
+    letter-spacing: 0;
+  }
+  .subtitle {
+    margin: 0;
+    color: var(--fg-2);
+    font: 12px/1.45 var(--font-mono);
+  }
+  .summary {
+    flex: 0 0 auto;
+    padding: 9px 12px;
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    background: var(--bg-1);
+    color: var(--fg-1);
+    font: 12px var(--font-mono);
+  }
+  .grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(440px, 1fr));
+    gap: 18px;
+  }
+  .card {
+    min-width: 0;
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    background: color-mix(in oklab, var(--bg-1) 88%, black);
+    overflow: hidden;
+  }
+  .card-head {
+    display: grid;
+    gap: 8px;
+    padding: 14px 16px;
+    border-bottom: 1px solid var(--line-soft);
+  }
+  .meta {
+    color: var(--accent);
+    font: 600 11px var(--font-mono);
+    text-transform: uppercase;
+  }
+  .prompt {
+    margin: 0;
+    color: var(--fg-0);
+    font-size: 15px;
+    line-height: 1.35;
+  }
+  .topology {
+    position: relative;
+    min-height: 340px;
+    overflow: hidden;
+    background:
+      radial-gradient(circle at 50% 42%, color-mix(in oklab, var(--accent) 10%, transparent), transparent 56%),
+      color-mix(in oklab, var(--bg-0) 82%, black);
+  }
+  .topology > svg {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+  }
+  .link {
+    stroke: color-mix(in oklab, var(--fg-2) 72%, transparent);
+    stroke-width: .85;
+    vector-effect: non-scaling-stroke;
+    stroke-linecap: round;
+  }
+  .link.serial {
+    stroke: var(--warn);
+    stroke-dasharray: 4 3;
+  }
+  .link-label {
+    position: absolute;
+    z-index: 4;
+    max-width: 150px;
+    transform: translate(-50%, -50%);
+    padding: 3px 6px;
+    border: 1px solid var(--line-soft);
+    border-radius: 5px;
+    background: color-mix(in oklab, var(--bg-0) 90%, transparent);
+    color: var(--fg-1);
+    font: 10px/1.25 var(--font-mono);
+    text-align: center;
+    white-space: pre-line;
+    pointer-events: none;
+  }
+  .node {
+    --glyph-size: 54px;
+    position: absolute;
+    z-index: 5;
+    width: 104px;
+    min-height: 74px;
+    transform: translate(-50%, calc(-1 * var(--glyph-size) / 2));
+    display: grid;
+    justify-items: center;
+    gap: 6px;
+    text-align: center;
+  }
+  .glyph {
+    width: var(--glyph-size);
+    height: var(--glyph-size);
+    display: grid;
+    place-items: center;
+    color: var(--accent);
+    filter: drop-shadow(0 8px 12px rgba(0,0,0,.32));
+  }
+  .glyph svg {
+    width: var(--glyph-size);
+    height: var(--glyph-size);
+    display: block;
+  }
+  .node.router .glyph { color: var(--magenta); }
+  .node.l2switch .glyph { color: var(--ok); }
+  .node.server .glyph { color: var(--warn); }
+  .label {
+    max-width: 126px;
+    padding: 3px 5px;
+    border-radius: 5px;
+    background: color-mix(in oklab, var(--bg-0) 80%, transparent);
+    color: var(--fg-1);
+    font: 10.5px/1.25 var(--font-mono);
+    white-space: pre-line;
+    overflow-wrap: anywhere;
+  }
+  .code {
+    margin: 0;
+    max-height: 190px;
+    overflow: auto;
+    padding: 14px 16px;
+    border-top: 1px solid var(--line-soft);
+    background: color-mix(in oklab, var(--bg-0) 86%, black);
+    color: var(--fg-1);
+    font: 12px/1.55 var(--font-mono);
+    white-space: pre-wrap;
+  }
+  .code-line {
+    min-height: 1.55em;
+  }
+  .code-prompt {
+    color: color-mix(in oklab, var(--fg-0) 88%, var(--accent));
+    font-weight: 700;
+  }
+  @media (max-width: 620px) {
+    .page { width: min(100vw - 20px, 1500px); padding-top: 18px; }
+    header { align-items: stretch; flex-direction: column; }
+    .summary { width: fit-content; }
+    .grid { grid-template-columns: minmax(0, 1fr); }
+    .topology { min-height: 280px; }
+    .node { --glyph-size: 42px; width: 84px; min-height: 62px; }
+    .label, .link-label { font-size: 9px; }
+  }
+</style>
+</head>
+<body>
+<div class="page">
+  <header>
+    <div>
+      <h1>Jeopardy Diagrams</h1>
+      <p class="subtitle">Temporary review page for every structured topology exhibit in the Jeopardy question bank.</p>
+    </div>
+    <div class="summary" id="summary">Loading...</div>
+  </header>
+  <main class="grid" id="grid"></main>
+</div>
+
+<script src="quiz/final-exhibits.js"></script>
+<script src="quiz/questions-ccna-b.js"></script>
+<script>
+  const exhibitReferenceRe = /\b(refer to (the )?(exhibit|topology|figure|diagram|output|configuration)|shown in the exhibit|shown by the exhibit|shown below|in the shown|as shown)\b/i;
+
+  function enrichQuestion(item) {
+    const enrichments = window.FINAL_STRUCTURED_EXHIBITS || {};
+    const key = `${item?.src || ""}#${item?.si || ""}`;
+    return enrichments[key] ? { ...item, ...enrichments[key] } : item;
+  }
+
+  function fitNodes(nodes) {
+    if (!nodes.length) return [];
+    const bounds = nodes.reduce((box, node) => ({
+      minX: Math.min(box.minX, Number(node.x) || 0),
+      maxX: Math.max(box.maxX, Number(node.x) || 0),
+      minY: Math.min(box.minY, Number(node.y) || 0),
+      maxY: Math.max(box.maxY, Number(node.y) || 0),
+    }), { minX: Infinity, maxX: -Infinity, minY: Infinity, maxY: -Infinity });
+    const scale = (value, min, max, low, high) => (
+      max === min ? (low + high) / 2 : low + ((Number(value) - min) / (max - min)) * (high - low)
+    );
+    return nodes.map((node) => ({
+      ...node,
+      x: scale(node.x, bounds.minX, bounds.maxX, 14, 86),
+      y: scale(node.y, bounds.minY, bounds.maxY, 24, 78),
+    }));
+  }
+
+  function iconMarkup(kind) {
+    switch (kind) {
+      case "router":
+        return `
+          <svg viewBox="0 0 30 30" fill="none" aria-hidden="true">
+            <circle cx="15" cy="15" r="10" stroke="currentColor" stroke-width="1.3" fill="rgba(255,255,255,0.04)"/>
+            <path d="M15 6l-2 2.5h1.4v3.5h1.2V8.5H17zM15 24l2-2.5h-1.4v-3.5h-1.2V21.5H13zM6 15l2.5-2v1.4h3.5v1.2H8.5V17zM24 15l-2.5 2v-1.4h-3.5v-1.2h3.5V13z" fill="currentColor"/>
+          </svg>`;
+      case "l2switch":
+        return `
+          <svg viewBox="0 0 30 30" fill="none" aria-hidden="true">
+            <rect x="4" y="10" width="22" height="10" rx="1.5" stroke="currentColor" stroke-width="1.3" fill="rgba(255,255,255,0.04)"/>
+            <rect x="6" y="13" width="2" height="4" fill="currentColor" opacity=".7"/>
+            <rect x="9" y="13" width="2" height="4" fill="currentColor" opacity=".7"/>
+            <rect x="12" y="13" width="2" height="4" fill="currentColor" opacity=".7"/>
+            <rect x="15" y="13" width="2" height="4" fill="currentColor" opacity=".7"/>
+            <rect x="18" y="13" width="2" height="4" fill="currentColor" opacity=".7"/>
+            <rect x="21" y="13" width="2" height="4" fill="currentColor" opacity=".7"/>
+          </svg>`;
+      case "server":
+        return `
+          <svg viewBox="0 0 30 30" fill="none" aria-hidden="true">
+            <rect x="6" y="5" width="18" height="6" rx="1" stroke="currentColor" stroke-width="1.3" fill="rgba(255,255,255,0.04)"/>
+            <rect x="6" y="12.5" width="18" height="6" rx="1" stroke="currentColor" stroke-width="1.3" fill="rgba(255,255,255,0.04)"/>
+            <rect x="6" y="20" width="18" height="6" rx="1" stroke="currentColor" stroke-width="1.3" fill="rgba(255,255,255,0.04)"/>
+            <circle cx="10" cy="8" r=".9" fill="currentColor"/>
+            <circle cx="10" cy="15.5" r=".9" fill="currentColor"/>
+            <circle cx="10" cy="23" r=".9" fill="currentColor"/>
+            <path d="M14 8h7M14 15.5h7M14 23h7" stroke="currentColor" stroke-width=".8" opacity=".55"/>
+          </svg>`;
+      case "internet":
+        return `
+          <svg viewBox="0 0 30 30" fill="none" aria-hidden="true">
+            <circle cx="15" cy="15" r="9" stroke="currentColor" stroke-width="1.3" fill="rgba(255,255,255,0.04)"/>
+            <path d="M6.5 15h17M15 6c2.5 2.5 3.7 5.5 3.7 9S17.5 21.5 15 24M15 6c-2.5 2.5-3.7 5.5-3.7 9S12.5 21.5 15 24M8.8 9.2c3.8 1.4 8.6 1.4 12.4 0M8.8 20.8c3.8-1.4 8.6-1.4 12.4 0" stroke="currentColor" stroke-width="1.05" stroke-linecap="round"/>
+          </svg>`;
+      case "cloud":
+        return `
+          <svg viewBox="0 0 30 30" fill="none" aria-hidden="true">
+            <path d="M9 21h13a4.5 4.5 0 0 0 .4-8.97A7 7 0 0 0 8.4 11.2 5 5 0 0 0 9 21z" stroke="currentColor" stroke-width="1.3" fill="rgba(255,255,255,0.04)" stroke-linejoin="round"/>
+            <circle cx="12" cy="16.5" r="1" fill="currentColor" opacity=".75"/>
+            <circle cx="16" cy="14" r="1" fill="currentColor" opacity=".75"/>
+            <circle cx="20" cy="17" r="1" fill="currentColor" opacity=".75"/>
+            <path d="M13 16l2.2-1.4M16.9 14.7l2.2 1.5" stroke="currentColor" stroke-width=".8" opacity=".7"/>
+          </svg>`;
+      case "pc":
+      default:
+        return `
+          <svg viewBox="0 0 30 30" fill="none" aria-hidden="true">
+            <rect x="4" y="6" width="22" height="14" rx="1.2" stroke="currentColor" stroke-width="1.3" fill="rgba(255,255,255,0.04)"/>
+            <path d="M11 20l-1 4M19 20l1 4M9 24h12" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/>
+            <rect x="7" y="9" width="16" height="8" fill="currentColor" opacity=".08"/>
+          </svg>`;
+    }
+  }
+
+  function deviceGlyph(kind) {
+    const glyph = document.createElement("div");
+    glyph.className = "glyph";
+    glyph.innerHTML = iconMarkup(kind);
+    return glyph;
+  }
+
+  function cleanDeviceName(value) {
+    return String(value || "")
+      .split("\n")[0]
+      .replace(/[^A-Za-z0-9_-].*$/, "")
+      .trim();
+  }
+
+  function consoleDevice(question) {
+    const lines = Array.isArray(question.code) ? question.code : [];
+    for (const line of lines) {
+      const promptMatch = String(line).match(/^\s*([A-Za-z][\w-]*)(?:\([^)]*\))?#/);
+      if (promptMatch) return promptMatch[1];
+      const showMatch = String(line).match(/^\s*([A-Za-z][\w-]*)\s+show\s+/i);
+      if (showMatch) return showMatch[1];
+    }
+    const promptOutputMatch = String(question.q || "").match(/\bin\s+([A-Za-z][\w-]*)\s+output\b/i);
+    if (promptOutputMatch) return promptOutputMatch[1];
+    const titleDevice = cleanDeviceName(question.exhibit?.title);
+    if (/^(Router|Switch|SW|R)\w+/i.test(titleDevice)) return titleDevice;
+    const nodeDevice = (question.exhibit?.nodes || [])
+      .map((node) => cleanDeviceName(node.label))
+      .find((label) => /^(Router|Switch|SW|R)\w+/i.test(label));
+    return nodeDevice || "Device";
+  }
+
+  function stripConsolePrompt(line) {
+    return String(line || "")
+      .replace(/^\s*[A-Za-z][\w-]*(?:\([^)]*\))?#\s*/, "")
+      .replace(/^\s*[A-Za-z][\w-]*\s+(?=show\s+)/i, "")
+      .trimEnd();
+  }
+
+  function consoleLines(question) {
+    const device = consoleDevice(question);
+    return (question.code || [])
+      .map(stripConsolePrompt)
+      .filter((line) => line.trim())
+      .map((line) => ({ prompt: `${device}#`, text: line }));
+  }
+
+  function renderConsoleCode(question) {
+    const code = document.createElement("div");
+    code.className = "code";
+    for (const line of consoleLines(question)) {
+      const row = document.createElement("div");
+      row.className = "code-line";
+      row.appendChild(textNode("span", "code-prompt", line.prompt));
+      row.appendChild(document.createTextNode(` ${line.text}`));
+      code.appendChild(row);
+    }
+    return code;
+  }
+
+  function textNode(tag, className, text) {
+    const node = document.createElement(tag);
+    if (className) node.className = className;
+    node.textContent = text;
+    return node;
+  }
+
+  function renderTopology(exhibit) {
+    const nodes = fitNodes(exhibit.nodes || []);
+    const byId = Object.fromEntries(nodes.map((node) => [node.id, node]));
+    const links = exhibit.links || [];
+    const topology = document.createElement("div");
+    topology.className = "topology";
+    const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+    svg.setAttribute("viewBox", "0 0 100 100");
+    svg.setAttribute("preserveAspectRatio", "none");
+    for (const [index, link] of links.entries()) {
+      const a = byId[link.from];
+      const b = byId[link.to];
+      if (!a || !b) continue;
+      const line = document.createElementNS("http://www.w3.org/2000/svg", "line");
+      line.dataset.from = link.from;
+      line.dataset.to = link.to;
+      line.setAttribute("class", `link ${link.type || "ethernet"}`);
+      svg.appendChild(line);
+      if (link.label) {
+        const label = textNode("div", `link-label ${link.type || "ethernet"}`, link.label);
+        label.style.left = `${(a.x + b.x) / 2}%`;
+        label.style.top = `${(a.y + b.y) / 2}%`;
+        topology.appendChild(label);
+      }
+    }
+    topology.appendChild(svg);
+    for (const node of nodes) {
+      const nodeEl = document.createElement("div");
+      nodeEl.className = `node ${node.kind || "pc"}`;
+      nodeEl.dataset.nodeId = node.id;
+      nodeEl.style.left = `${node.x}%`;
+      nodeEl.style.top = `${node.y}%`;
+      nodeEl.appendChild(deviceGlyph(node.kind));
+      nodeEl.appendChild(textNode("div", "label", node.label || ""));
+      topology.appendChild(nodeEl);
+    }
+    return topology;
+  }
+
+  function trimPoint(a, b, box, radiusPx) {
+    const ax = a.x / 100 * box.width;
+    const ay = a.y / 100 * box.height;
+    const bx = b.x / 100 * box.width;
+    const by = b.y / 100 * box.height;
+    const dx = bx - ax;
+    const dy = by - ay;
+    const length = Math.hypot(dx, dy) || 1;
+    return {
+      x: (ax + dx / length * radiusPx) / box.width * 100,
+      y: (ay + dy / length * radiusPx) / box.height * 100,
+    };
+  }
+
+  function updateTopologyLines(root = document) {
+    for (const topology of root.querySelectorAll(".topology")) {
+      const box = topology.getBoundingClientRect();
+      if (!box.width || !box.height) continue;
+      const nodeMap = Object.fromEntries([...topology.querySelectorAll(".node")].map((node) => [
+        node.dataset.nodeId,
+        {
+          x: Number(String(node.style.left || "").replace("%", "")),
+          y: Number(String(node.style.top || "").replace("%", "")),
+          radius: (node.querySelector(".glyph")?.getBoundingClientRect().width || 54) / 2 + 2,
+        },
+      ]));
+      for (const line of topology.querySelectorAll(".link")) {
+        const a = nodeMap[line.dataset.from];
+        const b = nodeMap[line.dataset.to];
+        if (!a || !b) continue;
+        const start = trimPoint(a, b, box, a.radius);
+        const end = trimPoint(b, a, box, b.radius);
+        line.setAttribute("x1", start.x);
+        line.setAttribute("y1", start.y);
+        line.setAttribute("x2", end.x);
+        line.setAttribute("y2", end.y);
+      }
+    }
+  }
+
+  function render() {
+    const questions = (window.QUESTIONS_RAW || [])
+      .map(enrichQuestion)
+      .filter((question) => {
+        const hasTopology = question.exhibit?.type === "topology";
+        const hasCode = Array.isArray(question.code) && question.code.length > 0;
+        const missingReferencedExhibit = exhibitReferenceRe.test(question.q || "") && !hasTopology && !hasCode;
+        return !question.lab && hasTopology && !missingReferencedExhibit;
+      });
+    const grid = document.getElementById("grid");
+    const summary = document.getElementById("summary");
+    summary.textContent = `${questions.length} diagrams`;
+    grid.replaceChildren();
+    for (const question of questions) {
+      const card = document.createElement("article");
+      card.className = "card";
+      const head = document.createElement("div");
+      head.className = "card-head";
+      head.appendChild(textNode("div", "meta", `${question.src || question.bank || "Question bank"} #${question.si || question.s || ""}`));
+      head.appendChild(textNode("p", "prompt", question.q || ""));
+      card.appendChild(head);
+      card.appendChild(renderTopology(question.exhibit));
+      if (Array.isArray(question.code) && question.code.length) {
+        card.appendChild(renderConsoleCode(question));
+      }
+      grid.appendChild(card);
+    }
+    requestAnimationFrame(() => updateTopologyLines(grid));
+  }
+
+  render();
+  window.addEventListener("resize", () => updateTopologyLines());
+</script>
+</body>
+</html>

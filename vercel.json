@@ -29,6 +29,30 @@
       "destination": "/jeopardy.html"
     },
     {
+      "source": "/games",
+      "destination": "/games.html"
+    },
+    {
+      "source": "/games/",
+      "destination": "/games.html"
+    },
+    {
+      "source": "/firewall",
+      "destination": "/firewall.html"
+    },
+    {
+      "source": "/firewall/",
+      "destination": "/firewall.html"
+    },
+    {
+      "source": "/bomb",
+      "destination": "/bomb.html"
+    },
+    {
+      "source": "/bomb/",
+      "destination": "/bomb.html"
+    },
+    {
       "source": "/jeopardy-theme.m4a",
       "destination": "/01%20Jeopardy%20%28Main%20Theme%29.m4a"
     },

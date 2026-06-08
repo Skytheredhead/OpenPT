@@ -873,8 +873,26 @@ const CodeExhibit = ({ lines }) => (
   </div>
 );
 
+function fitQuizTopologyNodes(nodes) {
+  if (!nodes.length) return [];
+  const bounds = nodes.reduce((box, node) => ({
+    minX: Math.min(box.minX, Number(node.x) || 0),
+    maxX: Math.max(box.maxX, Number(node.x) || 0),
+    minY: Math.min(box.minY, Number(node.y) || 0),
+    maxY: Math.max(box.maxY, Number(node.y) || 0),
+  }), { minX: Infinity, maxX: -Infinity, minY: Infinity, maxY: -Infinity });
+  const scale = (value, min, max, low, high) => (
+    max === min ? (low + high) / 2 : low + ((Number(value) - min) / (max - min)) * (high - low)
+  );
+  return nodes.map(node => ({
+    ...node,
+    x: scale(node.x, bounds.minX, bounds.maxX, 14, 86),
+    y: scale(node.y, bounds.minY, bounds.maxY, 24, 78),
+  }));
+}
+
 const TopologyExhibit = ({ exhibit }) => {
-  const nodes = exhibit.nodes || [];
+  const nodes = fitQuizTopologyNodes(exhibit.nodes || []);
   const byId = Object.fromEntries(nodes.map(node => [node.id, node]));
   const glyphs = window.Glyph || {};
   const links = exhibit.links || [];
@@ -892,7 +910,6 @@ const TopologyExhibit = ({ exhibit }) => {
   });
   return (
     <div className="qtopology-exhibit" aria-label={exhibit.title || 'Network topology exhibit'}>
-      {exhibit.title && <div className="qtopology-title">{exhibit.title}</div>}
       <svg className="qtopology-links" viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true">
         {links.map((link, idx) => {
           const a = byId[link.from];

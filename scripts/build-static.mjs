@@ -9,6 +9,9 @@ const outDir = join(root, "dist");
 const rootFiles = [
   "index.html",
   "home.html",
+  "games.html",
+  "firewall.html",
+  "bomb.html",
   "jeopardy.html",
   "wordle.html",
   "styles.css",
@@ -29,6 +32,7 @@ const rootFiles = [
   "home.jsx",
   "jeopardy.jsx",
   "wordle.jsx",
+  "subnet-games.jsx",
   "app.jsx",
   "wordle-real-words.js",
   "01 Jeopardy (Main Theme).m4a"

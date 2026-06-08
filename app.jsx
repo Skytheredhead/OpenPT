@@ -19,13 +19,19 @@ const TweakButton = window.TweakButton;
 const QUIZ_LIBRARY_URL = "/quiz/?view=library";
 const JEOPARDY_URL = "/jeopardy";
 const WORDLE_URL = "/wordle";
-const INTERNAL_APP_ROUTES = new Set(["/", JEOPARDY_URL, WORDLE_URL]);
+const GAMES_URL = "/games";
+const FIREWALL_URL = "/firewall";
+const BOMB_URL = "/bomb";
+const INTERNAL_APP_ROUTES = new Set(["/", JEOPARDY_URL, WORDLE_URL, GAMES_URL, FIREWALL_URL, BOMB_URL]);
 const ifaceName = (name) => OPT_Engine.shortIfaceName ? OPT_Engine.shortIfaceName(name) : name;
 const ifaceText = (text) => OPT_Engine.shortIfaceNamesInText ? OPT_Engine.shortIfaceNamesInText(text) : text;
 
 function appRoutePath(pathname = "/") {
   if (/^\/jeopardy\/?$/.test(pathname)) return JEOPARDY_URL;
   if (/^\/wordle\/?$/.test(pathname)) return WORDLE_URL;
+  if (/^\/games\/?$/.test(pathname)) return GAMES_URL;
+  if (/^\/firewall\/?$/.test(pathname)) return FIREWALL_URL;
+  if (/^\/bomb\/?$/.test(pathname)) return BOMB_URL;
   if (pathname === "" || pathname === "/") return "/";
   return pathname;
 }
@@ -3960,6 +3966,18 @@ function App({ initialViewMode = null, initialHomeAction = null } = {}) {
 
   if (routePath === WORDLE_URL && window.WordlePage) {
     return <window.WordlePage />;
+  }
+
+  if (routePath === GAMES_URL && window.SubnetGamesPage) {
+    return <window.SubnetGamesPage />;
+  }
+
+  if (routePath === FIREWALL_URL && window.FirewallDefenderPage) {
+    return <window.FirewallDefenderPage />;
+  }
+
+  if (routePath === BOMB_URL && window.BroadcastBombSquadPage) {
+    return <window.BroadcastBombSquadPage />;
   }
 
   if (viewMode === "home" && window.HomePage) {
