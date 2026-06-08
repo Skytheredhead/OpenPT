@@ -1,4 +1,4 @@
-## Open-Source Packet Tracer
+## Open-Source Packet Tracer - work in progress still, most of CCNA things in there
 
 Tired of packet tracer's trash ui and terrible mac support? Voila! OpenPT
 
