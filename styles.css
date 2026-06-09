@@ -4934,16 +4934,17 @@ body.is-resizing-layout .server-module-resizer::before {
 }
 
 .jeopardy-topology-glyph {
-  width: 42px;
-  height: 42px;
+  width: 48px;
+  height: 48px;
   display: grid;
   place-items: center;
-  border: 1px solid color-mix(in oklab, var(--accent) 34%, var(--line));
-  border-radius: 8px;
-  background: linear-gradient(180deg, var(--bg-2), var(--bg-1));
   color: var(--accent);
-  font: 700 10px var(--font-mono);
-  box-shadow: 0 8px 18px rgba(0,0,0,.24);
+  filter: drop-shadow(0 8px 12px rgba(0,0,0,.32));
+}
+.jeopardy-topology-glyph svg {
+  width: 48px;
+  height: 48px;
+  display: block;
 }
 
 .jeopardy-topology-node.router .jeopardy-topology-glyph {

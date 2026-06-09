@@ -734,22 +734,6 @@ if (!backendOnly) {
     return reply.sendFile("jeopardy.html");
   });
 
-  app.get("/dragdrop-test", async (req, reply) => {
-    return reply.sendFile("dragdrop-test.html");
-  });
-
-  app.get("/dragdrop-test/", async (req, reply) => {
-    return reply.sendFile("dragdrop-test.html");
-  });
-
-  app.get("/jeopardy-dragdrop-test", async (req, reply) => {
-    return reply.sendFile("jeopardy.html");
-  });
-
-  app.get("/jeopardy-dragdrop-test/", async (req, reply) => {
-    return reply.sendFile("jeopardy.html");
-  });
-
   app.get("/wordle", async (req, reply) => {
     return reply.sendFile("wordle.html");
   });
@@ -798,9 +782,6 @@ if (!backendOnly) {
 app.setNotFoundHandler((req, reply) => {
   if (req.raw.url?.startsWith("/api/")) return reply.status(404).send({ error: "Not found" });
   if (backendOnly) return reply.status(404).send({ error: "OpenPT API only." });
-  const collapsedPath = `/${String(req.raw.url || "").split("?")[0].replace(/^\/+/, "")}`;
-  if (/^\/dragdrop-test\/?$/.test(collapsedPath)) return reply.sendFile("dragdrop-test.html");
-  if (/^\/jeopardy-dragdrop-test\/?$/.test(collapsedPath)) return reply.sendFile("jeopardy.html");
   return reply.sendFile("index.html");
 });
 

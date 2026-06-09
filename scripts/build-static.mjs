@@ -14,7 +14,6 @@ const rootFiles = [
   "bomb.html",
   "ccnacasino.html",
   "jeopardy.html",
-  "dragdrop-test.html",
   "wordle.html",
   "styles.css",
   "ccnacasino.css",

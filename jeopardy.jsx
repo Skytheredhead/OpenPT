@@ -593,44 +593,6 @@ function buildJeopardyBoard(rawQuestions, gameSeed, deckId, boardRound = 0, boar
   }));
 }
 
-function buildJeopardyDragDropTestBoard(rawQuestions, gameSeed, deckId, boardRound = 0) {
-  const normalized = (rawQuestions || [])
-    .map(normalizeJeopardyQuestion)
-    .filter((question) => question.prompt && question.pairs?.length && question.answerText.length && !question.lab && !question.missingReferencedExhibit);
-  const decked = normalized.filter((question) => deckId === "all" || String(question.source || "") === deckId);
-  const pool = decked.length ? decked : normalized;
-  if (!pool.length) return buildJeopardyBoard(rawQuestions, gameSeed, deckId, boardRound, []);
-
-  const shuffled = jeopardyShuffle(pool, `${gameSeed}:${deckId}:${boardRound}:dragdrop-test`);
-  const dailyDoubleIds = new Set(
-    jeopardyShuffle(
-      Array.from({ length: JEOPARDY_VISIBLE_COLUMNS * JEOPARDY_POINTS.length }, (_, index) => `dragdrop-test-${index}`),
-      `${gameSeed}:${deckId}:${boardRound}:dragdrop-test-daily-doubles`
-    ).slice(0, JEOPARDY_DAILY_DOUBLES)
-  );
-
-  return Array.from({ length: JEOPARDY_VISIBLE_COLUMNS }, (_, columnIndex) => ({
-    id: `dragdrop-test-column-${columnIndex + 1}`,
-    topicKey: `dragdrop-test-${columnIndex + 1}`,
-    title: `Drag Drop ${columnIndex + 1}`,
-    clues: JEOPARDY_POINTS.map((points, rowIndex) => {
-      const boardIndex = columnIndex * JEOPARDY_POINTS.length + rowIndex;
-      const sourceQuestion = shuffled[boardIndex % shuffled.length];
-      const clueId = `dragdrop-test-${boardIndex}`;
-      return {
-        id: clueId,
-        points,
-        category: `Drag Drop ${columnIndex + 1}`,
-        dailyDouble: dailyDoubleIds.has(clueId),
-        question: {
-          ...sourceQuestion,
-          id: `${sourceQuestion.id}-dragdrop-test-${columnIndex + 1}-${rowIndex + 1}`,
-        },
-      };
-    }),
-  }));
-}
-
 function ccnaBVersionNumber(source) {
   return Number(String(source || "").match(/quiz\s+(\d+)/i)?.[1] || 0);
 }
@@ -649,15 +611,65 @@ function makeDeckOptions(rawQuestions) {
   ];
 }
 
-function jeopardyNodeBadge(kind) {
+function JeopardyDeviceIcon({ kind }) {
   switch (kind) {
-    case "router": return "R";
-    case "l2switch": return "SW";
-    case "server": return "SRV";
-    case "internet": return "NET";
-    case "cloud": return "WAN";
+    case "router":
+      return (
+        <svg viewBox="0 0 30 30" fill="none" aria-hidden="true">
+          <circle cx="15" cy="15" r="10" stroke="currentColor" strokeWidth="1.3" fill="rgba(255,255,255,0.04)"/>
+          <path d="M15 6l-2 2.5h1.4v3.5h1.2V8.5H17zM15 24l2-2.5h-1.4v-3.5h-1.2V21.5H13zM6 15l2.5-2v1.4h3.5v1.2H8.5V17zM24 15l-2.5 2v-1.4h-3.5v-1.2h3.5V13z" fill="currentColor"/>
+        </svg>
+      );
+    case "l2switch":
+      return (
+        <svg viewBox="0 0 30 30" fill="none" aria-hidden="true">
+          <rect x="4" y="10" width="22" height="10" rx="1.5" stroke="currentColor" strokeWidth="1.3" fill="rgba(255,255,255,0.04)"/>
+          <rect x="6" y="13" width="2" height="4" fill="currentColor" opacity=".7"/>
+          <rect x="9" y="13" width="2" height="4" fill="currentColor" opacity=".7"/>
+          <rect x="12" y="13" width="2" height="4" fill="currentColor" opacity=".7"/>
+          <rect x="15" y="13" width="2" height="4" fill="currentColor" opacity=".7"/>
+          <rect x="18" y="13" width="2" height="4" fill="currentColor" opacity=".7"/>
+          <rect x="21" y="13" width="2" height="4" fill="currentColor" opacity=".7"/>
+        </svg>
+      );
+    case "server":
+      return (
+        <svg viewBox="0 0 30 30" fill="none" aria-hidden="true">
+          <rect x="6" y="5" width="18" height="6" rx="1" stroke="currentColor" strokeWidth="1.3" fill="rgba(255,255,255,0.04)"/>
+          <rect x="6" y="12.5" width="18" height="6" rx="1" stroke="currentColor" strokeWidth="1.3" fill="rgba(255,255,255,0.04)"/>
+          <rect x="6" y="20" width="18" height="6" rx="1" stroke="currentColor" strokeWidth="1.3" fill="rgba(255,255,255,0.04)"/>
+          <circle cx="10" cy="8" r=".9" fill="currentColor"/>
+          <circle cx="10" cy="15.5" r=".9" fill="currentColor"/>
+          <circle cx="10" cy="23" r=".9" fill="currentColor"/>
+          <path d="M14 8h7M14 15.5h7M14 23h7" stroke="currentColor" strokeWidth=".8" opacity=".55"/>
+        </svg>
+      );
+    case "internet":
+      return (
+        <svg viewBox="0 0 30 30" fill="none" aria-hidden="true">
+          <circle cx="15" cy="15" r="9" stroke="currentColor" strokeWidth="1.3" fill="rgba(255,255,255,0.04)"/>
+          <path d="M6.5 15h17M15 6c2.5 2.5 3.7 5.5 3.7 9S17.5 21.5 15 24M15 6c-2.5 2.5-3.7 5.5-3.7 9S12.5 21.5 15 24M8.8 9.2c3.8 1.4 8.6 1.4 12.4 0M8.8 20.8c3.8-1.4 8.6-1.4 12.4 0" stroke="currentColor" strokeWidth="1.05" strokeLinecap="round"/>
+        </svg>
+      );
+    case "cloud":
+      return (
+        <svg viewBox="0 0 30 30" fill="none" aria-hidden="true">
+          <path d="M9 21h13a4.5 4.5 0 0 0 .4-8.97A7 7 0 0 0 8.4 11.2 5 5 0 0 0 9 21z" stroke="currentColor" strokeWidth="1.3" fill="rgba(255,255,255,0.04)" strokeLinejoin="round"/>
+          <circle cx="12" cy="16.5" r="1" fill="currentColor" opacity=".75"/>
+          <circle cx="16" cy="14" r="1" fill="currentColor" opacity=".75"/>
+          <circle cx="20" cy="17" r="1" fill="currentColor" opacity=".75"/>
+          <path d="M13 16l2.2-1.4M16.9 14.7l2.2 1.5" stroke="currentColor" strokeWidth=".8" opacity=".7"/>
+        </svg>
+      );
     case "pc":
-    default: return "PC";
+    default:
+      return (
+        <svg viewBox="0 0 30 30" fill="none" aria-hidden="true">
+          <rect x="4" y="6" width="22" height="14" rx="1.2" stroke="currentColor" strokeWidth="1.3" fill="rgba(255,255,255,0.04)"/>
+          <path d="M11 20l-1 4M19 20l1 4M9 24h12" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round"/>
+          <rect x="7" y="9" width="16" height="8" fill="currentColor" opacity=".08"/>
+        </svg>
+      );
   }
 }
 
@@ -750,7 +762,7 @@ const JeopardyTopologyExhibit = ({ exhibit }) => {
           className={`jeopardy-topology-node ${node.kind || "pc"}`}
           style={{ left: `${node.x}%`, top: `${node.y}%` }}
         >
-          <div className="jeopardy-topology-glyph">{jeopardyNodeBadge(node.kind)}</div>
+          <div className="jeopardy-topology-glyph"><JeopardyDeviceIcon kind={node.kind} /></div>
           <div className="jeopardy-topology-node-label">{node.label}</div>
         </div>
       ))}
@@ -946,9 +958,7 @@ const JeopardyMatchQuestion = ({ question, selectedAnswers, answerShown, onChang
 };
 
 function JeopardyPage() {
-  const allRawQuestions = window.QUESTIONS_RAW || [];
-  const dragDropTestMode = /^\/jeopardy-dragdrop-test\/?$/.test(location.pathname) || new URLSearchParams(location.search).get("test") === "dragdrop";
-  const rawQuestions = dragDropTestMode ? allRawQuestions.filter((item) => Array.isArray(item?.pairs) && item.pairs.length) : allRawQuestions;
+  const rawQuestions = window.QUESTIONS_RAW || [];
   const decks = useJeopardyMemo(() => makeDeckOptions(rawQuestions), [rawQuestions.length]);
   const [deckId, setDeckId] = useJeopardyState(() => {
     try { return JSON.parse(localStorage.getItem(JEOPARDY_STORAGE_KEY) || "{}").deckId || "all"; }
@@ -1027,10 +1037,8 @@ function JeopardyPage() {
   const settingsCardRef = useJeopardyRef(null);
 
   const board = useJeopardyMemo(
-    () => dragDropTestMode
-      ? buildJeopardyDragDropTestBoard(rawQuestions, seed, deckId, boardRound)
-      : buildJeopardyBoard(rawQuestions, seed, deckId, boardRound, boardHistory),
-    [rawQuestions.length, seed, deckId, boardRound, boardHistory, dragDropTestMode]
+    () => buildJeopardyBoard(rawQuestions, seed, deckId, boardRound, boardHistory),
+    [rawQuestions.length, seed, deckId, boardRound, boardHistory]
   );
   const allClues = useJeopardyMemo(() => board.flatMap((column) => column.clues), [board]);
   const orderedTeams = useJeopardyMemo(() => orderJeopardyTeams(teams), [teams]);

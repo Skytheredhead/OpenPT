@@ -29,22 +29,6 @@
       "destination": "/jeopardy.html"
     },
     {
-      "source": "/dragdrop-test",
-      "destination": "/dragdrop-test.html"
-    },
-    {
-      "source": "/dragdrop-test/",
-      "destination": "/dragdrop-test.html"
-    },
-    {
-      "source": "/jeopardy-dragdrop-test",
-      "destination": "/jeopardy.html"
-    },
-    {
-      "source": "/jeopardy-dragdrop-test/",
-      "destination": "/jeopardy.html"
-    },
-    {
       "source": "/games",
       "destination": "/games.html"
     },
