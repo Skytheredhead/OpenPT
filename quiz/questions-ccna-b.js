@@ -1010,6 +1010,7 @@
   const code = (lines) => ({ e: 1, code: lines });
   const x = (text) => text;
   const a = (letters) => String(letters).replace(/[^A-Z]/g, '').split('').map(letter => letter.charCodeAt(0) - 65);
+  const pairAnswers = (pairs) => pairs.map(([term, description]) => `${term} -> ${description}`);
   const item = (s, q, o, correct, extra = {}) => ({
     s,
     q,
@@ -1515,6 +1516,8 @@
       x: x('Modified EUI-64 inserts FFFE in the middle of the MAC address and flips the U/L bit. 00-33-66-99-BB-EE becomes 0233:66FF:FE99:BBEE, appended to 2012:0:0:99::/64.'),
     }),
     item(41, 'Drag each IOS command to its description. Commands can be used only once.', passwordPairs.map(([term]) => term), 'A', {
+      a: pairAnswers(passwordPairs),
+      m: true,
       pairs: passwordPairs,
       x: x('enable secret password hashes a clear-text enable secret. enable secret 5 hash installs an existing MD5 hash. enable password password creates a clear-text enable password. password 7 hash configures an encrypted line password. service password-encryption enables global encryption of clear-text passwords.'),
     }),
@@ -1688,6 +1691,8 @@
       x: x('Queuing buffers packets when an interface is congested. Classification marks or groups traffic, scheduling decides queue servicing order, and policing drops or remarks traffic that exceeds a rate.'),
     }),
     item(57, 'Drag each SNMP-related term to its appropriate definition. All terms should be used.', snmpPairs.map(([term]) => term), 'A', {
+      a: pairAnswers(snmpPairs),
+      m: true,
       pairs: snmpPairs,
       x: x('SNMP conveys management data between managed devices and an NMS. MIB, ASN.1, agents, probes, RMON, and RMON2 describe the data structure, collectors, and monitoring extensions used by SNMP systems.'),
     }),
@@ -1764,6 +1769,8 @@
       x: x('The WLC virtual interface supports client mobility operations such as DHCP relay and inter-controller mobility anchoring behavior.'),
     }),
     item(65, 'Select the EtherChannel operating modes and match them to the resulting EtherChannel configuration.', etherChannelPairs.map(([term]) => term), 'A', {
+      a: pairAnswers(etherChannelPairs),
+      m: true,
       pairs: etherChannelPairs,
       ...code(['Result table: SwitchA mode / SwitchB mode', 'off: all combinations NO', 'auto + desirable = PAgP; desirable + auto = PAgP; desirable + desirable = PAgP', 'passive + active = LACP; active + passive = LACP; active + active = LACP', 'on + on = ON', 'all other mixed mode combinations = NO']),
       x: x('PAgP forms when at least one side is desirable and the other is auto or desirable. LACP forms when at least one side is active and the other is passive or active. Static on forms only with on on both sides; off or incompatible modes do not form an EtherChannel.'),
@@ -1821,6 +1828,8 @@
       x: x('WPA3-Personal uses Simultaneous Authentication of Equals instead of WPA2-Personal pre-shared keys. PMF protects management frames, while AES-GCMP and ECDSA relate to WPA3-Enterprise enhancements.'),
     }),
     item(71, 'Drag the ACL commands to the appropriate descriptions. Not all commands are used.', aclPairs.map(([term]) => term), 'A', {
+      a: pairAnswers(aclPairs),
+      m: true,
       pairs: aclPairs,
       x: x('access-class applies ACLs to lines for management access. ip access-group applies IPv4 ACLs to interfaces, and ipv6 traffic-filter applies IPv6 ACLs to interfaces.'),
     }),

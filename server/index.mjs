@@ -731,11 +731,11 @@ if (!backendOnly) {
     return reply.sendFile("bomb.html");
   });
 
-  app.get("/ccnacasino", async (req, reply) => {
+  app.get("/casino", async (req, reply) => {
     return reply.sendFile("ccnacasino.html");
   });
 
-  app.get("/ccnacasino/", async (req, reply) => {
+  app.get("/casino/", async (req, reply) => {
     return reply.sendFile("ccnacasino.html");
   });
 

@@ -1446,9 +1446,12 @@ function JeopardyPage() {
                 <div className="jeopardy-modal-kicker">Game over</div>
                 <h2 id="jeopardy-end-title">Final Standings</h2>
               </div>
-              <button type="button" className="jeopardy-close" aria-label="Close end game results" onClick={() => setEndGameOpen(false)}>
-                <span aria-hidden="true">&times;</span>
-              </button>
+              <div className="jeopardy-end-actions">
+                <button type="button" className="jeopardy-btn primary" onClick={newGame}>New Game</button>
+                <button type="button" className="jeopardy-close" aria-label="Close end game results" onClick={() => setEndGameOpen(false)}>
+                  <span aria-hidden="true">&times;</span>
+                </button>
+              </div>
             </div>
 
             <div className="jeopardy-end-body">

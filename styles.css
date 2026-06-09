@@ -5314,6 +5314,16 @@ body.is-resizing-layout .server-module-resizer::before {
   border-bottom: 1px solid var(--line-soft);
 }
 
+.jeopardy-end-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.jeopardy-end-actions .jeopardy-btn {
+  white-space: nowrap;
+}
+
 .jeopardy-end-head h2 {
   margin: 0;
   color: var(--fg-0);
@@ -5347,7 +5357,7 @@ body.is-resizing-layout .server-module-resizer::before {
 }
 
 .jeopardy-podium-slot {
-  --podium-height: 178px;
+  --podium-height: 148px;
   min-width: 0;
   display: grid;
   grid-template-rows: auto var(--podium-height);
@@ -5356,11 +5366,11 @@ body.is-resizing-layout .server-module-resizer::before {
 }
 
 .jeopardy-podium-slot.first {
-  --podium-height: 238px;
+  --podium-height: 280px;
 }
 
 .jeopardy-podium-slot.third {
-  --podium-height: 142px;
+  --podium-height: 110px;
 }
 
 .jeopardy-podium-name {
@@ -5413,6 +5423,7 @@ body.is-resizing-layout .server-module-resizer::before {
 
 .jeopardy-podium-step {
   position: relative;
+  align-self: stretch;
   min-height: 0;
   display: grid;
   place-items: start center;
@@ -5810,14 +5821,14 @@ body.is-resizing-layout .server-module-resizer::before {
     padding: 12px 10px 0;
   }
   .jeopardy-podium-slot {
-    --podium-height: 136px;
+    --podium-height: 110px;
     gap: 8px;
   }
   .jeopardy-podium-slot.first {
-    --podium-height: 184px;
+    --podium-height: 220px;
   }
   .jeopardy-podium-slot.third {
-    --podium-height: 112px;
+    --podium-height: 80px;
   }
   .jeopardy-podium-name strong {
     font-size: 15px;

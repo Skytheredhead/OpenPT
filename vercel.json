@@ -53,11 +53,11 @@
       "destination": "/bomb.html"
     },
     {
-      "source": "/ccnacasino",
+      "source": "/casino",
       "destination": "/ccnacasino.html"
     },
     {
-      "source": "/ccnacasino/",
+      "source": "/casino/",
       "destination": "/ccnacasino.html"
     },
     {

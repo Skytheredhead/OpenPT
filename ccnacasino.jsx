@@ -1214,7 +1214,6 @@ function CCNACasinoPage() {
             <span className="casino-mark">CCNA</span>
             <span className="casino-brand-text">
               <strong>OpenPT CCNA Casino</strong>
-              <span>Study chips, no real money, all networking reps.</span>
             </span>
           </a>
           <nav className="casino-top-actions" aria-label="CCNA Casino actions">
@@ -1235,21 +1234,10 @@ function CCNACasinoPage() {
         <section className="casino-hero">
           <div className="casino-hero-main">
             <div className="casino-hero-content">
-              <p className="casino-kicker">GMBl remix for CCNA practice</p>
-              <h1>Turn every casino game into a networking drill.</h1>
-              <p className="casino-hero-copy">
-                This page copies the GMBl game lineup into an OpenPT-native CCNA planning lobby. Pick a game, review five conversion ideas, and run quick study rounds that save to your OpenPT account.
-              </p>
+              <h1>CCNA Casino</h1>
               <div className="casino-hero-actions">
                 <a className="casino-button primary" href="#games">Pick a game</a>
-                <a className="casino-button" href="#ideas">See all 65 ideas</a>
                 <button className="casino-button" type="button" onClick={resetGuestChips}>Top up study chips</button>
-              </div>
-              <div className="casino-stat-strip" aria-label="CCNA Casino stats">
-                <div className="casino-stat"><span>Games copied</span><strong>{CASINO_GAMES.length}</strong></div>
-                <div className="casino-stat"><span>Ideas</span><strong>{CASINO_GAMES.length * 5}</strong></div>
-                <div className="casino-stat"><span>Topics</span><strong>9</strong></div>
-                <div className="casino-stat"><span>Mode</span><strong>HTML</strong></div>
               </div>
             </div>
           </div>
@@ -1259,7 +1247,6 @@ function CCNACasinoPage() {
               <div className="profile-avatar">{profile.displayName.slice(0, 2).toUpperCase()}</div>
               <div>
                 <h2>{profile.displayName}</h2>
-                <p>{user ? "Signed in with OpenPT cloud save." : "Guest profile. Sign in to sync across browsers."}</p>
               </div>
             </div>
             <div className="profile-balance">
@@ -1274,11 +1261,8 @@ function CCNACasinoPage() {
               <div className="profile-metric"><span className="metric-label">Win rate</span><strong>{winRate(profile)}%</strong></div>
               <div className="profile-metric"><span className="metric-label">Streak</span><strong>{profile.streak}</strong></div>
             </div>
-            <div className="badge-row" aria-label="Topic badges">
-              {badges.map((badge) => <span key={badge.id} className={`badge ${badge.active ? "active" : ""}`}>{badge.label}</span>)}
-            </div>
             <div className="sync-status">
-              <span><strong>Save:</strong> {cloudStatus}</span>
+              <span>{user ? "Cloud save" : "Local save"}</span>
             </div>
           </aside>
         </section>
@@ -1287,7 +1271,6 @@ function CCNACasinoPage() {
           <div className="section-head">
             <div>
               <h2>Game Lobby</h2>
-              <p>Each card keeps the GMBl game identity but swaps the payout logic for CCNA study mechanics.</p>
             </div>
             <span className="badge active">{completedIdeas} ideas played</span>
           </div>
@@ -1308,11 +1291,6 @@ function CCNACasinoPage() {
                   <span className="game-key">{String(index + 1).padStart(2, "0")}</span>
                 </div>
                 <h3>{game.name}</h3>
-                <p>{game.help}</p>
-                <div className="topic-row">
-                  <span className="topic-chip">{game.topic}</span>
-                  <span className="topic-chip">5 builds</span>
-                </div>
               </button>
             ))}
           </div>
@@ -1324,8 +1302,7 @@ function CCNACasinoPage() {
               <div className="selected-game-title">
                 <span className="game-icon">{selectedGame.short}</span>
                 <div>
-                  <h2>{selectedGame.name} conversions</h2>
-                  <p>{selectedGame.help}</p>
+                  <h2>{selectedGame.name}</h2>
                 </div>
               </div>
               <span className="badge active">{selectedGame.topic}</span>
@@ -1341,7 +1318,6 @@ function CCNACasinoPage() {
                   <span className="idea-number">{index + 1}</span>
                   <span>
                     <h3>{idea.title}</h3>
-                    <p>{idea.turnInto}</p>
                   </span>
                   <span className="idea-topic">{idea.topic}</span>
                 </button>
@@ -1351,12 +1327,11 @@ function CCNACasinoPage() {
 
           <aside className="round-card" aria-label="Selected CCNA Casino practice round">
             <div>
-              <h2>Quick Study Round</h2>
-              <p className="mini-copy">Prototype the selected idea and save progress to your profile.</p>
+              <h2>Round</h2>
             </div>
             <div>
               <h3>{selectedIdea.title}</h3>
-              <div className="round-prompt">{selectedIdea.prompt}</div>
+              <div className="round-prompt">{selectedIdea.turnInto}</div>
             </div>
             <div className="field">
               <label>Study stake</label>
@@ -1370,15 +1345,15 @@ function CCNACasinoPage() {
             <button className="casino-button primary" type="button" onClick={playRound}>Run round</button>
             {lastResult ? (
               <div className={`round-result ${lastResult.won ? "" : "miss"}`}>
-                <strong>{lastResult.won ? "Round cleared" : "Round needs review"} - score {lastResult.score}</strong>
-                <span>{lastResult.feedback} Reward: {formatNumber(lastResult.reward)} chips, {formatNumber(lastResult.xp)} XP.</span>
+                <strong>{lastResult.won ? "Cleared" : "Review"} - score {lastResult.score}</strong>
+                <span>+{formatNumber(lastResult.reward)} chips, +{formatNumber(lastResult.xp)} XP</span>
               </div>
             ) : null}
             <div>
               <h3>Recent rounds</h3>
               <div className="history-list">
-                {!profile.history.length ? <div className="message">No rounds yet. Run one from the selected idea.</div> : null}
-                {profile.history.slice(0, 8).map((entry) => (
+                {!profile.history.length ? <div className="message">No rounds yet.</div> : null}
+                {profile.history.slice(0, 4).map((entry) => (
                   <div className="history-item" key={entry.id}>
                     <div>
                       <strong>{entry.title}</strong>
@@ -1390,29 +1365,6 @@ function CCNACasinoPage() {
               </div>
             </div>
           </aside>
-        </section>
-
-        <section className="casino-section" id="ideas">
-          <div className="section-head">
-            <div>
-              <h2>All Game Conversion Ideas</h2>
-              <p>Five directions for every GMBl game, ready to turn into playable subnet, routing, ACL, switching, services, security, and troubleshooting drills.</p>
-            </div>
-          </div>
-          <div className="matrix-grid">
-            {CASINO_GAMES.map((game) => (
-              <article className="matrix-card" key={`matrix-${game.id}`}>
-                <h3>{game.name}</h3>
-                <ol>
-                  {game.ideas.map((idea) => (
-                    <li key={idea.title}>
-                      <strong>{idea.title}:</strong> {idea.turnInto}
-                    </li>
-                  ))}
-                </ol>
-              </article>
-            ))}
-          </div>
         </section>
       </div>
 
