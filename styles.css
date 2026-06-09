@@ -4925,8 +4925,7 @@ body.is-resizing-layout .server-module-resizer::before {
   position: absolute;
   z-index: 5;
   width: 92px;
-  min-height: 74px;
-  transform: translate(-50%, -50%);
+  transform: translate(-50%, -24px);
   display: grid;
   justify-items: center;
   gap: 6px;
@@ -4947,20 +4946,9 @@ body.is-resizing-layout .server-module-resizer::before {
   display: block;
 }
 
-.jeopardy-topology-node.router .jeopardy-topology-glyph {
-  border-color: color-mix(in oklab, var(--magenta) 42%, var(--line));
-  color: var(--magenta);
-}
-
-.jeopardy-topology-node.l2switch .jeopardy-topology-glyph {
-  border-color: color-mix(in oklab, var(--ok) 42%, var(--line));
-  color: var(--ok);
-}
-
-.jeopardy-topology-node.server .jeopardy-topology-glyph {
-  border-color: color-mix(in oklab, var(--warn) 42%, var(--line));
-  color: var(--warn);
-}
+.jeopardy-topology-node.router .jeopardy-topology-glyph { color: var(--magenta); }
+.jeopardy-topology-node.l2switch .jeopardy-topology-glyph { color: var(--ok); }
+.jeopardy-topology-node.server .jeopardy-topology-glyph { color: var(--warn); }
 
 .jeopardy-topology-node-label {
   max-width: 126px;
@@ -5968,13 +5956,15 @@ body.is-resizing-layout .server-module-resizer::before {
   }
   .jeopardy-topology-node {
     width: 76px;
-    min-height: 62px;
+    transform: translate(-50%, -17px);
   }
   .jeopardy-topology-glyph {
     width: 34px;
     height: 34px;
-    border-radius: 7px;
-    font-size: 9px;
+  }
+  .jeopardy-topology-glyph svg {
+    width: 34px;
+    height: 34px;
   }
   .jeopardy-topology-node-label,
   .jeopardy-topology-link-label {
