@@ -1,0 +1,843 @@
+{
+  "courseId": "ccna",
+  "version": 1,
+  "title": "CCNA Guided Lesson Mode",
+  "semesters": [
+    {
+      "id": "sem-01",
+      "title": "Semester 1",
+      "status": "available",
+      "description": "Networking basics, switching, IPv4, services, security, and a small-office capstone."
+    },
+    {
+      "id": "sem-02",
+      "title": "Semester 2",
+      "status": "planned",
+      "description": "Switching, wireless, routing, and first-hop redundancy lessons are planned."
+    },
+    {
+      "id": "sem-03",
+      "title": "Semester 3",
+      "status": "planned",
+      "description": "Enterprise networking, security, automation, and WAN lessons are planned."
+    }
+  ],
+  "modules": [
+    {
+      "id": "ccna/sem-01/m-1-3",
+      "semester": "sem-01",
+      "title": "Modules 1-3: Networking Today, Basic Switch and End Device Configuration, Protocols and Models"
+    },
+    {
+      "id": "ccna/sem-01/m-4-7",
+      "semester": "sem-01",
+      "title": "Modules 4-7: Physical Layer, Number Systems, Data Link, and Ethernet Switching"
+    },
+    {
+      "id": "ccna/sem-01/m-8-10",
+      "semester": "sem-01",
+      "title": "Modules 8-10: Network Layer, Address Resolution, and Basic Router Configuration"
+    },
+    {
+      "id": "ccna/sem-01/m-11-13",
+      "semester": "sem-01",
+      "title": "Modules 11-13: IPv4 Addressing, ICMP, and Transport Layer"
+    },
+    {
+      "id": "ccna/sem-01/m-14-15",
+      "semester": "sem-01",
+      "title": "Modules 14-15: Application Layer and Network Services"
+    },
+    {
+      "id": "ccna/sem-01/m-16-17",
+      "semester": "sem-01",
+      "title": "Modules 16-17: Network Security Fundamentals and Build a Small Network"
+    },
+    {
+      "id": "ccna/sem-01/final",
+      "semester": "sem-01",
+      "title": "Semester 1 Final Skills Capstone"
+    }
+  ],
+  "moduleBanks": [
+    "ccna/sem-01/m-1-3",
+    "ccna/sem-01/m-4-7",
+    "ccna/sem-01/m-8-10",
+    "ccna/sem-01/m-11-13",
+    "ccna/sem-01/m-14-15",
+    "ccna/sem-01/m-16-17",
+    "ccna/sem-01/final"
+  ],
+  "labFactories": [
+    "lan-two-hosts",
+    "ios-switch",
+    "cabling-link-state",
+    "switch-mac-arp",
+    "ipv4-two-lans",
+    "static-route-two-routers",
+    "dhcp-router",
+    "services-dns-http",
+    "ssh-hardening",
+    "small-office-capstone"
+  ],
+  "lessons": [
+    {
+      "id": "sem1-m1-3-network-roles",
+      "semester": "sem-01",
+      "moduleBank": "ccna/sem-01/m-1-3",
+      "title": "Map the Network Roles",
+      "estimatedMinutes": 10,
+      "prerequisites": [],
+      "xp": 100,
+      "labFactory": "lan-two-hosts",
+      "steps": [
+        {
+          "id": "predict-traffic",
+          "kind": "predict",
+          "prompt": "Before touching the topology, predict which device forwards frames between PC1, PC2, and SRV1, and which devices are endpoints.",
+          "checks": [{ "type": "manual" }],
+          "hints": ["Endpoints create or consume data; infrastructure forwards it.", "A switch does not usually originate user traffic in this lab."],
+          "commandCoach": "No commands yet. Say the path out loud: PC1 sends an Ethernet frame to SW1, and SW1 forwards it toward the destination.",
+          "explanation": "The switch is the LAN forwarding device. PCs and servers are endpoints because they create, receive, and respond to application traffic.",
+          "xp": 15
+        },
+        {
+          "id": "wire-pc1",
+          "kind": "build",
+          "prompt": "Cable PC1 eth0 to SW1 FastEthernet0/1. Watch the link lights and decide why both ends matter.",
+          "checks": [{ "type": "topology", "linkBetween": ["PC1", "SW1"], "interfaces": ["eth0", "FastEthernet0/1"] }],
+          "hints": ["Use cable mode, then click PC1 and SW1.", "Pick the Ethernet port on each side if the simulator asks."],
+          "commandCoach": "No IOS command is needed. Physical connectivity is the first layer of the story.",
+          "explanation": "Layer 1 must be present before Ethernet, ARP, IP, or application traffic can work. Both interfaces need a usable cable and an up state.",
+          "xp": 25
+        },
+        {
+          "id": "wire-pc2-server",
+          "kind": "build",
+          "prompt": "Finish the small LAN by cabling PC2 and SRV1 to SW1, then inspect how the topology changed.",
+          "checks": [
+            { "type": "topology", "linkBetween": ["PC2", "SW1"], "interfaces": ["eth0", "FastEthernet0/2"] },
+            { "type": "topology", "linkBetween": ["SRV1", "SW1"], "interfaces": ["eth0", "FastEthernet0/3"] }
+          ],
+          "hints": ["Keep PC2 on FastEthernet0/2 and SRV1 on FastEthernet0/3 for the cleanest assessment.", "If you used a different switch port, remove the cable and try the suggested port."],
+          "commandCoach": "Topology edits are the learning action here. Think: what changed at Layer 1 and Layer 2?",
+          "explanation": "Every endpoint now has a path to the switch. The switch can learn each endpoint MAC address after traffic begins.",
+          "xp": 30
+        },
+        {
+          "id": "prove-lan",
+          "kind": "prove",
+          "prompt": "Send a packet or ping from PC1 to 192.168.10.12. Notice that no router is required inside one IPv4 subnet.",
+          "checks": [{ "type": "ping", "source": "PC1", "target": "192.168.10.12" }],
+          "hints": ["Open PC1 and ping PC2's address.", "Same-subnet traffic goes through the switch, not a default gateway."],
+          "commandCoach": "From PC1, use ping 192.168.10.12.",
+          "explanation": "PC1 and PC2 share 192.168.10.0/24, so PC1 resolves PC2's MAC with ARP and sends the frame directly through SW1.",
+          "xp": 30
+        }
+      ]
+    },
+    {
+      "id": "sem1-m1-3-ios-modes-hostname",
+      "semester": "sem-01",
+      "moduleBank": "ccna/sem-01/m-1-3",
+      "title": "IOS Modes and Hostname Muscle Memory",
+      "estimatedMinutes": 12,
+      "prerequisites": ["sem1-m1-3-network-roles"],
+      "xp": 100,
+      "labFactory": "ios-switch",
+      "steps": [
+        {
+          "id": "predict-mode",
+          "kind": "predict",
+          "prompt": "Predict which IOS mode lets you change a switch hostname: user EXEC, privileged EXEC, global configuration, or interface configuration.",
+          "checks": [{ "type": "manual" }],
+          "hints": ["Show commands mostly live in EXEC modes.", "Changes to the running configuration live under configure terminal."],
+          "commandCoach": "The command path is enable, configure terminal, hostname ACCESS1.",
+          "explanation": "Hostname is a global setting, so it belongs in global configuration mode.",
+          "xp": 15
+        },
+        {
+          "id": "set-hostname",
+          "kind": "configure",
+          "prompt": "Rename SW1 to ACCESS1 from the CLI.",
+          "checks": [{ "type": "assessment", "id": "hostname-access1", "device": "ACCESS1", "name": "display name hostname ACCESS1", "components": "IOS Configuration", "value": "hostname ACCESS1", "points": 2 }],
+          "hints": ["Enter privileged EXEC with enable.", "Use configure terminal, then hostname ACCESS1."],
+          "commandCoach": "enable\nconfigure terminal\nhostname ACCESS1",
+          "explanation": "The prompt changes because the running configuration changed. The hostname becomes part of the device identity in every prompt and config export.",
+          "xp": 25
+        },
+        {
+          "id": "address-vlan1",
+          "kind": "configure",
+          "prompt": "Give ACCESS1 a management address on VLAN 1: 192.168.10.2/24.",
+          "checks": [
+            { "type": "assessment", "id": "vlan1-ip", "device": "ACCESS1", "iface": "Vlan1", "name": "ip address 192.168.10.2", "components": "IOS Configuration", "value": "ip address 192.168.10.2 255.255.255.0", "points": 2 },
+            { "type": "assessment", "id": "vlan1-mask", "device": "ACCESS1", "iface": "Vlan1", "name": "subnet mask 255.255.255.0", "components": "IOS Configuration", "value": "255.255.255.0", "points": 1 },
+            { "type": "assessment", "id": "vlan1-up", "device": "ACCESS1", "iface": "Vlan1", "name": "interface status up", "components": "IOS Configuration", "value": "no shutdown", "points": 1 }
+          ],
+          "hints": ["A switch management IP goes on an SVI, not a physical access port.", "Use interface vlan 1, ip address 192.168.10.2 255.255.255.0, no shutdown."],
+          "commandCoach": "interface vlan 1\nip address 192.168.10.2 255.255.255.0\nno shutdown",
+          "explanation": "An SVI gives a Layer 2 switch an IP identity for management. It does not turn the switch into a router.",
+          "xp": 35
+        },
+        {
+          "id": "save-config",
+          "kind": "configure",
+          "prompt": "Save the running configuration so the switch would keep it after a reload.",
+          "checks": [{ "type": "assessment", "id": "startup-saved", "device": "ACCESS1", "name": "save config startup", "components": "IOS Configuration", "value": "copy running-config startup-config", "points": 2 }],
+          "hints": ["Running config is active now; startup config survives reload.", "Use copy running-config startup-config or write memory."],
+          "commandCoach": "end\ncopy running-config startup-config",
+          "explanation": "The running configuration is in RAM. Saving creates startup configuration so the intended state persists across reloads.",
+          "xp": 25
+        }
+      ]
+    },
+    {
+      "id": "sem1-m4-7-cabling-link-state",
+      "semester": "sem-01",
+      "moduleBank": "ccna/sem-01/m-4-7",
+      "title": "Cabling and Link State",
+      "estimatedMinutes": 11,
+      "prerequisites": ["sem1-m1-3-ios-modes-hostname"],
+      "xp": 100,
+      "labFactory": "cabling-link-state",
+      "steps": [
+        {
+          "id": "predict-layer1",
+          "kind": "predict",
+          "prompt": "Predict what happens if a correct cable is present but a router interface is administratively down.",
+          "checks": [{ "type": "manual" }],
+          "hints": ["Physical cable is necessary but not always sufficient.", "Administrative state is a local software decision."],
+          "commandCoach": "You will fix the port with interface configuration in the next step.",
+          "explanation": "A link can fail because of cabling, interface compatibility, power, or administrative shutdown. Link state is the combined result.",
+          "xp": 15
+        },
+        {
+          "id": "wire-router-switch",
+          "kind": "build",
+          "prompt": "Cable R1 GigabitEthernet0/0/0 to SW1 FastEthernet0/24.",
+          "checks": [{ "type": "topology", "linkBetween": ["R1", "SW1"], "interfaces": ["GigabitEthernet0/0/0", "FastEthernet0/24"] }],
+          "hints": ["Use an Ethernet cable between router and switch.", "The exact ports matter for this lesson's check."],
+          "commandCoach": "No command yet. Build the physical path first.",
+          "explanation": "Routers and switches can connect over Ethernet. The cable gives the devices a chance to exchange frames once both ports are up.",
+          "xp": 25
+        },
+        {
+          "id": "no-shutdown",
+          "kind": "configure",
+          "prompt": "Bring R1 GigabitEthernet0/0/0 up from the CLI.",
+          "checks": [{ "type": "assessment", "id": "r1-g0-up", "device": "R1", "iface": "GigabitEthernet0/0/0", "name": "interface status up", "components": "Interface State", "value": "no shutdown", "points": 2 }],
+          "hints": ["Use interface GigabitEthernet0/0/0.", "The command that reverses shutdown is no shutdown."],
+          "commandCoach": "enable\nconfigure terminal\ninterface gigabitEthernet 0/0/0\nno shutdown",
+          "explanation": "The no shutdown command clears the administrative down state. Data-link protocols can operate only after the interface is administratively enabled.",
+          "xp": 30
+        },
+        {
+          "id": "reflect-link",
+          "kind": "reflect",
+          "prompt": "Explain the difference between physical connectivity and administrative state in one sentence.",
+          "checks": [{ "type": "manual" }],
+          "hints": ["One is about the medium; one is about configured intent.", "A perfect cable still fails when the interface is shut down."],
+          "commandCoach": "No extra command. Use the Events panel and link markers as evidence.",
+          "explanation": "Physical connectivity gives a signal path; administrative state tells the device whether it is allowed to use that path.",
+          "xp": 30
+        }
+      ]
+    },
+    {
+      "id": "sem1-m4-7-arp-mac-learning",
+      "semester": "sem-01",
+      "moduleBank": "ccna/sem-01/m-4-7",
+      "title": "ARP and MAC Learning in Motion",
+      "estimatedMinutes": 13,
+      "prerequisites": ["sem1-m4-7-cabling-link-state"],
+      "xp": 110,
+      "labFactory": "switch-mac-arp",
+      "steps": [
+        {
+          "id": "predict-unknown",
+          "kind": "predict",
+          "prompt": "Predict what SW1 does with the first frame from PC1 before it has learned the destination MAC address.",
+          "checks": [{ "type": "manual" }],
+          "hints": ["Switches learn source MAC addresses.", "Unknown unicast and ARP requests are flooded inside the VLAN."],
+          "commandCoach": "The simulator packet trace will make the prediction visible.",
+          "explanation": "A switch learns from source MAC addresses. If the destination is unknown or broadcast, it floods the frame out other ports in the VLAN.",
+          "xp": 15
+        },
+        {
+          "id": "ping-pc2",
+          "kind": "prove",
+          "prompt": "Ping PC2 from PC1 and watch ARP happen before the ICMP echo succeeds.",
+          "checks": [{ "type": "ping", "source": "PC1", "target": "192.168.10.12" }],
+          "hints": ["The first ping may create ARP events first.", "Open the packet inspector if you want the protocol breakdown."],
+          "commandCoach": "From PC1, use ping 192.168.10.12.",
+          "explanation": "PC1 must know PC2's MAC address before it can send the IPv4 packet in an Ethernet frame.",
+          "xp": 30
+        },
+        {
+          "id": "access-vlan10",
+          "kind": "configure",
+          "prompt": "Put SW1 FastEthernet0/1 and FastEthernet0/2 in access VLAN 10.",
+          "checks": [
+            { "type": "assessment", "id": "sw1-fa1-access", "device": "SW1", "iface": "FastEthernet0/1", "name": "switchport mode access", "components": "Switching", "value": "switchport mode access", "points": 1 },
+            { "type": "assessment", "id": "sw1-fa1-vlan10", "device": "SW1", "iface": "FastEthernet0/1", "name": "switchport access vlan 10", "components": "Switching", "value": "switchport access vlan 10", "points": 1 },
+            { "type": "assessment", "id": "sw1-fa2-access", "device": "SW1", "iface": "FastEthernet0/2", "name": "switchport mode access", "components": "Switching", "value": "switchport mode access", "points": 1 },
+            { "type": "assessment", "id": "sw1-fa2-vlan10", "device": "SW1", "iface": "FastEthernet0/2", "name": "switchport access vlan 10", "components": "Switching", "value": "switchport access vlan 10", "points": 1 }
+          ],
+          "hints": ["Use interface range FastEthernet0/1-2.", "Access ports carry one data VLAN for normal endpoint traffic."],
+          "commandCoach": "interface range fastEthernet 0/1-2\nswitchport mode access\nswitchport access vlan 10",
+          "explanation": "Both endpoints now share VLAN 10. Switching and ARP stay inside that broadcast domain.",
+          "xp": 40
+        },
+        {
+          "id": "prove-after-vlan",
+          "kind": "prove",
+          "prompt": "Ping PC2 again. Notice that same-VLAN traffic still works after the access VLAN is explicit.",
+          "checks": [{ "type": "ping", "source": "PC1", "target": "192.168.10.12" }],
+          "hints": ["If the ping fails, confirm both ports are in VLAN 10.", "A same-subnet pair must also be in the same VLAN."],
+          "commandCoach": "ping 192.168.10.12",
+          "explanation": "IPv4 addressing and VLAN membership must line up. Same subnet plus same VLAN gives the hosts a direct Layer 2 path.",
+          "xp": 25
+        }
+      ]
+    },
+    {
+      "id": "sem1-m8-10-ipv4-router-interfaces",
+      "semester": "sem-01",
+      "moduleBank": "ccna/sem-01/m-8-10",
+      "title": "IPv4 Interfaces and Default Gateways",
+      "estimatedMinutes": 13,
+      "prerequisites": ["sem1-m4-7-arp-mac-learning"],
+      "xp": 110,
+      "labFactory": "ipv4-two-lans",
+      "steps": [
+        {
+          "id": "predict-gateway",
+          "kind": "predict",
+          "prompt": "Predict why PC1 needs a default gateway to reach PC2 when they are in different IPv4 networks.",
+          "checks": [{ "type": "manual" }],
+          "hints": ["A host compares the destination IP to its own subnet mask.", "Off-subnet traffic is sent to a router interface."],
+          "commandCoach": "You will give R1 one interface in each LAN.",
+          "explanation": "A host uses its default gateway when the destination is outside its local prefix. The gateway is the router interface on the local LAN.",
+          "xp": 15
+        },
+        {
+          "id": "r1-g0-address",
+          "kind": "configure",
+          "prompt": "Configure R1 GigabitEthernet0/0/0 as PC1's gateway: 192.168.10.1/24.",
+          "checks": [
+            { "type": "assessment", "id": "r1-g0-ip", "device": "R1", "iface": "GigabitEthernet0/0/0", "name": "ip address 192.168.10.1", "components": "IPv4 Routing", "value": "ip address 192.168.10.1 255.255.255.0", "points": 2 },
+            { "type": "assessment", "id": "r1-g0-up", "device": "R1", "iface": "GigabitEthernet0/0/0", "name": "interface status up", "components": "IPv4 Routing", "value": "no shutdown", "points": 1 }
+          ],
+          "hints": ["Use interface GigabitEthernet0/0/0.", "Do not forget no shutdown."],
+          "commandCoach": "interface gigabitEthernet 0/0/0\nip address 192.168.10.1 255.255.255.0\nno shutdown",
+          "explanation": "R1 now has an IPv4 identity in PC1's network and can receive frames addressed to its router MAC.",
+          "xp": 30
+        },
+        {
+          "id": "r1-g1-address",
+          "kind": "configure",
+          "prompt": "Configure R1 GigabitEthernet0/0/1 as PC2's gateway: 192.168.20.1/24.",
+          "checks": [
+            { "type": "assessment", "id": "r1-g1-ip", "device": "R1", "iface": "GigabitEthernet0/0/1", "name": "ip address 192.168.20.1", "components": "IPv4 Routing", "value": "ip address 192.168.20.1 255.255.255.0", "points": 2 },
+            { "type": "assessment", "id": "r1-g1-up", "device": "R1", "iface": "GigabitEthernet0/0/1", "name": "interface status up", "components": "IPv4 Routing", "value": "no shutdown", "points": 1 }
+          ],
+          "hints": ["The second LAN uses 192.168.20.0/24.", "Each routed interface must be in a different subnet."],
+          "commandCoach": "interface gigabitEthernet 0/0/1\nip address 192.168.20.1 255.255.255.0\nno shutdown",
+          "explanation": "R1 is directly connected to both LANs. It can now route between them if hosts point at the correct gateways.",
+          "xp": 30
+        },
+        {
+          "id": "prove-routing",
+          "kind": "prove",
+          "prompt": "Ping PC2 from PC1. Explain why the packet uses R1 even though both PCs are nearby on the canvas.",
+          "checks": [{ "type": "ping", "source": "PC1", "target": "192.168.20.12" }],
+          "hints": ["Topology distance on the canvas is not the same as IP network distance.", "The subnet mask decides local vs remote."],
+          "commandCoach": "From PC1, use ping 192.168.20.12.",
+          "explanation": "PC1 sends the frame to R1's MAC because 192.168.20.12 is outside PC1's /24. R1 then forwards toward the 192.168.20.0/24 LAN.",
+          "xp": 35
+        }
+      ]
+    },
+    {
+      "id": "sem1-m8-10-router-basics-save",
+      "semester": "sem-01",
+      "moduleBank": "ccna/sem-01/m-8-10",
+      "title": "Router Basics and Persistence",
+      "estimatedMinutes": 10,
+      "prerequisites": ["sem1-m8-10-ipv4-router-interfaces"],
+      "xp": 90,
+      "labFactory": "ipv4-two-lans",
+      "steps": [
+        {
+          "id": "predict-running-startup",
+          "kind": "predict",
+          "prompt": "Predict what would happen to interface IP addresses after a reload if you only changed running-config.",
+          "checks": [{ "type": "manual" }],
+          "hints": ["Running-config is active now.", "Startup-config is read at boot."],
+          "commandCoach": "The persistence command comes at the end.",
+          "explanation": "Unsaved running-config changes are lost after reload. Startup-config is the durable boot source.",
+          "xp": 15
+        },
+        {
+          "id": "name-router",
+          "kind": "configure",
+          "prompt": "Rename R1 to EDGE1 so every later prompt and log message identifies the edge router clearly.",
+          "checks": [{ "type": "assessment", "id": "edge1-hostname", "device": "EDGE1", "name": "display name hostname EDGE1", "components": "Router Basics", "value": "hostname EDGE1", "points": 2 }],
+          "hints": ["Hostname is global configuration.", "Use hostname EDGE1 from config mode."],
+          "commandCoach": "enable\nconfigure terminal\nhostname EDGE1",
+          "explanation": "A useful hostname makes logs, prompts, topology diagrams, and troubleshooting less ambiguous.",
+          "xp": 20
+        },
+        {
+          "id": "set-gateways",
+          "kind": "configure",
+          "prompt": "Ensure EDGE1 has 192.168.10.1/24 on G0/0/0 and 192.168.20.1/24 on G0/0/1.",
+          "checks": [
+            { "type": "assessment", "id": "edge1-g0-ip", "device": "EDGE1", "iface": "GigabitEthernet0/0/0", "name": "ip address 192.168.10.1", "components": "Router Basics", "value": "ip address 192.168.10.1 255.255.255.0", "points": 2 },
+            { "type": "assessment", "id": "edge1-g1-ip", "device": "EDGE1", "iface": "GigabitEthernet0/0/1", "name": "ip address 192.168.20.1", "components": "Router Basics", "value": "ip address 192.168.20.1 255.255.255.0", "points": 2 }
+          ],
+          "hints": ["If you already did this in the previous lesson, the checks may complete quickly.", "The hostname changed, but the interface names did not."],
+          "commandCoach": "interface g0/0/0\nip address 192.168.10.1 255.255.255.0\nno shutdown\ninterface g0/0/1\nip address 192.168.20.1 255.255.255.0\nno shutdown",
+          "explanation": "Router interface addresses are the anchor points hosts use as default gateways.",
+          "xp": 30
+        },
+        {
+          "id": "save-edge",
+          "kind": "configure",
+          "prompt": "Save EDGE1's running configuration.",
+          "checks": [{ "type": "assessment", "id": "edge-startup", "device": "EDGE1", "name": "save config startup", "components": "Router Basics", "value": "copy running-config startup-config", "points": 2 }],
+          "hints": ["Exit to privileged EXEC or use do copy from config mode if supported.", "write memory is accepted too."],
+          "commandCoach": "end\ncopy running-config startup-config",
+          "explanation": "Saving is a professional habit: it converts a working moment into a reproducible device state.",
+          "xp": 25
+        }
+      ]
+    },
+    {
+      "id": "sem1-m11-13-static-route-path",
+      "semester": "sem-01",
+      "moduleBank": "ccna/sem-01/m-11-13",
+      "title": "Static Routes as Intent",
+      "estimatedMinutes": 14,
+      "prerequisites": ["sem1-m8-10-router-basics-save"],
+      "xp": 120,
+      "labFactory": "static-route-two-routers",
+      "steps": [
+        {
+          "id": "predict-missing-route",
+          "kind": "predict",
+          "prompt": "Predict why PC1 cannot reach PC2 when R1 and R2 both know only their directly connected networks.",
+          "checks": [{ "type": "manual" }],
+          "hints": ["A router forwards only when the route table has a matching destination.", "Connected networks do not automatically teach a neighbor."],
+          "commandCoach": "You will add one route on each router.",
+          "explanation": "Each router needs a route to the remote LAN. Without one, the packet is dropped even when links are physically healthy.",
+          "xp": 15
+        },
+        {
+          "id": "r1-static",
+          "kind": "configure",
+          "prompt": "On R1, add a static route to 192.168.20.0/24 through R2 at 10.0.0.2.",
+          "checks": [{ "type": "assessment", "id": "r1-route-20", "device": "R1", "name": "ip route 192.168.20.0 255.255.255.0 10.0.0.2", "components": "Static Routing", "value": "ip route 192.168.20.0 255.255.255.0 10.0.0.2", "points": 3 }],
+          "hints": ["The destination is the remote LAN, not the next-hop link.", "The next hop is R2's address on the 10.0.0.0/30 link."],
+          "commandCoach": "ip route 192.168.20.0 255.255.255.0 10.0.0.2",
+          "explanation": "A static route says: for this destination prefix, forward packets to this next-hop address.",
+          "xp": 30
+        },
+        {
+          "id": "r2-static",
+          "kind": "configure",
+          "prompt": "On R2, add the return static route to 192.168.10.0/24 through R1 at 10.0.0.1.",
+          "checks": [{ "type": "assessment", "id": "r2-route-10", "device": "R2", "name": "ip route 192.168.10.0 255.255.255.0 10.0.0.1", "components": "Static Routing", "value": "ip route 192.168.10.0 255.255.255.0 10.0.0.1", "points": 3 }],
+          "hints": ["Packets need a path there and a path back.", "Return traffic fails without the reverse route."],
+          "commandCoach": "ip route 192.168.10.0 255.255.255.0 10.0.0.1",
+          "explanation": "Two-way communication needs forwarding knowledge in both directions unless a default route or dynamic protocol covers one side.",
+          "xp": 30
+        },
+        {
+          "id": "prove-static",
+          "kind": "prove",
+          "prompt": "Ping PC2 from PC1 and connect the success to both routers' route tables.",
+          "checks": [{ "type": "ping", "source": "PC1", "target": "192.168.20.12" }],
+          "hints": ["If it fails, check both static routes and both PC gateways.", "A ping reply must return to the source network."],
+          "commandCoach": "ping 192.168.20.12",
+          "explanation": "The echo request follows R1's route to R2. The echo reply follows R2's route back to R1.",
+          "xp": 45
+        }
+      ]
+    },
+    {
+      "id": "sem1-m11-13-icmp-troubleshoot",
+      "semester": "sem-01",
+      "moduleBank": "ccna/sem-01/m-11-13",
+      "title": "ICMP Troubleshooting Loop",
+      "estimatedMinutes": 12,
+      "prerequisites": ["sem1-m11-13-static-route-path"],
+      "xp": 100,
+      "labFactory": "static-route-two-routers",
+      "steps": [
+        {
+          "id": "predict-test-order",
+          "kind": "predict",
+          "prompt": "Choose a smart test order: local gateway, next router, remote gateway, then remote host. Why that order?",
+          "checks": [{ "type": "manual" }],
+          "hints": ["Troubleshooting gets easier when each test narrows the fault domain.", "Start close, then move outward."],
+          "commandCoach": "The ping target changes as the scope expands.",
+          "explanation": "A layered test sequence tells you where the path stops instead of only proving that the final target failed.",
+          "xp": 15
+        },
+        {
+          "id": "ping-local-gateway",
+          "kind": "prove",
+          "prompt": "From PC1, ping its local default gateway 192.168.10.1.",
+          "checks": [{ "type": "ping", "source": "PC1", "target": "192.168.10.1" }],
+          "hints": ["This tests PC1 IP settings, cabling, VLAN, and R1's LAN interface.", "If local gateway ping fails, remote tests are noise."],
+          "commandCoach": "ping 192.168.10.1",
+          "explanation": "The local gateway test confirms that PC1 can reach the first routing hop.",
+          "xp": 25
+        },
+        {
+          "id": "ping-remote-gateway",
+          "kind": "prove",
+          "prompt": "From PC1, ping R2's LAN gateway address 192.168.20.1.",
+          "checks": [{ "type": "ping", "source": "PC1", "target": "192.168.20.1" }],
+          "hints": ["This test crosses the router-to-router link.", "If it fails after local gateway works, focus on routes or the transit network."],
+          "commandCoach": "ping 192.168.20.1",
+          "explanation": "Reaching the remote gateway proves the inter-router path works before testing the final host.",
+          "xp": 25
+        },
+        {
+          "id": "ping-remote-host",
+          "kind": "prove",
+          "prompt": "Now ping PC2 at 192.168.20.12 and explain what changed from the previous test.",
+          "checks": [{ "type": "ping", "source": "PC1", "target": "192.168.20.12" }],
+          "hints": ["The last segment is R2 to PC2.", "If only this fails, check PC2 addressing or its switch link."],
+          "commandCoach": "ping 192.168.20.12",
+          "explanation": "The final test includes every segment: PC1 LAN, R1, transit link, R2, and PC2 LAN.",
+          "xp": 35
+        }
+      ]
+    },
+    {
+      "id": "sem1-m14-15-dhcp-service",
+      "semester": "sem-01",
+      "moduleBank": "ccna/sem-01/m-14-15",
+      "title": "DHCP Gives Hosts a Starting Point",
+      "estimatedMinutes": 14,
+      "prerequisites": ["sem1-m11-13-icmp-troubleshoot"],
+      "xp": 120,
+      "labFactory": "dhcp-router",
+      "steps": [
+        {
+          "id": "predict-dhcp-fields",
+          "kind": "predict",
+          "prompt": "Predict the minimum DHCP information a host needs to communicate off its local network.",
+          "checks": [{ "type": "manual" }],
+          "hints": ["An address alone is not enough for remote networks.", "Think IP address, mask, gateway, and often DNS."],
+          "commandCoach": "The pool will carry network, default-router, and dns-server values.",
+          "explanation": "A useful DHCP lease includes an IP address, subnet mask, default gateway, and DNS server so users do not configure hosts manually.",
+          "xp": 15
+        },
+        {
+          "id": "exclude-addresses",
+          "kind": "configure",
+          "prompt": "On R1, exclude 192.168.30.1 through 192.168.30.20 from DHCP assignment.",
+          "checks": [{ "type": "assessment", "id": "dhcp-exclude", "device": "R1", "name": "ip dhcp excluded-address 192.168.30.1 192.168.30.20", "components": "DHCP", "value": "ip dhcp excluded-address 192.168.30.1 192.168.30.20", "points": 2 }],
+          "hints": ["Routers, servers, and printers often use reserved addresses.", "Excluded addresses stay out of dynamic leases."],
+          "commandCoach": "ip dhcp excluded-address 192.168.30.1 192.168.30.20",
+          "explanation": "Exclusions protect addresses used for infrastructure or static assignments.",
+          "xp": 25
+        },
+        {
+          "id": "build-dhcp-pool",
+          "kind": "configure",
+          "prompt": "Create DHCP pool LAN30 with network 192.168.30.0/24, default router 192.168.30.1, and DNS server 192.168.30.10.",
+          "checks": [
+            { "type": "assessment", "id": "dhcp-pool", "device": "R1", "name": "ip dhcp pool LAN30", "components": "DHCP", "value": "ip dhcp pool LAN30", "points": 2 },
+            { "type": "assessment", "id": "dhcp-network", "device": "R1", "name": "network 192.168.30.0 255.255.255.0", "components": "DHCP", "value": "network 192.168.30.0 255.255.255.0", "points": 2 },
+            { "type": "assessment", "id": "dhcp-gateway", "device": "R1", "name": "default-router 192.168.30.1", "components": "DHCP", "value": "default-router 192.168.30.1", "points": 2 },
+            { "type": "assessment", "id": "dhcp-dns", "device": "R1", "name": "dns-server 192.168.30.10", "components": "DHCP", "value": "dns-server 192.168.30.10", "points": 2 }
+          ],
+          "hints": ["The network line defines the address pool.", "The default-router option should be the LAN interface on R1."],
+          "commandCoach": "ip dhcp pool LAN30\nnetwork 192.168.30.0 255.255.255.0\ndefault-router 192.168.30.1\ndns-server 192.168.30.10",
+          "explanation": "The pool turns network policy into a repeatable lease offer for every DHCP client on that LAN.",
+          "xp": 45
+        },
+        {
+          "id": "request-lease",
+          "kind": "prove",
+          "prompt": "Use DHCP on PC1, then ping R1 at 192.168.30.1.",
+          "checks": [
+            { "type": "action", "device": "PC1", "commandKind": "host-dhcp" },
+            { "type": "ping", "source": "PC1", "target": "192.168.30.1" }
+          ],
+          "hints": ["Open PC1 and request DHCP from its desktop or CLI.", "If the lease fails, confirm the pool and R1 interface."],
+          "commandCoach": "On PC1, use dhcp or the IP configuration app's DHCP action, then ping 192.168.30.1.",
+          "explanation": "The host receives addressing information from R1, then proves local IP connectivity to the default gateway.",
+          "xp": 35
+        }
+      ]
+    },
+    {
+      "id": "sem1-m14-15-dns-http-flow",
+      "semester": "sem-01",
+      "moduleBank": "ccna/sem-01/m-14-15",
+      "title": "DNS and HTTP: Names Become Sessions",
+      "estimatedMinutes": 12,
+      "prerequisites": ["sem1-m14-15-dhcp-service"],
+      "xp": 100,
+      "labFactory": "services-dns-http",
+      "steps": [
+        {
+          "id": "predict-name-flow",
+          "kind": "predict",
+          "prompt": "Predict which happens first when a user opens http://intranet.openpt: DNS resolution or the HTTP request.",
+          "checks": [{ "type": "manual" }],
+          "hints": ["HTTP needs a destination IP before TCP can connect.", "DNS maps the name to an address."],
+          "commandCoach": "You will configure the name and then prove reachability.",
+          "explanation": "The client resolves the name first, then starts a transport session to the returned IP address.",
+          "xp": 15
+        },
+        {
+          "id": "server-address",
+          "kind": "configure",
+          "prompt": "Ensure SRV1 uses 192.168.30.10/24 with default gateway 192.168.30.1.",
+          "checks": [
+            { "type": "assessment", "id": "srv-ip", "device": "SRV1", "iface": "eth0", "name": "ip address 192.168.30.10", "components": "Services", "value": "ip address 192.168.30.10 255.255.255.0", "points": 2 },
+            { "type": "assessment", "id": "srv-gw", "device": "SRV1", "iface": "eth0", "name": "default gateway 192.168.30.1", "components": "Services", "value": "192.168.30.1", "points": 1 }
+          ],
+          "hints": ["A service endpoint still needs normal IP settings.", "The server gateway points to R1's LAN address."],
+          "commandCoach": "On SRV1, set IP 192.168.30.10 mask 255.255.255.0 gateway 192.168.30.1.",
+          "explanation": "Servers need stable addresses so DNS records and clients have a dependable target.",
+          "xp": 25
+        },
+        {
+          "id": "dns-host-record",
+          "kind": "configure",
+          "prompt": "On R1, add a host record mapping intranet.openpt to 192.168.30.10.",
+          "checks": [{ "type": "assessment", "id": "dns-host", "device": "R1", "name": "ip host intranet.openpt 192.168.30.10", "components": "Services", "value": "ip host intranet.openpt 192.168.30.10", "points": 2 }],
+          "hints": ["This simulator uses the router host table as the simple DNS-style name source.", "Use ip host name address."],
+          "commandCoach": "ip host intranet.openpt 192.168.30.10",
+          "explanation": "A name record lets learners think in service names while the network still forwards to IP addresses.",
+          "xp": 25
+        },
+        {
+          "id": "prove-service",
+          "kind": "prove",
+          "prompt": "From PC1, ping intranet.openpt or 192.168.30.10, then explain where DNS stops and HTTP would begin.",
+          "checks": [{ "type": "ping", "source": "PC1", "target": "192.168.30.10" }],
+          "hints": ["If name lookup is not available in the current tool, ping the IP and explain the name step.", "Application protocols depend on working lower layers."],
+          "commandCoach": "ping 192.168.30.10",
+          "explanation": "DNS provides the destination IP. ICMP proves reachability; HTTP would then use transport and application-layer exchanges with the same server address.",
+          "xp": 35
+        }
+      ]
+    },
+    {
+      "id": "sem1-m16-17-ssh-hardening",
+      "semester": "sem-01",
+      "moduleBank": "ccna/sem-01/m-16-17",
+      "title": "SSH and Basic Hardening",
+      "estimatedMinutes": 15,
+      "prerequisites": ["sem1-m14-15-dns-http-flow"],
+      "xp": 130,
+      "labFactory": "ssh-hardening",
+      "steps": [
+        {
+          "id": "predict-telnet-risk",
+          "kind": "predict",
+          "prompt": "Predict why a network admin should prefer SSH over Telnet for remote management.",
+          "checks": [{ "type": "manual" }],
+          "hints": ["Think confidentiality and authentication.", "Remote management crosses networks you may not fully trust."],
+          "commandCoach": "SSH needs a domain name, local user, RSA keys, SSH version, and VTY transport.",
+          "explanation": "SSH encrypts the management session. Telnet sends the session in clear text.",
+          "xp": 15
+        },
+        {
+          "id": "domain-and-user",
+          "kind": "configure",
+          "prompt": "On SW1, set ip domain-name openpt.local and create username admin secret class123.",
+          "checks": [
+            { "type": "assessment", "id": "domain", "device": "SW1", "name": "ip domain-name openpt.local", "components": "Security", "value": "ip domain-name openpt.local", "points": 2 },
+            { "type": "assessment", "id": "username", "device": "SW1", "name": "username admin secret class123", "components": "Security", "value": "username admin secret class123", "points": 2 }
+          ],
+          "hints": ["The domain name participates in SSH key generation.", "Use a local username for login."],
+          "commandCoach": "ip domain-name openpt.local\nusername admin secret class123",
+          "explanation": "Local credentials and a domain name prepare the device for SSH server operation.",
+          "xp": 30
+        },
+        {
+          "id": "keys-version",
+          "kind": "configure",
+          "prompt": "Generate RSA keys on SW1 and force SSH version 2.",
+          "checks": [
+            { "type": "assessment", "id": "rsa", "device": "SW1", "name": "crypto key generate rsa modulus 2048", "components": "Security", "value": "crypto key generate rsa modulus 2048", "points": 2 },
+            { "type": "assessment", "id": "sshv2", "device": "SW1", "name": "ip ssh version 2", "components": "Security", "value": "ip ssh version 2", "points": 2 }
+          ],
+          "hints": ["If the simulator accepts the default modulus, the checker expects 2048.", "SSH version 2 is the modern baseline."],
+          "commandCoach": "crypto key generate rsa modulus 2048\nip ssh version 2",
+          "explanation": "RSA keys give the SSH server cryptographic identity. SSHv2 avoids older protocol behavior.",
+          "xp": 30
+        },
+        {
+          "id": "vty-ssh-only",
+          "kind": "configure",
+          "prompt": "Restrict SW1 VTY lines 0 through 4 to SSH only.",
+          "checks": [{ "type": "assessment", "id": "vty-ssh", "device": "SW1", "name": "line vty 0 4 transport input ssh", "components": "Security", "value": "transport input ssh", "points": 2 }],
+          "hints": ["VTY lines are remote terminal lines.", "Use line vty 0 4, then transport input ssh."],
+          "commandCoach": "line vty 0 4\ntransport input ssh",
+          "explanation": "Restricting VTY transport closes the Telnet path and keeps remote management on SSH.",
+          "xp": 30
+        },
+        {
+          "id": "encrypt-save",
+          "kind": "configure",
+          "prompt": "Turn on service password-encryption and save SW1's configuration.",
+          "checks": [
+            { "type": "assessment", "id": "password-encryption", "device": "SW1", "name": "service password-encryption", "components": "Security", "value": "service password-encryption", "points": 1 },
+            { "type": "assessment", "id": "security-save", "device": "SW1", "name": "save config startup", "components": "Security", "value": "copy running-config startup-config", "points": 1 }
+          ],
+          "hints": ["This is not the same strength as SSH, but it avoids casual clear-text display.", "Save after security changes."],
+          "commandCoach": "service password-encryption\nend\ncopy running-config startup-config",
+          "explanation": "Basic hardening layers small controls: encrypted management, limited transports, local users, and saved known-good configuration.",
+          "xp": 25
+        }
+      ]
+    },
+    {
+      "id": "sem1-m16-17-small-network-checklist",
+      "semester": "sem-01",
+      "moduleBank": "ccna/sem-01/m-16-17",
+      "title": "Small Network Build Checklist",
+      "estimatedMinutes": 12,
+      "prerequisites": ["sem1-m16-17-ssh-hardening"],
+      "xp": 100,
+      "labFactory": "small-office-capstone",
+      "steps": [
+        {
+          "id": "predict-build-order",
+          "kind": "predict",
+          "prompt": "Predict a good build order for a small office: cables, interface IPs, routes/services, security, or testing first?",
+          "checks": [{ "type": "manual" }],
+          "hints": ["A later layer depends on earlier layers.", "Testing happens throughout, but final proof comes after configuration."],
+          "commandCoach": "Use the order: physical, interface addressing, services, security, proof.",
+          "explanation": "Good network work is staged. Each checkpoint narrows the next possible failure.",
+          "xp": 15
+        },
+        {
+          "id": "wire-office",
+          "kind": "build",
+          "prompt": "Cable PC1 to SW1 F0/1, PC2 to SW1 F0/2, SRV1 to SW1 F0/3, and SW1 F0/24 to R1 G0/0/0.",
+          "checks": [
+            { "type": "topology", "linkBetween": ["PC1", "SW1"], "interfaces": ["eth0", "FastEthernet0/1"] },
+            { "type": "topology", "linkBetween": ["PC2", "SW1"], "interfaces": ["eth0", "FastEthernet0/2"] },
+            { "type": "topology", "linkBetween": ["SRV1", "SW1"], "interfaces": ["eth0", "FastEthernet0/3"] },
+            { "type": "topology", "linkBetween": ["SW1", "R1"], "interfaces": ["FastEthernet0/24", "GigabitEthernet0/0/0"] }
+          ],
+          "hints": ["Use the specified switch ports so later assessment stays predictable.", "Bring R1's interface up after the cable exists."],
+          "commandCoach": "Topology first. CLI comes next.",
+          "explanation": "The cabling plan creates a single LAN behind a router. Port choice makes troubleshooting and documentation easier.",
+          "xp": 30
+        },
+        {
+          "id": "gateway-address",
+          "kind": "configure",
+          "prompt": "Configure R1 G0/0/0 as 192.168.50.1/24 and bring it up.",
+          "checks": [
+            { "type": "assessment", "id": "office-r1-ip", "device": "R1", "iface": "GigabitEthernet0/0/0", "name": "ip address 192.168.50.1", "components": "Small Network", "value": "ip address 192.168.50.1 255.255.255.0", "points": 2 },
+            { "type": "assessment", "id": "office-r1-up", "device": "R1", "iface": "GigabitEthernet0/0/0", "name": "interface status up", "components": "Small Network", "value": "no shutdown", "points": 1 }
+          ],
+          "hints": ["The router interface is the default gateway for this office LAN.", "Remember no shutdown."],
+          "commandCoach": "interface g0/0/0\nip address 192.168.50.1 255.255.255.0\nno shutdown",
+          "explanation": "The default gateway anchors the LAN and gives hosts a way to leave the subnet later.",
+          "xp": 25
+        },
+        {
+          "id": "prove-office-local",
+          "kind": "prove",
+          "prompt": "Ping R1 from PC1 at 192.168.50.1.",
+          "checks": [{ "type": "ping", "source": "PC1", "target": "192.168.50.1" }],
+          "hints": ["PC1 must have an IP in 192.168.50.0/24 and gateway 192.168.50.1.", "If it fails, check the cable, PC addressing, and R1 interface state."],
+          "commandCoach": "ping 192.168.50.1",
+          "explanation": "This proves the endpoint, switch port, router interface, and IP subnet agree.",
+          "xp": 30
+        }
+      ]
+    },
+    {
+      "id": "sem1-final-small-office-capstone",
+      "semester": "sem-01",
+      "moduleBank": "ccna/sem-01/final",
+      "title": "Semester 1 Small Office Capstone",
+      "estimatedMinutes": 15,
+      "prerequisites": ["sem1-m16-17-small-network-checklist"],
+      "xp": 150,
+      "labFactory": "small-office-capstone",
+      "steps": [
+        {
+          "id": "plan-capstone",
+          "kind": "predict",
+          "prompt": "Plan the office build in four checkpoints: physical, addressing, services, security. What will you test after each checkpoint?",
+          "checks": [{ "type": "manual" }],
+          "hints": ["Good builders create proof points before moving on.", "Each test should isolate one kind of failure."],
+          "commandCoach": "Write the tests in your head before you configure: link state, gateway ping, service ping, saved security.",
+          "explanation": "The capstone rewards a disciplined build loop: predict, configure, test, explain.",
+          "xp": 20
+        },
+        {
+          "id": "capstone-addressing",
+          "kind": "configure",
+          "prompt": "Set R1 G0/0/0 to 192.168.50.1/24, SRV1 to 192.168.50.10/24 gateway 192.168.50.1, and PC1/PC2 in the same /24.",
+          "checks": [
+            { "type": "assessment", "id": "cap-r1-ip", "device": "R1", "iface": "GigabitEthernet0/0/0", "name": "ip address 192.168.50.1", "components": "Capstone", "value": "ip address 192.168.50.1 255.255.255.0", "points": 2 },
+            { "type": "assessment", "id": "cap-srv-ip", "device": "SRV1", "iface": "eth0", "name": "ip address 192.168.50.10", "components": "Capstone", "value": "ip address 192.168.50.10 255.255.255.0", "points": 2 },
+            { "type": "assessment", "id": "cap-srv-gw", "device": "SRV1", "iface": "eth0", "name": "default gateway 192.168.50.1", "components": "Capstone", "value": "192.168.50.1", "points": 1 }
+          ],
+          "hints": ["Use static endpoint addressing here to keep the final proof deterministic.", "PC1 can use 192.168.50.11 and PC2 can use 192.168.50.12."],
+          "commandCoach": "On R1: interface g0/0/0, ip address 192.168.50.1 255.255.255.0, no shutdown. On endpoints, set IP, mask, and gateway.",
+          "explanation": "The LAN now has an addressing plan with a router gateway, user hosts, and a stable server.",
+          "xp": 35
+        },
+        {
+          "id": "capstone-services",
+          "kind": "configure",
+          "prompt": "On R1, add ip host intranet.openpt 192.168.50.10 so the office has a memorable service name.",
+          "checks": [{ "type": "assessment", "id": "cap-host-record", "device": "R1", "name": "ip host intranet.openpt 192.168.50.10", "components": "Capstone", "value": "ip host intranet.openpt 192.168.50.10", "points": 2 }],
+          "hints": ["Names reduce cognitive load for users and admins.", "The network still forwards to an IP address."],
+          "commandCoach": "ip host intranet.openpt 192.168.50.10",
+          "explanation": "A service name connects the application layer to the addressing plan.",
+          "xp": 25
+        },
+        {
+          "id": "capstone-security",
+          "kind": "configure",
+          "prompt": "Harden SW1 for SSH: domain openpt.local, user admin secret class123, RSA keys, SSHv2, and VTY SSH only.",
+          "checks": [
+            { "type": "assessment", "id": "cap-domain", "device": "SW1", "name": "ip domain-name openpt.local", "components": "Capstone", "value": "ip domain-name openpt.local", "points": 1 },
+            { "type": "assessment", "id": "cap-user", "device": "SW1", "name": "username admin secret class123", "components": "Capstone", "value": "username admin secret class123", "points": 1 },
+            { "type": "assessment", "id": "cap-sshv2", "device": "SW1", "name": "ip ssh version 2", "components": "Capstone", "value": "ip ssh version 2", "points": 1 },
+            { "type": "assessment", "id": "cap-vty", "device": "SW1", "name": "line vty 0 4 transport input ssh", "components": "Capstone", "value": "transport input ssh", "points": 1 }
+          ],
+          "hints": ["Reuse the SSH hardening pattern from the earlier mission.", "VTY lines control remote CLI access."],
+          "commandCoach": "ip domain-name openpt.local\nusername admin secret class123\ncrypto key generate rsa modulus 2048\nip ssh version 2\nline vty 0 4\ntransport input ssh",
+          "explanation": "Security is not an afterthought. It is part of the final definition of done for a working network.",
+          "xp": 35
+        },
+        {
+          "id": "capstone-final-proof",
+          "kind": "prove",
+          "prompt": "Prove the office works: ping SRV1 from PC1 at 192.168.50.10, then save the router and switch configurations.",
+          "checks": [
+            { "type": "ping", "source": "PC1", "target": "192.168.50.10" },
+            { "type": "assessment", "id": "cap-r1-save", "device": "R1", "name": "save config startup", "components": "Capstone", "value": "copy running-config startup-config", "points": 1 },
+            { "type": "assessment", "id": "cap-sw1-save", "device": "SW1", "name": "save config startup", "components": "Capstone", "value": "copy running-config startup-config", "points": 1 }
+          ],
+          "hints": ["The ping proves service reachability at the network layer.", "Saving proves the working state can survive a reload."],
+          "commandCoach": "From PC1: ping 192.168.50.10. On R1 and SW1: copy running-config startup-config.",
+          "explanation": "You have built, tested, secured, and persisted a small office network. That is the Semester 1 loop in miniature.",
+          "xp": 35
+        }
+      ]
+    }
+  ]
+}

@@ -7937,3 +7937,465 @@ body.is-resizing-layout .server-module-resizer::before {
     justify-self: start;
   }
 }
+
+.learn-page {
+  min-height: 100vh;
+  background: var(--bg-0);
+  color: var(--fg-0);
+  display: flex;
+  flex-direction: column;
+}
+
+.learn-topbar {
+  height: 48px;
+  border-bottom: 1px solid var(--line);
+  background: var(--bg-1);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 0 14px;
+}
+
+.learn-brand {
+  font-weight: 800;
+  letter-spacing: 0;
+}
+
+.learn-shell {
+  width: min(1180px, calc(100vw - 28px));
+  margin: 0 auto;
+  padding: 22px 0 42px;
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+
+.learn-hero,
+.learn-login-gate,
+.learn-module,
+.learn-coming-soon > div {
+  border: 1px solid var(--line);
+  background: color-mix(in oklab, var(--bg-1) 88%, transparent);
+}
+
+.learn-hero {
+  min-height: 190px;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(260px, 360px);
+  align-items: end;
+  gap: 24px;
+  padding: 28px;
+}
+
+.learn-kicker,
+.learn-module-head span,
+.learn-step-meta span,
+.learn-mission-meta span,
+.learn-coming-soon span,
+.learn-command-coach span,
+.learn-explanation span,
+.learn-coach-head span,
+.learn-score-strip span {
+  font-size: 10.5px;
+  color: var(--fg-3);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  font-weight: 700;
+}
+
+.learn-hero h1 {
+  margin: 8px 0 10px;
+  font-size: clamp(31px, 5vw, 58px);
+  line-height: 0.98;
+  letter-spacing: 0;
+  max-width: 820px;
+}
+
+.learn-hero p,
+.learn-login-gate p,
+.learn-mission p,
+.learn-coming-soon p,
+.learn-finish-box p,
+.learn-explanation p,
+.learn-hints p {
+  margin: 0;
+  color: var(--fg-2);
+  line-height: 1.45;
+}
+
+.learn-score-strip {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 8px;
+}
+
+.learn-score-strip > div {
+  min-height: 58px;
+  border: 1px solid var(--line-soft);
+  background: var(--bg-2);
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  padding: 10px 12px;
+}
+
+.learn-score-strip strong {
+  font-size: 18px;
+}
+
+.learn-login-gate {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 18px;
+}
+
+.learn-login-gate h2,
+.learn-module-head h2,
+.learn-mission h3,
+.learn-step-card h2 {
+  margin: 0;
+  letter-spacing: 0;
+}
+
+.learn-empty {
+  border: 1px solid var(--line);
+  padding: 18px;
+  color: var(--fg-2);
+  background: var(--bg-1);
+}
+
+.learn-path {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.learn-module {
+  padding: 18px;
+}
+
+.learn-module-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 14px;
+  margin-bottom: 14px;
+}
+
+.learn-badge {
+  flex: 0 0 auto;
+  color: var(--accent);
+  font-size: 12px;
+}
+
+.learn-mission-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.learn-mission {
+  min-height: 190px;
+  border: 1px solid var(--line-soft);
+  background: var(--bg-0);
+  padding: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  position: relative;
+}
+
+.learn-mission.recommended {
+  border-color: color-mix(in oklab, var(--accent) 62%, var(--line));
+}
+
+.learn-mission.completed {
+  background: color-mix(in oklab, var(--bg-0) 78%, var(--accent) 6%);
+}
+
+.learn-mission-meta {
+  display: flex;
+  gap: 8px;
+  justify-content: space-between;
+}
+
+.learn-mission h3 {
+  font-size: 18px;
+}
+
+.learn-mission p {
+  flex: 1;
+  font-size: 13px;
+}
+
+.learn-progress-line {
+  height: 7px;
+  border-radius: 999px;
+  background: var(--bg-2);
+  overflow: hidden;
+  border: 1px solid var(--line-soft);
+}
+
+.learn-progress-line span {
+  display: block;
+  height: 100%;
+  background: var(--accent);
+  min-width: 0;
+  transition: width 220ms ease;
+}
+
+.learn-coming-soon {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.learn-coming-soon > div {
+  padding: 14px;
+}
+
+.learn-coming-soon strong {
+  display: block;
+  margin: 6px 0;
+}
+
+.learn-coach {
+  width: min(380px, 34vw);
+  flex: 0 0 min(380px, 34vw);
+  background: var(--bg-1);
+  border-right: 1px solid var(--line);
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  color: var(--fg-0);
+}
+
+.learn-coach-head {
+  min-height: 56px;
+  border-bottom: 1px solid var(--line);
+  padding: 10px 12px;
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.learn-coach-head strong {
+  display: block;
+  margin-top: 2px;
+  font-size: 14px;
+  line-height: 1.25;
+}
+
+.learn-coach-progress {
+  padding: 12px;
+  border-bottom: 1px solid var(--line-soft);
+}
+
+.learn-coach-progress > div:first-child {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 8px;
+  font-size: 12px;
+  color: var(--fg-2);
+}
+
+.learn-step-list {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 6px;
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--line-soft);
+}
+
+.learn-step-list button {
+  appearance: none;
+  border: 1px solid var(--line-soft);
+  background: var(--bg-0);
+  color: var(--fg-2);
+  min-height: 44px;
+  padding: 5px;
+  font-size: 10.5px;
+  overflow: hidden;
+}
+
+.learn-step-list button span {
+  display: block;
+  color: var(--accent);
+  font-weight: 800;
+  font-size: 11px;
+}
+
+.learn-step-list button.active {
+  color: var(--fg-0);
+  border-color: var(--accent);
+}
+
+.learn-step-list button.done {
+  background: color-mix(in oklab, var(--accent) 12%, var(--bg-0));
+}
+
+.learn-step-card {
+  min-height: 0;
+  overflow: auto;
+  padding: 14px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.learn-step-meta,
+.learn-checks > div,
+.learn-step-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.learn-step-meta {
+  justify-content: space-between;
+}
+
+.learn-step-card h2 {
+  font-size: 18px;
+  line-height: 1.25;
+}
+
+.learn-checks {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.learn-checks > div {
+  min-height: 34px;
+  border: 1px solid var(--line-soft);
+  background: var(--bg-0);
+  padding: 7px 8px;
+  font-size: 12px;
+  color: var(--fg-2);
+}
+
+.learn-checks > div span {
+  width: 22px;
+  color: var(--accent);
+  font-weight: 800;
+  flex: 0 0 22px;
+}
+
+.learn-checks > div.met {
+  color: var(--fg-0);
+  border-color: color-mix(in oklab, var(--accent) 48%, var(--line));
+}
+
+.learn-command-coach,
+.learn-explanation,
+.learn-hints,
+.learn-finish-box {
+  border: 1px solid var(--line-soft);
+  background: var(--bg-0);
+  padding: 10px;
+}
+
+.learn-command-coach pre {
+  margin: 6px 0 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--fg-1);
+}
+
+.learn-step-actions {
+  flex-wrap: wrap;
+}
+
+.learn-path-return {
+  margin: 0 12px 12px;
+}
+
+.learn-coach-stub {
+  width: 30px;
+  flex: 0 0 30px;
+  border-right: 1px solid var(--line);
+  background: var(--bg-1);
+  color: var(--fg-2);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: default;
+}
+
+.learn-coach-stub span {
+  writing-mode: vertical-rl;
+  transform: rotate(180deg);
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.learn-reward-toast {
+  position: fixed;
+  right: 18px;
+  bottom: 70px;
+  z-index: 80;
+  min-width: 240px;
+  max-width: min(360px, calc(100vw - 36px));
+  border: 1px solid color-mix(in oklab, var(--accent) 55%, var(--line));
+  background: var(--bg-1);
+  box-shadow: 0 16px 44px rgb(0 0 0 / 0.32);
+  padding: 12px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  animation: learn-reward-in 260ms ease both;
+}
+
+.learn-reward-toast > span {
+  width: 38px;
+  height: 38px;
+  display: grid;
+  place-items: center;
+  background: var(--accent);
+  color: var(--bg-0);
+  font-weight: 900;
+  border-radius: 8px;
+}
+
+.learn-reward-toast strong {
+  display: block;
+  font-size: 13px;
+}
+
+.learn-reward-toast p {
+  margin: 2px 0 0;
+  color: var(--fg-2);
+  font-size: 12px;
+}
+
+@keyframes learn-reward-in {
+  from { opacity: 0; transform: translateY(10px) scale(0.98); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+@media (max-width: 900px) {
+  .learn-hero,
+  .learn-mission-grid,
+  .learn-coming-soon {
+    grid-template-columns: 1fr;
+  }
+
+  .learn-login-gate {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .learn-coach {
+    width: min(340px, 88vw);
+    flex-basis: min(340px, 88vw);
+  }
+}

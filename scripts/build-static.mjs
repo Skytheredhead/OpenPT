@@ -36,6 +36,7 @@ const rootFiles = [
   "wordle.jsx",
   "ccnacasino.jsx",
   "subnet-games.jsx",
+  "learn.jsx",
   "app.jsx",
   "wordle-real-words.js",
   "01 Jeopardy (Main Theme).m4a"

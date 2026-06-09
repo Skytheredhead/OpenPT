@@ -401,6 +401,32 @@ app.post("/api/study/ccna/sessions/:id/finish", async (req) => {
   return store.finishStudySession(user.id, "ccna", req.params.id, Number.isFinite(total) ? total : 0);
 });
 
+app.get("/api/lessons/ccna/summary", async (req) => {
+  const user = requireUser(req);
+  return { dashboard: store.lessonSummary(user.id, "ccna") };
+});
+
+app.post("/api/lessons/ccna/:lessonId/start", async (req) => {
+  const user = requireUser(req);
+  requireCsrf(req);
+  abuse.check("lessonStartUser", user.id, { limit: 120, windowMs: 60 * 60_000 });
+  return store.startLesson(user.id, "ccna", req.params.lessonId);
+});
+
+app.post("/api/lessons/ccna/:lessonId/events", async (req) => {
+  const user = requireUser(req);
+  requireCsrf(req);
+  abuse.check("lessonEventUser", user.id, { limit: 1200, windowMs: 60 * 60_000 });
+  return store.recordLessonEvent(user.id, "ccna", req.params.lessonId, req.body || {});
+});
+
+app.post("/api/lessons/ccna/:lessonId/finish", async (req) => {
+  const user = requireUser(req);
+  requireCsrf(req);
+  abuse.check("lessonFinishUser", user.id, { limit: 240, windowMs: 60 * 60_000 });
+  return store.finishLesson(user.id, "ccna", req.params.lessonId, req.body || {});
+});
+
 app.get("/api/sessions", async (req) => {
   const user = requireUser(req);
   return { sessions: store.listSessions(user.id, user.sessionId) };
@@ -680,6 +706,15 @@ if (!backendOnly) {
   });
 
   app.get("/lab/", async (req, reply) => {
+    return reply.sendFile("index.html");
+  });
+
+  app.get("/learn", async (req, reply) => {
+    const query = req.url.includes("?") ? req.url.slice(req.url.indexOf("?")) : "";
+    return reply.redirect(`/learn/${query}`, 308);
+  });
+
+  app.get("/learn/", async (req, reply) => {
     return reply.sendFile("index.html");
   });
 

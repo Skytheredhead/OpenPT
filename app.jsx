@@ -4,6 +4,7 @@ const { useState, useEffect, useRef, useMemo } = React;
 const Topology = window.Topology;
 const CLI = window.CLI;
 const Inspector = window.Inspector;
+const OpenPTLearn = window.OpenPTLearn;
 const Icon = window.Icon;
 const Glyph = window.Glyph;
 const DeviceCatalog = window.DeviceCatalog;
@@ -22,7 +23,8 @@ const WORDLE_URL = "/wordle";
 const GAMES_URL = "/games";
 const FIREWALL_URL = "/firewall";
 const BOMB_URL = "/bomb";
-const INTERNAL_APP_ROUTES = new Set(["/", JEOPARDY_URL, WORDLE_URL, GAMES_URL, FIREWALL_URL, BOMB_URL]);
+const LEARN_URL = "/learn";
+const INTERNAL_APP_ROUTES = new Set(["/", JEOPARDY_URL, WORDLE_URL, GAMES_URL, FIREWALL_URL, BOMB_URL, LEARN_URL]);
 const ifaceName = (name) => OPT_Engine.shortIfaceName ? OPT_Engine.shortIfaceName(name) : name;
 const ifaceText = (text) => OPT_Engine.shortIfaceNamesInText ? OPT_Engine.shortIfaceNamesInText(text) : text;
 
@@ -32,6 +34,7 @@ function appRoutePath(pathname = "/") {
   if (/^\/games\/?$/.test(pathname)) return GAMES_URL;
   if (/^\/firewall\/?$/.test(pathname)) return FIREWALL_URL;
   if (/^\/bomb\/?$/.test(pathname)) return BOMB_URL;
+  if (/^\/learn\/?$/.test(pathname)) return LEARN_URL;
   if (pathname === "" || pathname === "/") return "/";
   return pathname;
 }
@@ -1214,6 +1217,7 @@ function App({ initialViewMode = null, initialHomeAction = null } = {}) {
     try { return localStorage.getItem("openpt:bottom-collapsed") === "1"; } catch (e) { return false; }
   });
   const isHomeRoute = routePath === "/";
+  const isLearnRoute = routePath === LEARN_URL;
 
   // Derived: the most-recently-selected device (used for inspector / context menu)
   const selectedId = selectedIds[selectedIds.length - 1] || null;
@@ -1643,6 +1647,11 @@ function App({ initialViewMode = null, initialHomeAction = null } = {}) {
   const [syncStatus, setSyncStatus] = useState({ state: "local", message: "Local only" });
   const [accountOpen, setAccountOpen] = useState(false);
   const [accountInitial, setAccountInitial] = useState(null);
+  const [lessonCatalog, setLessonCatalog] = useState(null);
+  const [lessonCatalogLoading, setLessonCatalogLoading] = useState(false);
+  const [lessonDashboard, setLessonDashboard] = useState(null);
+  const [lessonSession, setLessonSession] = useState(null);
+  const [lessonReward, setLessonReward] = useState(null);
   const [projectsOpen, setProjectsOpen] = useState(false);
   const [shareOpen, setShareOpen] = useState(false);
   const [feedbackOpen, setFeedbackOpen] = useState(false);
@@ -1657,6 +1666,7 @@ function App({ initialViewMode = null, initialHomeAction = null } = {}) {
   const savePromiseRef = useRef(null);
   const createProjectInFlightRef = useRef(false);
   const latestSaveStateRef = useRef({});
+  const lessonEventNonceRef = useRef(0);
 
   useEffect(() => {
     try { localStorage.setItem("openpt:bottom-height", String(bottomPanelHeight)); } catch (e) {}
@@ -1763,6 +1773,263 @@ function App({ initialViewMode = null, initialHomeAction = null } = {}) {
       window.parent?.postMessage(payload, location.origin);
     } catch (e) {}
   }, [quizEmbedMode, quizEmbedReturnKey, gradedPtActivity]);
+
+  const loadGuidedLessonCatalog = React.useCallback(async () => {
+    if (!OpenPTLearn?.loadLessonCatalog) return null;
+    if (lessonCatalog) return lessonCatalog;
+    setLessonCatalogLoading(true);
+    try {
+      const catalog = await OpenPTLearn.loadLessonCatalog();
+      setLessonCatalog(catalog);
+      return catalog;
+    } catch (err) {
+      setToast({ kind: "err", msg: err.message || "Could not load CCNA lessons" });
+      return null;
+    } finally {
+      setLessonCatalogLoading(false);
+    }
+  }, [lessonCatalog]);
+
+  const refreshLessonDashboard = React.useCallback(async () => {
+    if (!syncClient || !cloudUser) {
+      setLessonDashboard(null);
+      return null;
+    }
+    try {
+      const data = await syncClient.lessonSummary();
+      setLessonDashboard(data.dashboard || null);
+      return data.dashboard || null;
+    } catch (err) {
+      setToast({ kind: "err", msg: err.message || "Could not load lesson progress" });
+      return null;
+    }
+  }, [syncClient, cloudUser?.id]);
+
+  useEffect(() => {
+    if (!isLearnRoute && !lessonSession) return;
+    loadGuidedLessonCatalog();
+  }, [isLearnRoute, lessonSession?.lessonId, loadGuidedLessonCatalog]);
+
+  useEffect(() => {
+    if (!isLearnRoute || !cloudUser) return;
+    refreshLessonDashboard();
+  }, [isLearnRoute, cloudUser?.id, refreshLessonDashboard]);
+
+  useEffect(() => {
+    if (cloudUser) return;
+    setLessonDashboard(null);
+  }, [cloudUser?.id]);
+
+  const openLessonSignIn = () => {
+    setAccountInitial({ mode: cloudUser ? "account" : "login" });
+    setAccountOpen(true);
+  };
+
+  const lessonClientEventId = (lessonId, stepId, type) => {
+    lessonEventNonceRef.current += 1;
+    return `lesson:${lessonId}:${stepId || "lesson"}:${type}:${lessonEventNonceRef.current}`;
+  };
+
+  const startGuidedLesson = async (lessonId) => {
+    if (!syncClient || !cloudUser) {
+      setAccountInitial({ mode: "login" });
+      setAccountOpen(true);
+      return;
+    }
+    const catalog = await loadGuidedLessonCatalog();
+    const lesson = (catalog?.lessons || []).find((item) => item.id === lessonId);
+    if (!lesson || !OpenPTLearn?.buildLessonLab) return;
+    let startResult = null;
+    try {
+      startResult = await syncClient.startLesson(lesson.id);
+      setLessonDashboard(startResult.dashboard || null);
+    } catch (err) {
+      setToast({ kind: "err", msg: err.message || "Could not start lesson" });
+      return;
+    }
+    const lab = OpenPTLearn.buildLessonLab(lesson);
+    const norm = OPT_Engine.normalizeTopology(lab.devices, lab.links);
+    const before = captureAppSnapshot();
+    snapshotsRef.current[activeWid] = { devices, links, selectedIds, openConsoles, activeBottom, ptActivity, ptSidebarOpen };
+    const id = `lesson-${Date.now()}`;
+    snapshotsRef.current[id] = {
+      devices: norm.devices,
+      links: norm.links,
+      selectedIds: [],
+      openConsoles: [],
+      activeBottom: "events",
+      ptActivity: lab.activity,
+      ptSidebarOpen: false,
+    };
+    setTabs((ts) => [...ts, { id, name: `${lab.fileName}`, source: "ccna-lesson" }]);
+    setActiveWid(id);
+    skipNextSnapshot.current = true;
+    setDevices(norm.devices);
+    setLinks(norm.links);
+    setSelectedIds([]);
+    setSelectedLinkId(null);
+    setOpenConsoles([]);
+    setActiveBottom("events");
+    setPtActivity(lab.activity);
+    setPtSidebarOpen(false);
+    setStarterScreenVisible(false);
+    setEvents([]);
+    setPackets([]);
+    setPacketEvents([]);
+    setServerModuleOpen(false);
+    setAppsSidebarOpen(false);
+    setCloudProjectId(null);
+    setCloudVersion(0);
+    setCloudBaseDoc(null);
+    setCloudLease(null);
+    setShareToken(null);
+    setShareMode(null);
+    setSyncStatus({ state: "local", message: "Signed in" });
+    const progress = startResult.lesson || {};
+    const completedSteps = progress.completedSteps || [];
+    const firstIncomplete = (lesson.steps || []).find((step) => !completedSteps.includes(step.id))?.id || lesson.steps?.[0]?.id || null;
+    setLessonSession({
+      lessonId: lesson.id,
+      stepId: progress.currentStepId || firstIncomplete,
+      completedStepIds: completedSteps,
+      earnedXp: progress.xp || 0,
+      proofs: { pings: {}, actions: {} },
+      hintsShown: {},
+      coachOpen: true,
+      finished: progress.status === "completed",
+      startedAt: Date.now(),
+    });
+    setLessonReward({ title: "Mission loaded", detail: lesson.title, xp: 0, nonce: Date.now() });
+    pushAppUndo("opened guided lesson", before);
+    navigateAppRoute(LEARN_URL);
+  };
+
+  const recordLessonEvent = async (event) => {
+    if (!syncClient || !cloudUser || !lessonSession?.lessonId) return null;
+    try {
+      const data = await syncClient.recordLessonEvent(lessonSession.lessonId, event);
+      if (data.dashboard) setLessonDashboard(data.dashboard);
+      return data;
+    } catch (err) {
+      setToast({ kind: "err", msg: err.message || "Could not save lesson progress" });
+      return null;
+    }
+  };
+
+  const completeLessonStep = React.useCallback(async (stepId, source = "checkpoint", payload = {}) => {
+    if (!stepId || !lessonSession?.lessonId || lessonSession.completedStepIds?.includes(stepId)) return;
+    const data = await recordLessonEvent({
+      eventType: "checkpoint",
+      stepId,
+      clientEventId: lessonClientEventId(lessonSession.lessonId, stepId, source),
+      payload: { source, ...payload },
+    });
+    setLessonSession((current) => {
+      if (!current || current.lessonId !== lessonSession.lessonId) return current;
+      const completedSteps = data?.lesson?.completedSteps || [...new Set([...(current.completedStepIds || []), stepId])];
+      const catalog = lessonCatalog;
+      const lesson = (catalog?.lessons || []).find((item) => item.id === current.lessonId);
+      const nextStepId = data?.lesson?.currentStepId ||
+        lesson?.steps?.find((step) => !completedSteps.includes(step.id))?.id ||
+        stepId;
+      return {
+        ...current,
+        completedStepIds: completedSteps,
+        stepId: nextStepId,
+        earnedXp: data?.lesson?.xp ?? current.earnedXp,
+      };
+    });
+    const earned = data?.event?.earnedXp || 0;
+    if (earned > 0) setLessonReward({ title: "Checkpoint complete", detail: `+${earned} Mastery XP`, xp: earned, nonce: Date.now() });
+  }, [lessonSession, lessonCatalog, syncClient, cloudUser?.id]);
+
+  const markLessonAction = (devId, cmd = {}) => {
+    if (!lessonSession?.lessonId || !cmd?.kind) return;
+    const device = devices[devId];
+    const deviceName = device?.hostname || device?.name || devId;
+    setLessonSession((current) => {
+      if (!current) return current;
+      const actions = { ...(current.proofs?.actions || {}), [OpenPTLearn.actionKey(deviceName, cmd.kind)]: true };
+      return { ...current, proofs: { ...(current.proofs || {}), actions } };
+    });
+    recordLessonEvent({
+      eventType: "action",
+      stepId: lessonSession.stepId,
+      clientEventId: lessonClientEventId(lessonSession.lessonId, lessonSession.stepId, "action"),
+      payload: { device: deviceName, commandKind: cmd.kind },
+    });
+  };
+
+  const markLessonPing = (srcId, target, plan) => {
+    if (!lessonSession?.lessonId || !plan?.ok) return;
+    const source = devices[srcId]?.hostname || devices[srcId]?.name || srcId;
+    const cleanedTarget = String(target || "").trim();
+    setLessonSession((current) => {
+      if (!current) return current;
+      const pings = { ...(current.proofs?.pings || {}), [OpenPTLearn.pingKey(source, cleanedTarget)]: true };
+      return { ...current, proofs: { ...(current.proofs || {}), pings } };
+    });
+    recordLessonEvent({
+      eventType: "ping",
+      stepId: lessonSession.stepId,
+      clientEventId: lessonClientEventId(lessonSession.lessonId, lessonSession.stepId, "ping"),
+      payload: { source, target: cleanedTarget, success: true },
+    });
+  };
+
+  const revealLessonHint = (stepId) => {
+    if (!lessonSession?.lessonId) return;
+    let hintIndex = 1;
+    setLessonSession((current) => {
+      if (!current) return current;
+      hintIndex = (current.hintsShown?.[stepId] || 0) + 1;
+      return { ...current, hintsShown: { ...(current.hintsShown || {}), [stepId]: hintIndex } };
+    });
+    recordLessonEvent({
+      eventType: "hint",
+      stepId,
+      clientEventId: lessonClientEventId(lessonSession.lessonId, stepId, "hint"),
+      payload: { hintIndex },
+    });
+  };
+
+  const finishGuidedLesson = async () => {
+    if (!syncClient || !cloudUser || !lessonSession?.lessonId) return;
+    try {
+      const data = await syncClient.finishLesson(lessonSession.lessonId, {
+        clientEventId: lessonClientEventId(lessonSession.lessonId, null, "finish"),
+        payload: { completedSteps: lessonSession.completedStepIds?.length || 0 },
+      });
+      if (data.dashboard) setLessonDashboard(data.dashboard);
+      setLessonSession((current) => current ? {
+        ...current,
+        completedStepIds: data.lesson?.completedSteps || current.completedStepIds,
+        earnedXp: data.lesson?.xp ?? current.earnedXp,
+        finished: data.lesson?.status === "completed",
+      } : current);
+      if (data.lesson?.status === "completed") {
+        setLessonReward({ title: "Mission complete", detail: "Badge progress saved", xp: 0, nonce: Date.now() });
+      } else {
+        setToast({ kind: "warn", msg: "Finish the remaining checkpoints first." });
+      }
+    } catch (err) {
+      setToast({ kind: "err", msg: err.message || "Could not finish lesson" });
+    }
+  };
+
+  useEffect(() => {
+    if (!lessonSession?.lessonId || !lessonCatalog || !OpenPTLearn?.stepChecksMet) return;
+    const lesson = (lessonCatalog.lessons || []).find((item) => item.id === lessonSession.lessonId);
+    if (!lesson) return;
+    const completed = new Set(lessonSession.completedStepIds || []);
+    const ready = (lesson.steps || []).find((step) => !completed.has(step.id) && OpenPTLearn.stepChecksMet(step, {
+      activity: gradedPtActivity,
+      devices,
+      links,
+      lessonSession,
+    }));
+    if (ready) completeLessonStep(ready.id, "auto-check");
+  }, [lessonSession, lessonCatalog, gradedPtActivity, devices, links, completeLessonStep]);
   const displayedImportReport = useMemo(() => {
     if (!lastImportReport) return null;
     const samePacketTracerImport = gradedPtActivity && (
@@ -3687,6 +3954,7 @@ function App({ initialViewMode = null, initialHomeAction = null } = {}) {
         trace: opts.trace,
       }), plan.devices || devices);
     }
+    if (!opts.silent && !opts.trace) markLessonPing(srcId, target, plan);
     if (opts.silent || opts.trace) {
       onComplete && onComplete(plan);
       return plan;
@@ -3949,6 +4217,10 @@ function App({ initialViewMode = null, initialHomeAction = null } = {}) {
         navigateAppRoute(JEOPARDY_URL);
         return;
       }
+      if (action === "learn") {
+        navigateAppRoute(LEARN_URL);
+        return;
+      }
       if (action === "import") {
         enterLabFromHome("import");
         return;
@@ -3959,6 +4231,45 @@ function App({ initialViewMode = null, initialHomeAction = null } = {}) {
     return () => window.removeEventListener("message", onHomeAction);
   }, [enterLabFromHome, navigateAppRoute]);
   const workspaceTabs = isHomeRoute ? [{ id: "home", name: "home.html" }] : tabs;
+
+  if (isLearnRoute && !lessonSession && OpenPTLearn?.LessonPathView) {
+    return (
+      <>
+        <OpenPTLearn.LessonPathView
+          catalog={lessonCatalog}
+          dashboard={lessonDashboard}
+          user={cloudUser}
+          loading={lessonCatalogLoading}
+          onStartLesson={startGuidedLesson}
+          onSignIn={openLessonSignIn}
+          onBackToLab={() => navigateAppRoute("/lab")}
+        />
+        {accountOpen && (
+          <AccountDialog
+            syncClient={syncClient}
+            user={cloudUser}
+            initial={accountInitial}
+            onClose={() => { setAccountOpen(false); setAccountInitial(null); }}
+            onSignedIn={(user) => {
+              setCloudUser(user);
+              setAccountOpen(false);
+              setAccountInitial(null);
+              setSyncStatus({ state: "local", message: "Signed in" });
+            }}
+            onSignedOut={logoutCloud}
+            onAccountDeleted={(deletion) => {
+              setCloudUser(null);
+              setCloudProjects([]);
+              resetSyncState({ clearProject: true, clearShare: true, clearSaveCounters: true, status: { state: "local", message: "Account deletion scheduled" } });
+              setAccountOpen(false);
+              setAccountInitial(null);
+              setToast({ kind: "warn", msg: `Account scheduled for deletion on ${formatSessionTime(deletion.deletionScheduledAt)}` });
+            }}
+          />
+        )}
+      </>
+    );
+  }
 
   if (routePath === JEOPARDY_URL && window.JeopardyPage) {
     return <window.JeopardyPage />;
@@ -3988,6 +4299,7 @@ function App({ initialViewMode = null, initialHomeAction = null } = {}) {
         onEnterImport={() => { setViewMode("app"); openPacketTracerFilePicker(); }}
         onStartQuiz={() => { window.location.href = QUIZ_LIBRARY_URL; }}
         onStartJeopardy={() => navigateAppRoute(JEOPARDY_URL)}
+        onStartLearn={() => navigateAppRoute(LEARN_URL)}
       />
     );
   }
@@ -4062,6 +4374,19 @@ function App({ initialViewMode = null, initialHomeAction = null } = {}) {
             <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ opacity: 0.7 }}>
               <path d="M7 17L17 7M9 7h8v8"/>
             </svg>
+          </button>
+          <button
+            type="button"
+            className="tb-btn quiz-link-btn"
+            title="Open CCNA guided lessons"
+            onClick={() => navigateAppRoute(LEARN_URL)}
+            style={{ padding: "3px 8px", fontSize: 11 }}
+          >
+            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M4 19.5V5a2 2 0 0 1 2-2h12v16H6a2 2 0 0 0-2 2"/>
+              <path d="M8 7h6M8 11h8"/>
+            </svg>
+            Learn
           </button>
         </div>
         <TitleMenus
@@ -4191,6 +4516,34 @@ function App({ initialViewMode = null, initialHomeAction = null } = {}) {
             title="Show assignment instructions"
           >
             <span>▸</span>
+          </div>
+        )}
+        {lessonSession && lessonSession.coachOpen && OpenPTLearn?.LessonCoachSidebar && (
+          <OpenPTLearn.LessonCoachSidebar
+            catalog={lessonCatalog}
+            lessonSession={lessonSession}
+            activity={gradedPtActivity}
+            devices={devices}
+            links={links}
+            onClose={() => setLessonSession((current) => current ? { ...current, coachOpen: false } : current)}
+            onHint={revealLessonHint}
+            onManualComplete={(stepId) => completeLessonStep(stepId, "manual")}
+            onStepSelect={(stepId) => setLessonSession((current) => current ? { ...current, stepId, coachOpen: true } : current)}
+            onFinish={finishGuidedLesson}
+            onReturnToPath={() => {
+              setLessonSession(null);
+              refreshLessonDashboard();
+              navigateAppRoute(LEARN_URL);
+            }}
+          />
+        )}
+        {lessonSession && !lessonSession.coachOpen && (
+          <div
+            className="learn-coach-stub"
+            onClick={() => setLessonSession((current) => current ? { ...current, coachOpen: true } : current)}
+            title="Show lesson coach"
+          >
+            <span>Lesson</span>
           </div>
         )}
 
@@ -4392,7 +4745,7 @@ function App({ initialViewMode = null, initialHomeAction = null } = {}) {
                     device={simulatedDevices[id]}
                     devices={simulatedDevices}
                     links={links}
-                    onApply={(cmd) => onApplyToDevice(id, cmd)}
+                    onApply={(cmd) => { markLessonAction(id, cmd); onApplyToDevice(id, cmd); }}
                     onPing={handlePing}
                     onTraceEvent={(trace) => recordPacketEvent(trace, simulatedDevices)}
                     pendingCmd={pendingCmd && pendingCmd.devId === id ? pendingCmd : null}
@@ -4417,7 +4770,7 @@ function App({ initialViewMode = null, initialHomeAction = null } = {}) {
                     onClose={() => closeEndpointApp(activeAppTab.id)}
                     onUpdateDevice={(mutator, message) => updateEndpointDevice(activeAppDevice.id, mutator, message)}
                     onRunSimulation={(mutator, message) => updateSimulationDevices("endpoint-app", mutator, message)}
-                    onApplyCommand={(cmd) => onApplyToDevice(activeAppDevice.id, cmd)}
+                    onApplyCommand={(cmd) => { markLessonAction(activeAppDevice.id, cmd); onApplyToDevice(activeAppDevice.id, cmd); }}
                     onPing={handlePing}
                     onTraceEvent={(trace) => recordPacketEvent(trace, simulatedDevices)}
                     scrollState={terminalScrolls[activeAppTab.id] || terminalScrolls[activeAppDevice.id]}
@@ -4536,6 +4889,16 @@ function App({ initialViewMode = null, initialHomeAction = null } = {}) {
         <div className={`toast ${toast.kind || ""}`}>
           <span className="dot"/>
           <span>{toast.msg}</span>
+        </div>
+      )}
+
+      {lessonReward && (
+        <div className="learn-reward-toast" key={lessonReward.nonce}>
+          <span>XP</span>
+          <div>
+            <strong>{lessonReward.title}</strong>
+            <p>{lessonReward.detail}</p>
+          </div>
         </div>
       )}
 

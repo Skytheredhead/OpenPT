@@ -5,6 +5,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { applyJsonPatch, byteLength } from "./json-patch.mjs";
 import { nextProgressForAttempt, sanitizeQuestionKeys, scheduleStudySession } from "./study-scheduler.mjs";
+import { lessonCatalogStats, lessonStepIds, lessonStepXp, lessonTotalXp, requireLesson } from "./lesson-catalog.mjs";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const migrationsDir = join(__dirname, "migrations");
@@ -67,6 +68,44 @@ function parseJson(value, fallback) {
   } catch (err) {
     return fallback;
   }
+}
+
+function todayKey(date = new Date()) {
+  return date.toISOString().slice(0, 10);
+}
+
+function previousDayKey(dateKey) {
+  const date = new Date(`${dateKey}T00:00:00.000Z`);
+  date.setUTCDate(date.getUTCDate() - 1);
+  return todayKey(date);
+}
+
+function sanitizeLessonEventId(value) {
+  const text = String(value || "").trim();
+  if (!/^[a-zA-Z0-9:_-]{8,120}$/.test(text)) return "";
+  return text;
+}
+
+function sanitizeLessonPayload(value, depth = 0) {
+  if (depth > 4) return null;
+  if (value == null) return value;
+  if (typeof value === "string") return value.slice(0, 500);
+  if (typeof value === "number") return Number.isFinite(value) ? value : null;
+  if (typeof value === "boolean") return value;
+  if (Array.isArray(value)) return value.slice(0, 25).map((item) => sanitizeLessonPayload(item, depth + 1));
+  if (typeof value !== "object") return null;
+  const denied = new Set(["rawCommand", "command", "typed", "input", "password", "secret", "token", "authorization"]);
+  const out = {};
+  for (const [key, child] of Object.entries(value).slice(0, 50)) {
+    if (denied.has(key) || /password|secret|token|authorization/i.test(key)) continue;
+    out[key] = sanitizeLessonPayload(child, depth + 1);
+  }
+  return out;
+}
+
+function lessonPercent(completedSteps, lesson) {
+  const total = lessonStepIds(lesson).length;
+  return total ? Math.round((completedSteps.length / total) * 100) : 0;
 }
 
 export class OpenPTStore {
@@ -590,6 +629,280 @@ export class OpenPTStore {
     return {
       session: { id: sessionId, ...summary },
       dashboard: this.studySummary(userId, bankId, totalQuestionCount)
+    };
+  }
+
+  lessonProgressRows(userId, courseId = "ccna") {
+    return this.db.prepare("SELECT * FROM lesson_progress WHERE user_id=? AND course_id=?").all(userId, courseId);
+  }
+
+  lessonProgressResponse(row, lesson = null) {
+    if (!row) return null;
+    const completedSteps = parseJson(row.completed_steps_json, []);
+    return {
+      lessonId: row.lesson_id,
+      courseId: row.course_id,
+      status: row.status,
+      completedSteps,
+      currentStepId: row.current_step_id,
+      xp: row.xp || 0,
+      bestPercent: row.best_percent || (lesson ? lessonPercent(completedSteps, lesson) : 0),
+      attemptCount: row.attempt_count || 0,
+      startedAt: row.started_at,
+      completedAt: row.completed_at,
+      updatedAt: row.updated_at
+    };
+  }
+
+  lessonCurrentStreak(userId, courseId = "ccna") {
+    const rows = this.db.prepare(`
+      SELECT activity_date
+      FROM lesson_daily_activity
+      WHERE user_id=? AND course_id=? AND (event_count > 0 OR xp > 0 OR completed_count > 0)
+      ORDER BY activity_date DESC
+      LIMIT 90
+    `).all(userId, courseId);
+    if (!rows.length) return { currentStreak: 0, lastActiveDate: null };
+    const activeDates = new Set(rows.map((row) => row.activity_date));
+    const today = todayKey();
+    let cursor = activeDates.has(today) ? today : previousDayKey(today);
+    let streak = 0;
+    while (activeDates.has(cursor)) {
+      streak += 1;
+      cursor = previousDayKey(cursor);
+    }
+    return { currentStreak: streak, lastActiveDate: rows[0].activity_date };
+  }
+
+  lessonSummary(userId, courseId = "ccna") {
+    const stats = lessonCatalogStats();
+    const rows = this.lessonProgressRows(userId, courseId);
+    const rowByLesson = new Map(rows.map((row) => [row.lesson_id, row]));
+    const completed = new Set(rows.filter((row) => row.status === "completed").map((row) => row.lesson_id));
+    const lessons = stats.lessons.map((lesson) => {
+      const row = rowByLesson.get(lesson.id);
+      const missingPrerequisites = (lesson.prerequisites || []).filter((id) => !completed.has(id));
+      return {
+        ...lesson,
+        status: row?.status || "not_started",
+        softGate: {
+          recommended: missingPrerequisites.length === 0,
+          missingPrerequisites
+        },
+        progress: row ? this.lessonProgressResponse(row, requireLesson(lesson.id)) : null
+      };
+    });
+    const recommended = lessons.find((lesson) => lesson.status !== "completed" && lesson.softGate.recommended) ||
+      lessons.find((lesson) => lesson.status !== "completed") ||
+      null;
+    const earnedXp = rows.reduce((sum, row) => sum + (row.xp || 0), 0);
+    const badges = stats.modules.map((module) => {
+      const moduleLessons = lessons.filter((lesson) => lesson.moduleBank === module.id);
+      const earned = moduleLessons.length > 0 && moduleLessons.every((lesson) => lesson.status === "completed");
+      return {
+        id: module.id,
+        title: module.title,
+        semester: module.semester,
+        earned,
+        completedLessons: moduleLessons.filter((lesson) => lesson.status === "completed").length,
+        totalLessons: moduleLessons.length
+      };
+    });
+    const streak = this.lessonCurrentStreak(userId, courseId);
+    return {
+      courseId,
+      version: stats.version,
+      title: stats.title,
+      totalLessons: stats.totalLessons,
+      completedLessons: completed.size,
+      totalXp: stats.totalXp,
+      earnedXp,
+      currentStreak: streak.currentStreak,
+      lastActiveDate: streak.lastActiveDate,
+      recommendedLessonId: recommended?.id || null,
+      semesters: stats.semesters,
+      modules: stats.modules,
+      badges,
+      lessons
+    };
+  }
+
+  ensureLessonProgress(userId, courseId, lesson) {
+    const now = nowIso();
+    const existing = this.db.prepare("SELECT * FROM lesson_progress WHERE user_id=? AND course_id=? AND lesson_id=?").get(userId, courseId, lesson.id);
+    if (existing) return existing;
+    const firstStep = lessonStepIds(lesson)[0] || null;
+    this.db.prepare(`
+      INSERT INTO lesson_progress (
+        user_id, course_id, lesson_id, status, completed_steps_json, current_step_id, xp, best_percent, attempt_count, started_at, updated_at
+      )
+      VALUES (?, ?, ?, 'started', '[]', ?, 0, 0, 0, ?, ?)
+    `).run(userId, courseId, lesson.id, firstStep, now, now);
+    return this.db.prepare("SELECT * FROM lesson_progress WHERE user_id=? AND course_id=? AND lesson_id=?").get(userId, courseId, lesson.id);
+  }
+
+  touchLessonDaily(userId, courseId, { xp = 0, eventCount = 0, completedCount = 0 } = {}) {
+    const date = todayKey();
+    const now = nowIso();
+    this.db.prepare(`
+      INSERT INTO lesson_daily_activity (user_id, course_id, activity_date, xp, completed_count, event_count, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?)
+      ON CONFLICT(user_id, course_id, activity_date) DO UPDATE SET
+        xp=lesson_daily_activity.xp + excluded.xp,
+        completed_count=lesson_daily_activity.completed_count + excluded.completed_count,
+        event_count=lesson_daily_activity.event_count + excluded.event_count,
+        updated_at=excluded.updated_at
+    `).run(userId, courseId, date, Math.max(0, Math.round(xp || 0)), Math.max(0, Math.round(completedCount || 0)), Math.max(0, Math.round(eventCount || 0)), now);
+  }
+
+  startLesson(userId, courseId = "ccna", lessonId) {
+    const lesson = requireLesson(lessonId);
+    const now = nowIso();
+    const firstStep = lessonStepIds(lesson)[0] || null;
+    const tx = this.db.transaction(() => {
+      const existing = this.ensureLessonProgress(userId, courseId, lesson);
+      const completedSteps = parseJson(existing.completed_steps_json, []);
+      const currentStep = completedSteps.length ? lessonStepIds(lesson).find((id) => !completedSteps.includes(id)) || firstStep : firstStep;
+      this.db.prepare(`
+        UPDATE lesson_progress
+        SET attempt_count=attempt_count + 1,
+            current_step_id=COALESCE(?, current_step_id),
+            status=CASE WHEN status='completed' THEN 'completed' ELSE 'started' END,
+            updated_at=?
+        WHERE user_id=? AND course_id=? AND lesson_id=?
+      `).run(currentStep, now, userId, courseId, lesson.id);
+      this.db.prepare(`
+        INSERT INTO lesson_events (id, user_id, course_id, lesson_id, step_id, event_type, payload_json, earned_xp, created_at)
+        VALUES (?, ?, ?, ?, ?, 'start', '{}', 0, ?)
+      `).run(randomUUID(), userId, courseId, lesson.id, currentStep, now);
+      this.touchLessonDaily(userId, courseId, { eventCount: 1 });
+      return this.db.prepare("SELECT * FROM lesson_progress WHERE user_id=? AND course_id=? AND lesson_id=?").get(userId, courseId, lesson.id);
+    });
+    const row = tx();
+    return {
+      lesson: this.lessonProgressResponse(row, lesson),
+      dashboard: this.lessonSummary(userId, courseId)
+    };
+  }
+
+  lessonEventResponse(row) {
+    return {
+      id: row.id,
+      lessonId: row.lesson_id,
+      stepId: row.step_id,
+      eventType: row.event_type,
+      earnedXp: row.earned_xp || 0,
+      createdAt: row.created_at
+    };
+  }
+
+  recordLessonEvent(userId, courseId = "ccna", lessonId, body = {}) {
+    const lesson = requireLesson(lessonId);
+    const eventType = String(body.eventType || body.type || "checkpoint").trim().slice(0, 40);
+    const allowed = new Set(["checkpoint", "hint", "action", "ping", "topology", "reflection", "lab-progress"]);
+    if (!allowed.has(eventType)) {
+      const err = new Error("Unsupported lesson event type.");
+      err.statusCode = 400;
+      throw err;
+    }
+    const stepIds = lessonStepIds(lesson);
+    const stepId = String(body.stepId || "").trim();
+    if (stepId && !stepIds.includes(stepId)) {
+      const err = new Error("Lesson step not found.");
+      err.statusCode = 400;
+      throw err;
+    }
+    const eventId = sanitizeLessonEventId(body.clientEventId || body.id) || randomUUID();
+    const existingEvent = this.db.prepare("SELECT * FROM lesson_events WHERE id=?").get(eventId);
+    if (existingEvent) {
+      const row = this.db.prepare("SELECT * FROM lesson_progress WHERE user_id=? AND course_id=? AND lesson_id=?").get(userId, courseId, lesson.id) ||
+        this.ensureLessonProgress(userId, courseId, lesson);
+      return {
+        event: this.lessonEventResponse(existingEvent),
+        lesson: this.lessonProgressResponse(row, lesson),
+        dashboard: this.lessonSummary(userId, courseId)
+      };
+    }
+
+    const tx = this.db.transaction(() => {
+      const current = this.ensureLessonProgress(userId, courseId, lesson);
+      const completedSteps = parseJson(current.completed_steps_json, []);
+      let nextCompleted = completedSteps;
+      let earnedXp = 0;
+      if (eventType === "checkpoint" && stepId && !completedSteps.includes(stepId)) {
+        nextCompleted = [...completedSteps, stepId].filter((id) => stepIds.includes(id));
+        const remainingXp = Math.max(0, lessonTotalXp(lesson) - (current.xp || 0));
+        earnedXp = Math.min(lessonStepXp(lesson, stepId), remainingXp);
+      }
+      const nextPercent = Math.max(current.best_percent || 0, lessonPercent(nextCompleted, lesson));
+      const nextCurrentStep = stepIds.find((id) => !nextCompleted.includes(id)) || stepIds[stepIds.length - 1] || null;
+      const now = nowIso();
+      this.db.prepare(`
+        UPDATE lesson_progress
+        SET completed_steps_json=?, current_step_id=?, xp=?, best_percent=?, updated_at=?
+        WHERE user_id=? AND course_id=? AND lesson_id=?
+      `).run(JSON.stringify(nextCompleted), nextCurrentStep, Math.min(lessonTotalXp(lesson), (current.xp || 0) + earnedXp), nextPercent, now, userId, courseId, lesson.id);
+      const payload = sanitizeLessonPayload(body.payload || body);
+      this.db.prepare(`
+        INSERT INTO lesson_events (id, user_id, course_id, lesson_id, step_id, event_type, payload_json, earned_xp, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `).run(eventId, userId, courseId, lesson.id, stepId || null, eventType, JSON.stringify(payload || {}), earnedXp, now);
+      this.touchLessonDaily(userId, courseId, { xp: earnedXp, eventCount: 1 });
+      return {
+        event: this.db.prepare("SELECT * FROM lesson_events WHERE id=?").get(eventId),
+        progress: this.db.prepare("SELECT * FROM lesson_progress WHERE user_id=? AND course_id=? AND lesson_id=?").get(userId, courseId, lesson.id)
+      };
+    });
+    const result = tx();
+    return {
+      event: this.lessonEventResponse(result.event),
+      lesson: this.lessonProgressResponse(result.progress, lesson),
+      dashboard: this.lessonSummary(userId, courseId)
+    };
+  }
+
+  finishLesson(userId, courseId = "ccna", lessonId, body = {}) {
+    const lesson = requireLesson(lessonId);
+    const eventId = sanitizeLessonEventId(body.clientEventId || body.id) || randomUUID();
+    const existingEvent = this.db.prepare("SELECT * FROM lesson_events WHERE id=?").get(eventId);
+    if (existingEvent) {
+      const row = this.db.prepare("SELECT * FROM lesson_progress WHERE user_id=? AND course_id=? AND lesson_id=?").get(userId, courseId, lesson.id) ||
+        this.ensureLessonProgress(userId, courseId, lesson);
+      return {
+        event: this.lessonEventResponse(existingEvent),
+        lesson: this.lessonProgressResponse(row, lesson),
+        dashboard: this.lessonSummary(userId, courseId)
+      };
+    }
+
+    const tx = this.db.transaction(() => {
+      const current = this.ensureLessonProgress(userId, courseId, lesson);
+      const completedSteps = parseJson(current.completed_steps_json, []);
+      const stepIds = lessonStepIds(lesson);
+      const complete = stepIds.length > 0 && stepIds.every((stepId) => completedSteps.includes(stepId));
+      const now = nowIso();
+      const firstCompletion = complete && current.status !== "completed";
+      this.db.prepare(`
+        UPDATE lesson_progress
+        SET status=?, completed_at=CASE WHEN ? THEN COALESCE(completed_at, ?) ELSE completed_at END,
+            best_percent=?, updated_at=?
+        WHERE user_id=? AND course_id=? AND lesson_id=?
+      `).run(complete ? "completed" : "started", firstCompletion ? 1 : 0, now, complete ? 100 : lessonPercent(completedSteps, lesson), now, userId, courseId, lesson.id);
+      this.db.prepare(`
+        INSERT INTO lesson_events (id, user_id, course_id, lesson_id, step_id, event_type, payload_json, earned_xp, created_at)
+        VALUES (?, ?, ?, ?, NULL, 'finish', ?, 0, ?)
+      `).run(eventId, userId, courseId, lesson.id, JSON.stringify(sanitizeLessonPayload(body.payload || body) || {}), now);
+      this.touchLessonDaily(userId, courseId, { eventCount: 1, completedCount: firstCompletion ? 1 : 0 });
+      return {
+        event: this.db.prepare("SELECT * FROM lesson_events WHERE id=?").get(eventId),
+        progress: this.db.prepare("SELECT * FROM lesson_progress WHERE user_id=? AND course_id=? AND lesson_id=?").get(userId, courseId, lesson.id)
+      };
+    });
+    const result = tx();
+    return {
+      event: this.lessonEventResponse(result.event),
+      lesson: this.lessonProgressResponse(result.progress, lesson),
+      dashboard: this.lessonSummary(userId, courseId)
     };
   }
 

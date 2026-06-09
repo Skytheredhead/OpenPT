@@ -6,6 +6,7 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import net from "node:net";
+import { findLesson } from "./lesson-catalog.mjs";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -350,6 +351,138 @@ test("ccna study endpoints require auth and record timed session progress", { ti
   });
 });
 
+test("ccna lesson endpoints require auth, csrf, and server-calculated XP", { timeout: 15_000 }, async () => {
+  await withTestServer({}, async (baseUrl) => {
+    const lesson = findLesson("sem1-m1-3-network-roles");
+    const stepIds = lesson.steps.map((step) => step.id);
+    const stepXp = lesson.steps.reduce((sum, step) => sum + step.xp, 0);
+
+    const anonSummary = await fetch(`${baseUrl}/api/lessons/ccna/summary`);
+    assert.equal(anonSummary.status, 401);
+
+    const session = await registerSession(baseUrl, "lessons@example.com");
+
+    const blockedStart = await fetch(`${baseUrl}/api/lessons/ccna/${lesson.id}/start`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        cookie: session.cookie,
+      },
+      body: JSON.stringify({}),
+    });
+    assert.equal(blockedStart.status, 403);
+
+    const summary = await fetch(`${baseUrl}/api/lessons/ccna/summary`, {
+      headers: { cookie: session.cookie },
+    });
+    assert.equal(summary.status, 200);
+    const summaryBody = await summary.json();
+    assert.equal(summaryBody.dashboard.totalLessons, 13);
+    assert.equal(summaryBody.dashboard.completedLessons, 0);
+
+    const start = await fetch(`${baseUrl}/api/lessons/ccna/${lesson.id}/start`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        cookie: session.cookie,
+        "x-openpt-csrf": session.csrf,
+      },
+      body: JSON.stringify({}),
+    });
+    assert.equal(start.status, 200);
+    const started = await start.json();
+    assert.equal(started.lesson.lessonId, lesson.id);
+    assert.equal(started.lesson.currentStepId, stepIds[0]);
+
+    const firstEventId = "lesson-test-first-event";
+    const firstEvent = await fetch(`${baseUrl}/api/lessons/ccna/${lesson.id}/events`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        cookie: session.cookie,
+        "x-openpt-csrf": session.csrf,
+      },
+      body: JSON.stringify({
+        eventType: "checkpoint",
+        stepId: stepIds[0],
+        clientEventId: firstEventId,
+        earnedXp: 9999,
+        payload: { rawCommand: "enable secret forged", commandKind: "manual" },
+      }),
+    });
+    assert.equal(firstEvent.status, 200);
+    const firstEventBody = await firstEvent.json();
+    assert.equal(firstEventBody.event.earnedXp, lesson.steps[0].xp);
+    assert.equal(firstEventBody.lesson.xp, lesson.steps[0].xp);
+
+    const duplicateEvent = await fetch(`${baseUrl}/api/lessons/ccna/${lesson.id}/events`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        cookie: session.cookie,
+        "x-openpt-csrf": session.csrf,
+      },
+      body: JSON.stringify({
+        eventType: "checkpoint",
+        stepId: stepIds[0],
+        clientEventId: firstEventId,
+        earnedXp: 9999,
+      }),
+    });
+    assert.equal(duplicateEvent.status, 200);
+    const duplicateBody = await duplicateEvent.json();
+    assert.equal(duplicateBody.lesson.xp, lesson.steps[0].xp);
+
+    const earlyFinish = await fetch(`${baseUrl}/api/lessons/ccna/${lesson.id}/finish`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        cookie: session.cookie,
+        "x-openpt-csrf": session.csrf,
+      },
+      body: JSON.stringify({ clientEventId: "lesson-test-early-finish", completed: true, earnedXp: 9999 }),
+    });
+    assert.equal(earlyFinish.status, 200);
+    const earlyFinishBody = await earlyFinish.json();
+    assert.equal(earlyFinishBody.lesson.status, "started");
+
+    for (const stepId of stepIds.slice(1)) {
+      const event = await fetch(`${baseUrl}/api/lessons/ccna/${lesson.id}/events`, {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          cookie: session.cookie,
+          "x-openpt-csrf": session.csrf,
+        },
+        body: JSON.stringify({
+          eventType: "checkpoint",
+          stepId,
+          clientEventId: `lesson-test-${stepId}`,
+          earnedXp: 9999,
+        }),
+      });
+      assert.equal(event.status, 200);
+    }
+
+    const finish = await fetch(`${baseUrl}/api/lessons/ccna/${lesson.id}/finish`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        cookie: session.cookie,
+        "x-openpt-csrf": session.csrf,
+      },
+      body: JSON.stringify({ clientEventId: "lesson-test-final-finish", earnedXp: 9999 }),
+    });
+    assert.equal(finish.status, 200);
+    const finished = await finish.json();
+    assert.equal(finished.lesson.status, "completed");
+    assert.equal(finished.lesson.xp, Math.min(lesson.xp, stepXp));
+    assert.equal(finished.dashboard.completedLessons, 1);
+    assert.equal(finished.dashboard.earnedXp, Math.min(lesson.xp, stepXp));
+    assert.equal(finished.dashboard.currentStreak, 1);
+  });
+});
+
 test("account deletion can be scheduled and cancelled during grace period", { timeout: 15_000 }, async () => {
   await withTestServer({}, async (baseUrl) => {
     const email = "delete-me@example.com";
@@ -402,6 +535,15 @@ test("frontend serves lab and quiz path entrypoints", { timeout: 15_000 }, async
     const labHtml = await lab.text();
     assert.match(labHtml, /<title>OpenPT<\/title>/);
     assert.match(labHtml, /<base href="\/" \/>/);
+
+    const learnRedirect = await fetch(`${baseUrl}/learn`, { redirect: "manual" });
+    assert.equal(learnRedirect.status, 308);
+    assert.equal(learnRedirect.headers.get("location"), "/learn/");
+
+    const learn = await fetch(`${baseUrl}/learn/`);
+    assert.equal(learn.status, 200);
+    const learnHtml = await learn.text();
+    assert.match(learnHtml, /learn\.jsx/);
 
     const quizRedirect = await fetch(`${baseUrl}/quiz`, { redirect: "manual" });
     assert.equal(quizRedirect.status, 308);

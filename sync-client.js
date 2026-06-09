@@ -225,6 +225,27 @@
         body: JSON.stringify({ totalQuestionCount })
       });
     }
+    async lessonSummary() {
+      return request("/api/lessons/ccna/summary");
+    }
+    async startLesson(lessonId) {
+      return request(`/api/lessons/ccna/${encodeURIComponent(lessonId)}/start`, {
+        method: "POST",
+        body: JSON.stringify({})
+      });
+    }
+    async recordLessonEvent(lessonId, event) {
+      return request(`/api/lessons/ccna/${encodeURIComponent(lessonId)}/events`, {
+        method: "POST",
+        body: JSON.stringify(event || {})
+      });
+    }
+    async finishLesson(lessonId, result = {}) {
+      return request(`/api/lessons/ccna/${encodeURIComponent(lessonId)}/finish`, {
+        method: "POST",
+        body: JSON.stringify(result || {})
+      });
+    }
     async register(email, password, proof = {}) {
       return request("/api/auth/register", { method: "POST", body: JSON.stringify({ email, password, clientLabel: this.clientLabel, ...proof }) });
     }

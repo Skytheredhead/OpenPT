@@ -209,6 +209,37 @@ test("ccna study mode is login gated and records a timed answer", async ({ page,
   expect(errors, "browser console/page errors").toEqual([]);
 });
 
+test("ccna guided lesson mode is login gated and starts a simulator mission", async ({ page, request }) => {
+  const errors = collectPageErrors(page);
+  await page.addInitScript(() => {
+    localStorage.clear();
+    localStorage.setItem("openpt:viewMode", "app");
+  });
+
+  await page.goto("/learn/");
+  await expect(page.getByText("Sign in to start guided CCNA missions.")).toBeVisible();
+
+  const email = `lesson-browser-${Date.now()}@example.com`;
+  const password = "password123";
+  const register = await request.post("/api/auth/register", { data: { email, password } });
+  expect(register.status()).toBe(202);
+  const registered = await register.json();
+  const verify = await request.post("/api/auth/verify-email", { data: { token: registered.verification.token } });
+  expect(verify.status()).toBe(200);
+
+  await page.getByRole("button", { name: /Sign in to learn/i }).click();
+  await page.getByLabel("Email").fill(email);
+  await page.getByLabel("Password").fill(password);
+  await page.getByRole("button", { name: /^Sign in$/ }).last().click();
+
+  await expect(page.getByText("Map the Network Roles")).toBeVisible();
+  await page.getByRole("button", { name: /Start mission/i }).first().click();
+  await expect(page.locator(".learn-coach")).toBeVisible();
+  await expect(page.getByText(/Before touching the topology/)).toBeVisible();
+  await expect(page.locator(".node-label", { hasText: "PC1" })).toBeVisible();
+  expect(errors, "browser console/page errors").toEqual([]);
+});
+
 test("jeopardy board and scoring flow work", async ({ page }) => {
   const errors = collectPageErrors(page);
   await page.addInitScript(() => {

@@ -970,6 +970,392 @@ function ToastStack({ toasts }) {
   );
 }
 
+const WAGER_OPTIONS = [10, 25, 50, 100];
+const CCNA_SYMBOLS = ["SUBNET", "ACL", "OSPF", "VLAN", "NAT", "DHCP", "STP", "DNS"];
+const CARD_DECK = [
+  { label: "/30", value: 2 },
+  { label: "/29", value: 3 },
+  { label: "/28", value: 4 },
+  { label: "/27", value: 5 },
+  { label: "/26", value: 6 },
+  { label: "/25", value: 7 },
+  { label: "AD 90", value: 8 },
+  { label: "AD 110", value: 9 },
+  { label: "ACE", value: 10 },
+  { label: "NAT", value: 10 },
+  { label: "OSPF", value: 11 },
+];
+
+function randomCasinoItem(items) {
+  return items[Math.floor(Math.random() * items.length)];
+}
+
+function randomCard() {
+  return randomCasinoItem(CARD_DECK);
+}
+
+function handTotal(cards) {
+  return (cards || []).reduce((sum, card) => sum + Number(card.value || 0), 0);
+}
+
+function quickScore(won, payout, wager) {
+  if (!won) return 48 + Math.floor(Math.random() * 18);
+  return Math.min(100, 70 + Math.floor((payout / Math.max(1, wager)) * 9) + Math.floor(Math.random() * 12));
+}
+
+function resultPayload({ game, idea, ideaIndex, wager, payout, label, detail }) {
+  const won = payout > wager;
+  return {
+    game,
+    idea,
+    ideaIndex,
+    wager,
+    payout,
+    won,
+    xp: won ? 42 + Math.floor(payout / 12) : 18,
+    score: quickScore(won, payout, wager),
+    label,
+    detail,
+  };
+}
+
+function GameCardStrip({ cards }) {
+  return (
+    <div className="quickplay-cards">
+      {cards.map((card, index) => (
+        <div className="quickplay-card" key={`${card.label}-${index}`}>
+          <span>{card.label}</span>
+          <strong>{card.value}</strong>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function QuickplayView({ game, profile, onBack, onRoundComplete, showToast }) {
+  const [wager, setWager] = useStateCasino(25);
+  const [ideaIndex, setIdeaIndex] = useStateCasino(0);
+  const [round, setRound] = useStateCasino({ phase: "idle" });
+  const [choice, setChoice] = useStateCasino(game.topic);
+  const [target, setTarget] = useStateCasino(50);
+  const idea = game.ideas[ideaIndex] || game.ideas[0];
+  const balance = Number(profile.balance || 0);
+  const canPlay = balance >= wager;
+
+  useEffectCasino(() => {
+    setRound({ phase: "idle" });
+    setIdeaIndex(0);
+    setChoice(game.topic);
+  }, [game.id]);
+
+  function settle(payout, label, detail = "") {
+    const payload = resultPayload({ game, idea, ideaIndex, wager, payout, label, detail });
+    setRound((current) => ({ ...current, phase: "done", result: payload }));
+    onRoundComplete(payload);
+  }
+
+  function requireChips() {
+    if (canPlay) return true;
+    showToast("Not enough chips.");
+    return false;
+  }
+
+  function startBlackjack() {
+    if (!requireChips()) return;
+    setRound({ phase: "playing", type: "blackjack", hand: [randomCard(), randomCard()], dealer: 16 + Math.floor(Math.random() * 7) });
+  }
+
+  function hitBlackjack() {
+    const hand = [...(round.hand || []), randomCard()];
+    if (handTotal(hand) > 21) {
+      const payload = resultPayload({ game, idea, ideaIndex, wager, payout: 0, label: "Busted", detail: "Subnet total exceeded 21." });
+      setRound({ ...round, hand, phase: "done", result: payload });
+      onRoundComplete(payload);
+      return;
+    }
+    setRound({ ...round, hand });
+  }
+
+  function standBlackjack() {
+    const total = handTotal(round.hand || []);
+    const dealer = Number(round.dealer || 18);
+    const won = total <= 21 && (dealer > 21 || total >= dealer);
+    settle(won ? Math.round(wager * (total === 21 ? 2.5 : 1.75)) : 0, won ? `Held ${total} vs ${dealer}` : `Dealer ${dealer}`);
+  }
+
+  function spinRoulette() {
+    if (!requireChips()) return;
+    const pockets = [
+      { label: "Longest prefix", topic: "Routing choices" },
+      { label: "Permit", topic: "ACLs" },
+      { label: "Native VLAN", topic: "Switching" },
+      { label: "Inside global", topic: "Services" },
+      { label: "Broadcast", topic: "Subnet math" },
+      { label: "Root bridge", topic: "Switching" },
+    ];
+    const pocket = randomCasinoItem(pockets);
+    const won = pocket.topic === choice;
+    setRound({ phase: "done", type: "roulette", pocket, result: { won } });
+    settle(won ? wager * 3 : 0, pocket.label, `Bet: ${choice}`);
+  }
+
+  function spinSlots(grid = false) {
+    if (!requireChips()) return;
+    const count = grid ? 9 : 3;
+    const symbols = Array.from({ length: count }, () => randomCasinoItem(CCNA_SYMBOLS));
+    const counts = symbols.reduce((acc, symbol) => ({ ...acc, [symbol]: (acc[symbol] || 0) + 1 }), {});
+    const best = Math.max(...Object.values(counts));
+    const payout = best >= (grid ? 4 : 3) ? wager * (grid ? 5 : 4) : best >= (grid ? 3 : 2) ? Math.round(wager * 1.6) : 0;
+    setRound({ phase: "done", type: grid ? "grid" : "slots", symbols });
+    settle(payout, payout ? `${best} matching ${Object.keys(counts).find((symbol) => counts[symbol] === best)}` : "No match");
+  }
+
+  function rollDice() {
+    if (!requireChips()) return;
+    const roll = Math.floor(Math.random() * 100) + 1;
+    const won = roll >= target;
+    setRound({ phase: "done", type: "dice", roll });
+    settle(won ? Math.round(wager * (100 / Math.max(2, 101 - target))) : 0, `Rolled ${roll}`, `Target ${target}+`);
+  }
+
+  function startMines() {
+    if (!requireChips()) return;
+    const mineCount = 4;
+    const mines = new Set();
+    while (mines.size < mineCount) mines.add(Math.floor(Math.random() * 25));
+    setRound({ phase: "playing", type: "mines", mines: [...mines], revealed: [] });
+  }
+
+  function revealMine(index) {
+    if (round.mines.includes(index)) {
+      const payload = resultPayload({ game, idea, ideaIndex, wager, payout: 0, label: "Misconfig hit", detail: "You revealed the bad config." });
+      setRound({ ...round, phase: "done", revealed: [...round.revealed, index], result: payload });
+      onRoundComplete(payload);
+      return;
+    }
+    const revealed = [...round.revealed, index];
+    setRound({ ...round, revealed });
+    if (revealed.length >= 5) settle(Math.round(wager * 2.4), `${revealed.length} safe configs`);
+  }
+
+  function startKeno() {
+    if (!requireChips()) return;
+    setRound({ phase: "picking", type: "keno", picks: [], drawn: [] });
+  }
+
+  function toggleKeno(number) {
+    const picks = round.picks || [];
+    if (round.phase !== "picking") return;
+    const next = picks.includes(number) ? picks.filter((item) => item !== number) : picks.length < 6 ? [...picks, number] : picks;
+    setRound({ ...round, picks: next });
+  }
+
+  function drawKeno() {
+    const drawn = [];
+    while (drawn.length < 8) {
+      const value = Math.floor(Math.random() * 24) + 1;
+      if (!drawn.includes(value)) drawn.push(value);
+    }
+    const hits = (round.picks || []).filter((pick) => drawn.includes(pick)).length;
+    setRound({ ...round, phase: "done", drawn });
+    settle(hits >= 3 ? wager * (hits + 1) : 0, `${hits} hits`);
+  }
+
+  function stepGame() {
+    if (!requireChips()) return;
+    const steps = Math.floor(Math.random() * 8) + 1;
+    const won = steps >= 5;
+    setRound({ phase: "done", type: "steps", steps });
+    settle(won ? Math.round(wager * (1.2 + steps / 5)) : 0, won ? `${steps} clean hops` : `${steps} hops then failed`);
+  }
+
+  function crashRun() {
+    if (!requireChips()) return;
+    const crashAt = Number((1 + Math.random() * 4.5).toFixed(2));
+    const cashoutAt = Number((1.2 + Math.random() * 3.3).toFixed(2));
+    const won = cashoutAt < crashAt;
+    setRound({ phase: "done", type: "crash", crashAt, cashoutAt });
+    settle(won ? Math.round(wager * cashoutAt) : 0, won ? `${cashoutAt}x cashout` : `crashed at ${crashAt}x`);
+  }
+
+  const isCardGame = ["blackjack", "holdem"].includes(game.id);
+  const isRoulette = game.id === "roulette";
+  const isSlots = ["slots", "gridslots"].includes(game.id);
+  const isDice = ["dice", "limbo"].includes(game.id);
+  const isMines = game.id === "mines";
+  const isKeno = game.id === "keno";
+  const isCrash = game.id === "crash";
+  const isStepGame = ["chicken", "path", "plinko"].includes(game.id);
+
+  return (
+    <section className="quickplay-screen">
+      <div className="quickplay-head">
+        <button className="casino-button" type="button" onClick={onBack}>Back to lobby</button>
+        <div>
+          <h1>{game.name}</h1>
+          <p>{idea.title}</p>
+        </div>
+        <div className="quickplay-balance">
+          <span>chips</span>
+          <strong>{formatNumber(profile.balance)}</strong>
+        </div>
+      </div>
+
+      <div className="quickplay-layout">
+        <aside className="quickplay-side casino-panel">
+          <div className="field">
+            <label>Wager</label>
+            <div className="wager-grid">
+              {WAGER_OPTIONS.map((value) => (
+                <button key={value} type="button" className={`casino-button ${wager === value ? "primary" : ""}`} onClick={() => setWager(value)}>
+                  {value}
+                </button>
+              ))}
+            </div>
+          </div>
+          <div className="field">
+            <label>CCNA twist</label>
+            <select value={ideaIndex} onChange={(event) => setIdeaIndex(Number(event.target.value))}>
+              {game.ideas.map((item, index) => <option key={item.title} value={index}>{item.title}</option>)}
+            </select>
+          </div>
+          <div className="quickplay-note">{idea.turnInto}</div>
+        </aside>
+
+        <div className="quickplay-table casino-panel">
+          {isCardGame ? (
+            <>
+              <div className="quickplay-table-top">
+                <h2>{game.id === "holdem" ? "Troubleshooting hand" : "Subnet hand"}</h2>
+                <span>{round.phase === "playing" ? `Dealer ${round.dealer}` : "Target 21"}</span>
+              </div>
+              <GameCardStrip cards={round.hand || []} />
+              <div className="quickplay-total">{handTotal(round.hand || []) || "--"}</div>
+              <div className="quickplay-actions">
+                {round.phase === "playing" ? (
+                  <>
+                    <button className="casino-button primary" type="button" onClick={hitBlackjack}>Hit</button>
+                    <button className="casino-button" type="button" onClick={standBlackjack}>Stand</button>
+                  </>
+                ) : (
+                  <button className="casino-button primary" type="button" onClick={startBlackjack}>Join hand</button>
+                )}
+              </div>
+            </>
+          ) : null}
+
+          {isRoulette ? (
+            <>
+              <div className="quickplay-wheel">{round.pocket?.label || "SPIN"}</div>
+              <div className="field">
+                <label>Bet</label>
+                <select value={choice} onChange={(event) => setChoice(event.target.value)}>
+                  {[...new Set(CASINO_GAMES.map((item) => item.topic))].map((topic) => <option key={topic}>{topic}</option>)}
+                </select>
+              </div>
+              <button className="casino-button primary" type="button" onClick={spinRoulette}>Spin</button>
+            </>
+          ) : null}
+
+          {isSlots ? (
+            <>
+              <div className={game.id === "gridslots" ? "slot-grid grid-mode" : "slot-grid"}>
+                {(round.symbols || ["?", "?", "?", ...(game.id === "gridslots" ? ["?", "?", "?", "?", "?", "?"] : [])]).map((symbol, index) => (
+                  <div className="slot-cell" key={`${symbol}-${index}`}>{symbol}</div>
+                ))}
+              </div>
+              <button className="casino-button primary" type="button" onClick={() => spinSlots(game.id === "gridslots")}>Spin</button>
+            </>
+          ) : null}
+
+          {isDice ? (
+            <>
+              <div className="quickplay-meter">
+                <span style={{ width: `${target}%` }} />
+              </div>
+              <div className="field">
+                <label>Target {target}+</label>
+                <input type="range" min="5" max="95" value={target} onChange={(event) => setTarget(Number(event.target.value))} />
+              </div>
+              <button className="casino-button primary" type="button" onClick={rollDice}>Roll</button>
+            </>
+          ) : null}
+
+          {isMines ? (
+            <>
+              <div className="tile-grid">
+                {Array.from({ length: 25 }, (_, index) => {
+                  const revealed = round.revealed?.includes(index);
+                  const bad = revealed && round.mines?.includes(index);
+                  return (
+                    <button
+                      key={index}
+                      type="button"
+                      disabled={round.phase !== "playing" || revealed}
+                      className={`tile-cell ${revealed ? bad ? "bad" : "good" : ""}`}
+                      onClick={() => revealMine(index)}
+                    >
+                      {revealed ? bad ? "!" : "OK" : ""}
+                    </button>
+                  );
+                })}
+              </div>
+              <button className="casino-button primary" type="button" onClick={startMines}>Start grid</button>
+            </>
+          ) : null}
+
+          {isKeno ? (
+            <>
+              <div className="keno-grid">
+                {Array.from({ length: 24 }, (_, index) => {
+                  const number = index + 1;
+                  const picked = round.picks?.includes(number);
+                  const drawn = round.drawn?.includes(number);
+                  return (
+                    <button key={number} type="button" className={`keno-cell ${picked ? "picked" : ""} ${drawn ? "drawn" : ""}`} onClick={() => toggleKeno(number)}>
+                      {number}
+                    </button>
+                  );
+                })}
+              </div>
+              <div className="quickplay-actions">
+                <button className="casino-button" type="button" onClick={startKeno}>Pick</button>
+                <button className="casino-button primary" type="button" disabled={round.phase !== "picking" || !(round.picks || []).length} onClick={drawKeno}>Draw</button>
+              </div>
+            </>
+          ) : null}
+
+          {isStepGame ? (
+            <>
+              <div className="step-lanes">
+                {Array.from({ length: 8 }, (_, index) => <span key={index} className={round.steps > index ? "active" : ""}>{index + 1}</span>)}
+              </div>
+              <button className="casino-button primary" type="button" onClick={stepGame}>Start run</button>
+            </>
+          ) : null}
+
+          {isCrash ? (
+            <>
+              <div className="crash-chart">
+                <span style={{ width: `${Math.min(100, (round.cashoutAt || 1) * 20)}%` }} />
+                <strong>{round.cashoutAt ? `${round.cashoutAt}x` : "1.00x"}</strong>
+              </div>
+              <button className="casino-button primary" type="button" onClick={crashRun}>Launch</button>
+            </>
+          ) : null}
+
+          {round.result ? (
+            <div className={`round-result ${round.result.won ? "" : "miss"}`}>
+              <strong>{round.result.won ? "Win" : "Loss"} - {round.result.label}</strong>
+              <span>{round.result.payout ? `+${formatNumber(round.result.payout)} chips` : "0 chips"}</span>
+            </div>
+          ) : null}
+        </div>
+      </div>
+    </section>
+  );
+}
+
 function CCNACasinoPage() {
   const syncClientRef = useRefCasino(null);
   const cloudRef = useRefCasino({ projectId: "", version: 0, ready: false });
@@ -980,14 +1366,14 @@ function CCNACasinoPage() {
   const [accountInitial, setAccountInitial] = useStateCasino(null);
   const [cloudStatus, setCloudStatus] = useStateCasino("Guest progress saves in this browser.");
   const [selectedGameId, setSelectedGameId] = useStateCasino(profile.selectedGameId || "blackjack");
-  const [selectedIdeaIndex, setSelectedIdeaIndex] = useStateCasino(profile.selectedIdeaIndex || 0);
-  const [stake, setStake] = useStateCasino(50);
-  const [lastResult, setLastResult] = useStateCasino(null);
+  const [activeGameId, setActiveGameId] = useStateCasino(() => {
+    const match = /^#\/quickplay\/([^/]+)/.exec(window.location.hash || "");
+    return match ? match[1] : "";
+  });
   const [toasts, setToasts] = useStateCasino([]);
 
   const selectedGame = useMemoCasino(() => CASINO_GAMES.find((game) => game.id === selectedGameId) || CASINO_GAMES[0], [selectedGameId]);
-  const selectedIdea = selectedGame.ideas[selectedIdeaIndex] || selectedGame.ideas[0];
-  const badges = useMemoCasino(() => topicMastery(profile), [profile]);
+  const activeGame = useMemoCasino(() => CASINO_GAMES.find((game) => game.id === activeGameId) || null, [activeGameId]);
   const completedIdeas = Object.keys(profile.ideaCompletions || {}).length;
   const syncClient = syncClientRef.current;
 
@@ -1060,7 +1446,6 @@ function CCNACasinoPage() {
         setProfile(chosen);
         persistLocalProfile(chosen, activeUser);
         setSelectedGameId(chosen.selectedGameId || "blackjack");
-        setSelectedIdeaIndex(chosen.selectedIdeaIndex || 0);
         setCloudStatus(`Cloud save loaded ${formatSessionTime(loaded.project.updatedAt)}.`);
         if (chosen === localProfile) scheduleCloudSave(chosen);
         return;
@@ -1108,9 +1493,24 @@ function CCNACasinoPage() {
     updateProfile((current) => ({
       ...current,
       selectedGameId,
-      selectedIdeaIndex,
     }), { cloud: false });
-  }, [selectedGameId, selectedIdeaIndex]);
+  }, [selectedGameId]);
+
+  useEffectCasino(() => {
+    const syncHash = () => {
+      const match = /^#\/quickplay\/([^/]+)/.exec(window.location.hash || "");
+      const nextGameId = match ? match[1] : "";
+      if (nextGameId && CASINO_GAMES.some((game) => game.id === nextGameId)) {
+        setSelectedGameId(nextGameId);
+        setActiveGameId(nextGameId);
+        return;
+      }
+      setActiveGameId("");
+    };
+    syncHash();
+    window.addEventListener("hashchange", syncHash);
+    return () => window.removeEventListener("hashchange", syncHash);
+  }, []);
 
   const signOut = async () => {
     if (syncClientRef.current) {
@@ -1122,7 +1522,6 @@ function CCNACasinoPage() {
     const guest = loadLocalProfile(null);
     setProfile(guest);
     setSelectedGameId(guest.selectedGameId || "blackjack");
-    setSelectedIdeaIndex(guest.selectedIdeaIndex || 0);
     setCloudStatus("Signed out. Guest progress saves in this browser.");
     setAccountOpen(false);
     showToast("Signed out.");
@@ -1133,7 +1532,6 @@ function CCNACasinoPage() {
     const localProfile = loadLocalProfile(nextUser);
     setProfile(localProfile);
     setSelectedGameId(localProfile.selectedGameId || "blackjack");
-    setSelectedIdeaIndex(localProfile.selectedIdeaIndex || 0);
     ensureCloudSave(nextUser, localProfile).catch(() => {});
     setAccountOpen(false);
   };
@@ -1146,37 +1544,37 @@ function CCNACasinoPage() {
     showToast("Account deletion scheduled.");
   };
 
-  const playRound = () => {
-    const safeStake = Math.max(10, Math.min(250, Math.round(Number(stake || 0))));
-    if (profile.balance < safeStake) {
-      showToast("Not enough study chips for that drill. Lower the stake or reset guest chips.");
-      return;
-    }
-    const outcome = chooseOutcome(profile, selectedIdea, safeStake);
-    const key = completionKey(selectedGame.id, selectedIdeaIndex);
+  const handleRoundComplete = useCallbackCasino((result) => {
+    const game = result.game;
+    const idea = result.idea;
+    const ideaIndex = result.ideaIndex || 0;
+    const key = completionKey(game.id, ideaIndex);
+    const wager = Number(result.wager || 0);
+    const payout = Number(result.payout || 0);
+    const xp = Number(result.xp || 0);
     const historyEntry = {
-      id: `${Date.now()}-${selectedGame.id}`,
-      gameId: selectedGame.id,
-      gameName: selectedGame.name,
-      title: selectedIdea.title,
-      topic: selectedIdea.topic,
-      won: outcome.won,
-      score: outcome.score,
-      reward: outcome.reward,
-      xp: outcome.xp,
+      id: `${Date.now()}-${game.id}`,
+      gameId: game.id,
+      gameName: game.name,
+      title: idea?.title || game.name,
+      topic: idea?.topic || game.topic,
+      won: !!result.won,
+      score: result.score || 0,
+      reward: payout,
+      xp,
       playedAt: nowIsoCasino(),
     };
     updateProfile((current) => {
-      const balance = Math.max(0, current.balance - safeStake + outcome.reward);
-      const streak = outcome.won ? current.streak + 1 : 0;
+      const streak = result.won ? current.streak + 1 : 0;
       return {
         ...current,
-        balance,
-        xp: current.xp + outcome.xp,
+        balance: Math.max(0, current.balance - wager + payout),
+        xp: current.xp + xp,
         rounds: current.rounds + 1,
-        wins: current.wins + (outcome.won ? 1 : 0),
+        wins: current.wins + (result.won ? 1 : 0),
         streak,
         bestStreak: Math.max(current.bestStreak || 0, streak),
+        selectedGameId: game.id,
         ideaCompletions: {
           ...(current.ideaCompletions || {}),
           [key]: ((current.ideaCompletions || {})[key] || 0) + 1,
@@ -1184,7 +1582,17 @@ function CCNACasinoPage() {
         history: [historyEntry, ...(current.history || [])].slice(0, 18),
       };
     });
-    setLastResult({ ...outcome, entry: historyEntry });
+  }, [updateProfile]);
+
+  const openGame = (gameId) => {
+    setSelectedGameId(gameId);
+    setActiveGameId(gameId);
+    window.location.hash = `/quickplay/${gameId}`;
+  };
+
+  const backToLobby = () => {
+    setActiveGameId("");
+    window.history.pushState("", document.title, `${window.location.pathname}${window.location.search}`);
   };
 
   const resetGuestChips = () => {
@@ -1230,143 +1638,80 @@ function CCNACasinoPage() {
         </div>
       </header>
 
-      <div className="casino-shell">
-        <section className="casino-hero">
-          <div className="casino-hero-main">
-            <div className="casino-hero-content">
-              <h1>CCNA Casino</h1>
-              <div className="casino-hero-actions">
-                <a className="casino-button primary" href="#games">Pick a game</a>
-                <button className="casino-button" type="button" onClick={resetGuestChips}>Top up study chips</button>
-              </div>
-            </div>
-          </div>
-
-          <aside className="casino-profile-panel casino-panel" aria-label="CCNA Casino account profile">
-            <div className="profile-head">
-              <div className="profile-avatar">{profile.displayName.slice(0, 2).toUpperCase()}</div>
-              <div>
-                <h2>{profile.displayName}</h2>
-              </div>
-            </div>
-            <div className="profile-balance">
-              <div>
-                <span>Study chips</span>
-                <strong>{formatNumber(profile.balance)}</strong>
-              </div>
-              <code>LVL {levelForXp(profile.xp)}</code>
-            </div>
-            <div className="profile-grid">
-              <div className="profile-metric"><span className="metric-label">XP</span><strong>{formatNumber(profile.xp)}</strong></div>
-              <div className="profile-metric"><span className="metric-label">Win rate</span><strong>{winRate(profile)}%</strong></div>
-              <div className="profile-metric"><span className="metric-label">Streak</span><strong>{profile.streak}</strong></div>
-            </div>
-            <div className="sync-status">
-              <span>{user ? "Cloud save" : "Local save"}</span>
-            </div>
-          </aside>
-        </section>
-
-        <section className="casino-section" id="games">
-          <div className="section-head">
-            <div>
-              <h2>Game Lobby</h2>
-            </div>
-            <span className="badge active">{completedIdeas} ideas played</span>
-          </div>
-          <div className="game-grid">
-            {CASINO_GAMES.map((game, index) => (
-              <button
-                key={game.id}
-                type="button"
-                className={`game-card ${game.id === selectedGame.id ? "active" : ""}`}
-                onClick={() => {
-                  setSelectedGameId(game.id);
-                  setSelectedIdeaIndex(0);
-                  document.getElementById("selected-game")?.scrollIntoView({ behavior: "smooth", block: "start" });
-                }}
-              >
-                <div className="game-card-top">
-                  <span className="game-icon">{game.short}</span>
-                  <span className="game-key">{String(index + 1).padStart(2, "0")}</span>
+      {activeGame ? (
+        <div className="casino-shell game-shell">
+          <QuickplayView
+            game={activeGame}
+            profile={profile}
+            onBack={backToLobby}
+            onRoundComplete={handleRoundComplete}
+            showToast={showToast}
+          />
+        </div>
+      ) : (
+        <div className="casino-shell">
+          <section className="casino-hero">
+            <div className="casino-hero-main">
+              <div className="casino-hero-content">
+                <h1>CCNA Casino</h1>
+                <div className="casino-hero-actions">
+                  <a className="casino-button primary" href="#games">Pick a game</a>
+                  <button className="casino-button" type="button" onClick={resetGuestChips}>Top up study chips</button>
                 </div>
-                <h3>{game.name}</h3>
-              </button>
-            ))}
-          </div>
-        </section>
+              </div>
+            </div>
 
-        <section className="casino-section detail-grid" id="selected-game">
-          <div className="casino-panel">
-            <div className="selected-game-head">
-              <div className="selected-game-title">
-                <span className="game-icon">{selectedGame.short}</span>
+            <aside className="casino-profile-panel casino-panel" aria-label="CCNA Casino account profile">
+              <div className="profile-head">
+                <div className="profile-avatar">{profile.displayName.slice(0, 2).toUpperCase()}</div>
                 <div>
-                  <h2>{selectedGame.name}</h2>
+                  <h2>{profile.displayName}</h2>
                 </div>
               </div>
-              <span className="badge active">{selectedGame.topic}</span>
+              <div className="profile-balance">
+                <div>
+                  <span>Study chips</span>
+                  <strong>{formatNumber(profile.balance)}</strong>
+                </div>
+                <code>LVL {levelForXp(profile.xp)}</code>
+              </div>
+              <div className="profile-grid">
+                <div className="profile-metric"><span className="metric-label">XP</span><strong>{formatNumber(profile.xp)}</strong></div>
+                <div className="profile-metric"><span className="metric-label">Win rate</span><strong>{winRate(profile)}%</strong></div>
+                <div className="profile-metric"><span className="metric-label">Streak</span><strong>{profile.streak}</strong></div>
+              </div>
+              <div className="sync-status">
+                <span>{user ? "Cloud save" : "Local save"}</span>
+              </div>
+            </aside>
+          </section>
+
+          <section className="casino-section" id="games">
+            <div className="section-head">
+              <div>
+                <h2>Game Lobby</h2>
+              </div>
+              <span className="badge active">{completedIdeas} ideas played</span>
             </div>
-            <div className="idea-list">
-              {selectedGame.ideas.map((idea, index) => (
+            <div className="game-grid">
+              {CASINO_GAMES.map((game, index) => (
                 <button
-                  key={idea.title}
+                  key={game.id}
                   type="button"
-                  className={`idea-row ${index === selectedIdeaIndex ? "active" : ""}`}
-                  onClick={() => setSelectedIdeaIndex(index)}
+                  className={`game-card ${game.id === selectedGame.id ? "active" : ""}`}
+                  onClick={() => openGame(game.id)}
                 >
-                  <span className="idea-number">{index + 1}</span>
-                  <span>
-                    <h3>{idea.title}</h3>
-                  </span>
-                  <span className="idea-topic">{idea.topic}</span>
+                  <div className="game-card-top">
+                    <span className="game-icon">{game.short}</span>
+                    <span className="game-key">{String(index + 1).padStart(2, "0")}</span>
+                  </div>
+                  <h3>{game.name}</h3>
                 </button>
               ))}
             </div>
-          </div>
-
-          <aside className="round-card" aria-label="Selected CCNA Casino practice round">
-            <div>
-              <h2>Round</h2>
-            </div>
-            <div>
-              <h3>{selectedIdea.title}</h3>
-              <div className="round-prompt">{selectedIdea.turnInto}</div>
-            </div>
-            <div className="field">
-              <label>Study stake</label>
-              <select value={stake} onChange={(event) => setStake(Number(event.target.value))}>
-                <option value="25">25 chips - warm-up</option>
-                <option value="50">50 chips - normal</option>
-                <option value="100">100 chips - exam pace</option>
-                <option value="150">150 chips - timed lab</option>
-              </select>
-            </div>
-            <button className="casino-button primary" type="button" onClick={playRound}>Run round</button>
-            {lastResult ? (
-              <div className={`round-result ${lastResult.won ? "" : "miss"}`}>
-                <strong>{lastResult.won ? "Cleared" : "Review"} - score {lastResult.score}</strong>
-                <span>+{formatNumber(lastResult.reward)} chips, +{formatNumber(lastResult.xp)} XP</span>
-              </div>
-            ) : null}
-            <div>
-              <h3>Recent rounds</h3>
-              <div className="history-list">
-                {!profile.history.length ? <div className="message">No rounds yet.</div> : null}
-                {profile.history.slice(0, 4).map((entry) => (
-                  <div className="history-item" key={entry.id}>
-                    <div>
-                      <strong>{entry.title}</strong>
-                      <span>{entry.gameName} - {entry.topic} - score {entry.score}</span>
-                    </div>
-                    <code>{entry.won ? "+" : ""}{formatNumber(entry.reward)}</code>
-                  </div>
-                ))}
-              </div>
-            </div>
-          </aside>
-        </section>
-      </div>
+          </section>
+        </div>
+      )}
 
       {accountOpen ? (
         <AccountDialog
