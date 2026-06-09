@@ -1622,6 +1622,13 @@
   width: 100%;
   max-width: 760px;
 }
+.q-main-card,
+.q-exhibit-card {
+  min-width: 0;
+}
+.qcard.has-side-exhibit .q-exhibit-card {
+  margin-top: 14px;
+}
 @keyframes qcard-in {
   from { opacity: 0; transform: translateY(28px) scale(.97); filter: blur(8px); }
   to   { opacity: 1; transform: translateY(0)    scale(1);   filter: blur(0); }
@@ -1669,6 +1676,44 @@
   margin: 0 0 26px;
   line-height: 1.35;
   text-wrap: pretty;
+}
+
+@media (min-width: 1120px) {
+  .qcard.has-side-exhibit {
+    max-width: min(1180px, calc(100vw - 72px));
+    display: grid;
+    grid-template-columns: minmax(500px, .95fr) minmax(420px, 1.05fr);
+    gap: 18px;
+    align-items: start;
+  }
+  .qcard.has-side-exhibit .q-main-card,
+  .qcard.has-side-exhibit .q-exhibit-card {
+    display: block;
+    background: var(--bg-1);
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    padding: 22px;
+    box-shadow:
+      0 18px 48px rgba(0,0,0,.22),
+      inset 0 1px 0 rgba(255,255,255,.03);
+  }
+  .qcard.has-side-exhibit .q-exhibit-card {
+    max-height: calc(100vh - 170px);
+    margin-top: 0;
+    overflow: auto;
+  }
+  .qcard.has-side-exhibit .q-exhibit-stack {
+    margin: 0;
+    gap: 16px;
+  }
+  .qcard.has-side-exhibit .qcode-exhibit {
+    font-size: 14px;
+    line-height: 1.65;
+    padding: 18px 20px;
+  }
+  .qcard.has-side-exhibit .qtopology-exhibit {
+    height: min(52vh, 480px);
+  }
 }
 
 .run-loading {

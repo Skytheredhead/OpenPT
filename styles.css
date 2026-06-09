@@ -1,4 +1,15 @@
 /* ── Palette (device list) ─────────────────────────────────── */
+input[type="number"] {
+  appearance: textfield;
+  -moz-appearance: textfield;
+}
+
+input[type="number"]::-webkit-outer-spin-button,
+input[type="number"]::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+
 .palette-section { padding: 4px 8px 8px; }
 .palette-section-title {
   font-size: 10px; letter-spacing: 0.08em; text-transform: uppercase;
@@ -1863,13 +1874,14 @@ body.is-resizing-layout .apps-sidebar-resizer::before {
 }
 .starter-message {
   width: calc(100vw - 48px);
-  max-width: 520px;
+  max-width: 720px;
   color: var(--fg-2);
   font-size: 13px;
   line-height: 1.5;
   text-align: center;
   text-wrap: balance;
-  display: flex;
+  display: grid;
+  grid-template-columns: repeat(3, minmax(132px, 1fr));
   justify-content: center;
   gap: 8px;
   flex-wrap: wrap;
@@ -1901,6 +1913,12 @@ body.is-resizing-layout .apps-sidebar-resizer::before {
   outline: 2px solid var(--accent-dim);
   outline-offset: 4px;
   border-radius: 3px;
+}
+
+@media (max-width: 620px) {
+  .starter-message {
+    grid-template-columns: repeat(2, minmax(128px, 1fr));
+  }
 }
 .marquee {
   position: absolute;
@@ -5099,6 +5117,176 @@ body.is-resizing-layout .server-module-resizer::before {
   word-break: break-word;
 }
 
+.jeopardy-match {
+  position: relative;
+  display: grid;
+  grid-template-columns: minmax(180px, .9fr) minmax(260px, 1.15fr);
+  gap: clamp(22px, 5vw, 54px);
+  margin-top: 4px;
+}
+
+.jeopardy-match-lines {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+  overflow: visible;
+  z-index: 0;
+}
+
+.jeopardy-match-lines line {
+  stroke: var(--jeopardy-gold);
+  stroke-width: 3;
+  stroke-linecap: round;
+  filter: drop-shadow(0 0 8px color-mix(in oklab, var(--jeopardy-gold) 30%, transparent));
+}
+
+.jeopardy-match-lines line.correct {
+  stroke: var(--ok);
+  filter: drop-shadow(0 0 8px color-mix(in oklab, var(--ok) 30%, transparent));
+}
+
+.jeopardy-match-lines line.incorrect {
+  stroke: var(--err);
+  filter: drop-shadow(0 0 8px color-mix(in oklab, var(--err) 30%, transparent));
+}
+
+.jeopardy-match-column {
+  position: relative;
+  z-index: 1;
+  display: grid;
+  align-content: start;
+  gap: 9px;
+  min-width: 0;
+}
+
+.jeopardy-match-card {
+  appearance: none;
+  width: 100%;
+  min-height: 48px;
+  display: grid;
+  grid-template-columns: 30px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 11px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--bg-1);
+  color: var(--fg-1);
+  text-align: left;
+  font-size: 13px;
+  line-height: 1.35;
+  cursor: pointer;
+  transition: border-color 140ms ease, background 140ms ease, box-shadow 140ms ease, transform 140ms ease;
+}
+
+.jeopardy-match-card.term {
+  cursor: grab;
+}
+
+.jeopardy-match-card.term:active {
+  cursor: grabbing;
+}
+
+.jeopardy-match-card:not(:disabled):hover,
+.jeopardy-match-card.drop-ready {
+  border-color: var(--accent-dim);
+  background: color-mix(in oklab, var(--bg-2) 82%, var(--accent-soft));
+}
+
+.jeopardy-match-card.active {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+  box-shadow: 0 0 0 2px color-mix(in oklab, var(--accent) 18%, transparent);
+}
+
+.jeopardy-match-card.matched {
+  border-color: color-mix(in oklab, var(--jeopardy-gold) 36%, var(--line));
+}
+
+.jeopardy-match-card.correct {
+  border-color: color-mix(in oklab, var(--ok) 65%, transparent);
+  background: var(--ok-soft);
+}
+
+.jeopardy-match-card.incorrect {
+  border-color: color-mix(in oklab, var(--err) 65%, transparent);
+  background: var(--err-soft);
+}
+
+.jeopardy-match-card:disabled {
+  cursor: default;
+}
+
+.jeopardy-match-marker {
+  width: 28px;
+  height: 28px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--bg-2);
+  color: var(--fg-1);
+  font: 700 11px/1 var(--font-mono);
+}
+
+.jeopardy-match-card.active .jeopardy-match-marker,
+.jeopardy-match-card.matched .jeopardy-match-marker {
+  border-color: var(--jeopardy-gold);
+  background: var(--jeopardy-gold);
+  color: var(--bg-0);
+}
+
+.jeopardy-match-card.correct .jeopardy-match-marker {
+  border-color: var(--ok);
+  background: var(--ok);
+  color: var(--bg-0);
+}
+
+.jeopardy-match-card.incorrect .jeopardy-match-marker {
+  border-color: var(--err);
+  background: var(--err);
+  color: var(--bg-0);
+}
+
+.jeopardy-match-text {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.jeopardy-match-pill,
+.jeopardy-match-clear {
+  min-height: 22px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--bg-2);
+  color: var(--fg-2);
+  font: 700 10px/1.15 var(--font-mono);
+}
+
+.jeopardy-match-pill {
+  max-width: 128px;
+  padding: 3px 7px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.jeopardy-match-clear {
+  width: 22px;
+  color: var(--fg-3);
+}
+
+.jeopardy-match-clear:hover {
+  border-color: var(--accent-dim);
+  color: var(--fg-0);
+}
+
 .jeopardy-explanation {
   margin-top: 14px;
   padding: 14px 16px;
@@ -5183,9 +5371,37 @@ body.is-resizing-layout .server-module-resizer::before {
   outline: none;
 }
 
+.jeopardy-toast {
+  position: fixed;
+  right: 18px;
+  bottom: 18px;
+  z-index: 430;
+  width: min(390px, calc(100vw - 36px));
+  padding: 13px 14px;
+  border: 1px solid color-mix(in oklab, var(--jeopardy-gold) 42%, var(--line));
+  border-radius: 8px;
+  background:
+    linear-gradient(180deg, color-mix(in oklab, var(--jeopardy-gold-soft) 45%, var(--bg-1)), var(--bg-1));
+  color: var(--fg-0);
+  box-shadow: 0 18px 46px rgba(0,0,0,0.56);
+  font: 700 13px/1.45 var(--font-ui);
+  animation: jeopardy-toast-in 180ms cubic-bezier(.22,.85,.2,1) both;
+}
+
+@keyframes jeopardy-toast-in {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
 .jeopardy-award-team {
   display: grid;
-  grid-template-columns: minmax(84px, 1fr) auto auto;
+  grid-template-columns: minmax(128px, 1fr) auto auto;
   align-items: center;
   gap: 6px;
   min-height: 38px;
@@ -5199,13 +5415,30 @@ body.is-resizing-layout .server-module-resizer::before {
   border-color: color-mix(in oklab, var(--jeopardy-gold) 42%, transparent);
 }
 
-.jeopardy-award-team span {
+.jeopardy-award-team-score,
+.jeopardy-final-team-score {
+  min-width: 0;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: baseline;
+  gap: 10px;
+}
+
+.jeopardy-award-team-score span,
+.jeopardy-final-team-score span {
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   color: var(--fg-0);
   font-size: 13px;
   font-weight: 600;
+}
+
+.jeopardy-award-team-score strong,
+.jeopardy-final-team-score strong {
+  color: var(--jeopardy-gold);
+  font: 800 13px/1 var(--font-mono);
+  white-space: nowrap;
 }
 
 .jeopardy-awards-actions {
@@ -5255,20 +5488,21 @@ body.is-resizing-layout .server-module-resizer::before {
   margin-top: 18px;
 }
 
+.jeopardy-final-head-actions {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+}
+
 .jeopardy-final-team {
   display: grid;
-  grid-template-columns: minmax(110px, 1fr) 120px auto auto;
+  grid-template-columns: minmax(160px, 1fr) 120px auto auto;
   align-items: center;
   gap: 8px;
   padding: 9px;
   border: 1px solid var(--line-soft);
   border-radius: 7px;
   background: var(--bg-2);
-}
-
-.jeopardy-final-team span {
-  color: var(--fg-0);
-  font-weight: 600;
 }
 
 .jeopardy-final-team input {
@@ -5785,12 +6019,26 @@ body.is-resizing-layout .server-module-resizer::before {
     border-radius: 7px;
     font-size: 15px;
   }
+  .jeopardy-match {
+    grid-template-columns: 1fr;
+    gap: 10px;
+  }
+  .jeopardy-match-card {
+    grid-template-columns: 28px minmax(0, 1fr);
+    min-height: 46px;
+    padding: 10px;
+  }
+  .jeopardy-match-pill,
+  .jeopardy-match-clear {
+    grid-column: 2;
+    justify-self: start;
+  }
   .jeopardy-award-team,
   .jeopardy-final-team {
     grid-template-columns: 1fr 1fr;
   }
-  .jeopardy-award-team span,
-  .jeopardy-final-team span {
+  .jeopardy-award-team-score,
+  .jeopardy-final-team-score {
     grid-column: 1 / -1;
   }
   .jeopardy-final-team input {

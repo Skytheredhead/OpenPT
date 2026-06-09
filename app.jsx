@@ -4652,6 +4652,9 @@ function App({ initialViewMode = null, initialHomeAction = null } = {}) {
             onCreateProject={createEmptyProjectFromStarterScreen}
             onCreateStarter={newStarterTab}
             onImportPacketTracer={openPacketTracerFilePicker}
+            onOpenGames={() => navigateAppRoute(GAMES_URL)}
+            onOpenJeopardy={() => navigateAppRoute(JEOPARDY_URL)}
+            onOpenLearn={() => navigateAppRoute(LEARN_URL)}
             onOpenConsole={openDeviceModule}
             onContextMenu={(e, d) => setCtx({ x: e.clientX, y: e.clientY, devId: d.id })}
             onLinkContextMenu={(e, l) => setCtx({ x: e.clientX, y: e.clientY, linkId: l.id })}

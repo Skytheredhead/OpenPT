@@ -33,32 +33,32 @@ const JEOPARDY_TOPIC_RULES = [
   {
     id: "security",
     title: "ACLs & Security",
-    terms: ["acl", "access-list", "access control", "permit", "deny", "ssh", "aaa", "attack", "malware", "security", "ipsec", "vpn", "ssl", "firewall", "authentication", "authorization", "accounting"],
+    terms: ["acl", "access-list", "access-group", "access control", "permit", "deny", "ssh", "aaa", "attack", "malware", "rootkit", "security", "ipsec", "vpn", "ssl", "firewall", "authentication", "authorization", "accounting", "authentication-factor", "single-factor", "multi-factor", "something you have", "something you know", "something you are", "wpa2", "wpa3", "psk", "ccmp", "aes", "sae", "gcmp", "encryption"],
   },
   {
     id: "switching",
     title: "Switching",
-    terms: ["switch", "vlan", "trunk", "stp", "spanning-tree", "etherchannel", "portfast", "native vlan", "svi", "catalyst", "switchport", "dtp", "vtp"],
+    terms: ["switch", "switches", "vlan", "trunk", "stp", "spanning-tree", "etherchannel", "portfast", "native vlan", "svi", "catalyst", "switchport", "dtp", "vtp", "broadcast domain", "broadcast frames", "collisions", "ethernet", "fcs", "crc", "core and distribution", "access layer"],
   },
   {
     id: "addressing",
     title: "Addressing",
-    terms: ["ipv6", "ipv4", "subnet", "mask", "wildcard", "dhcp", "dns", "nat", "pat", "address", "default gateway", "prefix", "slaac"],
+    terms: ["ipv6", "ipv4", "subnet", "mask", "wildcard", "dhcp", "dns", "nat", "pat", "address", "addresses", "ip address", "ip addresses", "default gateway", "prefix", "slaac", "point-to-point"],
   },
   {
     id: "services",
     title: "Services",
-    terms: ["snmp", "syslog", "ntp", "tftp", "ftp", "qos", "voice", "video", "traffic", "wan", "cloud", "virtualization", "hypervisor", "logging"],
+    terms: ["snmp", "syslog", "ntp", "tftp", "ftp", "tcp", "three-way handshake", "connection-oriented", "qos", "voice", "video", "traffic", "wan", "cloud", "virtualization", "hypervisor", "vm", "vms", "logging"],
   },
   {
     id: "automation",
     title: "Automation",
-    terms: ["api", "rest", "json", "xml", "yaml", "sdn", "controller", "automation", "northbound", "southbound", "aci"],
+    terms: ["api", "rest", "json", "xml", "yaml", "http", "crud", "get", "post", "patch", "put", "webhook", "ansible", "inventory", "sdn", "controller", "automation", "northbound", "southbound", "aci", "sda", "dna center", "fabric", "overlay", "underlay", "data model", "modeling language", "terraform", "hcl"],
   },
   {
     id: "wireless",
     title: "Wireless",
-    terms: ["wireless", "802.11", "ssid", "ap", "access point", "wlan", "channel", "roaming", "controller", "wap"],
+    terms: ["wireless", "802.11", "ssid", "ap", "access point", "wlan", "channel", "roaming", "controller", "wap", "wlc", "capwap", "lightweight ap", "dynamic interface"],
   },
   {
     id: "vlans",
@@ -68,7 +68,7 @@ const JEOPARDY_TOPIC_RULES = [
   {
     id: "ports",
     title: "Ports",
-    terms: ["port", "ports", "interface", "fastethernet", "gigabitethernet", "serial", "duplex", "speed", "err-disabled"],
+    terms: ["port", "ports", "interface", "fastethernet", "gigabitethernet", "serial", "duplex", "speed", "err-disabled", "fiber", "single-mode", "connector", "transceiver", "sfp", "1000baselx"],
   },
   {
     id: "redundancy",
@@ -83,7 +83,7 @@ const JEOPARDY_TOPIC_RULES = [
   {
     id: "stp",
     title: "STP",
-    terms: ["stp", "spanning-tree", "root bridge", "bpdu", "portfast", "blocking", "forwarding"],
+    terms: ["stp", "spanning-tree", "rapid pvst", "802.1w", "root bridge", "bpdu", "portfast", "blocking", "forwarding"],
   },
   {
     id: "nat",
@@ -154,8 +154,17 @@ function enrichJeopardyRawQuestion(item) {
 function normalizeJeopardyQuestion(item, index) {
   const enriched = enrichJeopardyRawQuestion(item);
   const options = Array.isArray(enriched?.o) ? enriched.o.map((option) => String(option || "").trim()).filter(Boolean) : [];
-  const answers = Array.isArray(enriched?.a) ? enriched.a : [enriched?.a].filter((value) => Number.isInteger(value));
-  const answerText = answers.map((answerIndex) => options[answerIndex]).filter(Boolean);
+  const answers = Array.isArray(enriched?.a) ? enriched.a : [enriched?.a].filter((value) => value != null);
+  const pairs = Array.isArray(enriched?.pairs)
+    ? enriched.pairs
+      .map((pair) => Array.isArray(pair) ? [String(pair[0] || "").trim(), String(pair[1] || "").trim()] : null)
+      .filter((pair) => pair?.[0] && pair?.[1])
+    : [];
+  const pairAnswerText = pairs.map(([term, description]) => `${term} -> ${description}`);
+  const answerIndexes = answers.filter((value) => Number.isInteger(value));
+  const answerText = pairs.length
+    ? pairAnswerText
+    : answers.map((answerIndex) => options[answerIndex]).filter(Boolean);
   const codeLines = Array.isArray(enriched?.code) ? enriched.code.map((line) => String(line || "")) : [];
   const structuredExhibit = enriched?.exhibit && typeof enriched.exhibit === "object" ? enriched.exhibit : null;
   const exhibitCount = Number(enriched?.e) || (structuredExhibit || codeLines.length ? 1 : 0);
@@ -164,11 +173,12 @@ function normalizeJeopardyQuestion(item, index) {
     id: `${enriched?.bank || enriched?.src || "quiz"}-${enriched?.si || enriched?.s || index}`,
     prompt: String(enriched?.q || "").trim(),
     options,
-    answerIndexes: answers,
+    pairs,
+    answerIndexes,
     answerText,
     source: enriched?.src || enriched?.bank || "Quiz bank",
     sourceIndex: enriched?.si || enriched?.s || index + 1,
-    multi: !!enriched?.m || answers.length > 1,
+    multi: !!enriched?.m || answerIndexes.length > 1 || pairs.length > 0,
     hasExhibit: exhibitCount > 0,
     hasUsableExhibit,
     missingReferencedExhibit: JEOPARDY_EXHIBIT_REFERENCE_RE.test(enriched?.q || "") && !hasUsableExhibit,
@@ -183,26 +193,117 @@ function normalizeJeopardyQuestion(item, index) {
 }
 
 function questionTopicText(question) {
-  return `${question.prompt} ${question.options.join(" ")} ${question.codeLines.join(" ")} ${question.explanation}`.toLowerCase();
+  const pairText = (question.pairs || []).flat().join(" ");
+  return `${question.prompt} ${question.options.join(" ")} ${pairText} ${question.codeLines.join(" ")} ${question.explanation}`.toLowerCase();
+}
+
+function escapeJeopardyRegExp(value) {
+  return String(value).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function jeopardyTermWeight(term) {
+  const text = String(term || "");
+  if (text.length <= 3) return 3;
+  if (text.includes(" ") || text.includes("-")) return 4;
+  return 2;
+}
+
+function jeopardyTermPattern(term) {
+  const escaped = escapeJeopardyRegExp(term).replace(/\s+/g, "\\s+");
+  return `(^|[^a-z0-9])${escaped}([^a-z0-9]|$)`;
+}
+
+function questionTopicTermMatchCount(text, term) {
+  const matches = text.match(new RegExp(jeopardyTermPattern(term), "gi"));
+  return Math.min(matches?.length || 0, 3);
+}
+
+function questionMatchesTopicTerm(text, term) {
+  return new RegExp(jeopardyTermPattern(term), "i").test(text);
 }
 
 function topicScore(question, topic) {
   const text = questionTopicText(question);
-  return topic.terms.reduce((score, term) => score + (text.includes(term) ? 1 : 0), 0);
+  return topic.terms.reduce((score, term) => {
+    return score + (questionTopicTermMatchCount(text, term) * jeopardyTermWeight(term));
+  }, 0);
+}
+
+function topicSpecificity(topic) {
+  return (topic.terms || []).reduce((total, term) => total + jeopardyTermWeight(term), 0);
+}
+
+function bestTopicMatchForQuestion(question) {
+  return JEOPARDY_TOPIC_RULES.reduce((best, topic) => {
+    const score = topicScore(question, topic);
+    if (!score) return best;
+    if (!best || score > best.score || (score === best.score && topicSpecificity(topic) > best.specificity)) {
+      return { topic, score, specificity: topicSpecificity(topic) };
+    }
+    return best;
+  }, null);
 }
 
 function bestTopicForQuestions(questions, salt = 0) {
   let best = null;
   for (const topic of JEOPARDY_TOPIC_RULES) {
     const score = questions.reduce((total, question) => total + topicScore(question, topic), 0);
-    if (!best || score > best.score) best = { topic, score };
+    const specificity = topicSpecificity(topic);
+    if (!best || score > best.score || (score === best.score && specificity > best.specificity)) {
+      best = { topic, score, specificity };
+    }
   }
   return best?.score > 0 ? best.topic : JEOPARDY_TOPIC_RULES[salt % JEOPARDY_TOPIC_RULES.length];
 }
 
 function questionDifficulty(question) {
-  const lengthScore = Math.min(5, Math.floor(question.prompt.length / 95));
-  return lengthScore + (question.multi ? 2 : 0) + (question.hasExhibit ? 1 : 0) + Math.min(2, Math.floor(question.options.length / 4));
+  const prompt = String(question.prompt || "");
+  const optionsText = (question.options || []).join(" ");
+  const combined = `${prompt} ${optionsText} ${question.codeLines.join(" ")}`.toLowerCase();
+  const promptScore = Math.min(5, Math.floor(prompt.split(/\s+/).filter(Boolean).length / 14));
+  const optionScore = Math.min(5, Math.floor(optionsText.length / 135));
+  const optionCountScore = Math.min(3, Math.max(0, (question.options || []).length - 4));
+  const configScore = [
+    /\baccess-list\b/,
+    /\bswitchport\b/,
+    /\bip route\b/,
+    /\brouter\(config/,
+    /\bshow\b/,
+    /\beq\s+\w+/,
+    /\b0\.0\.0\./,
+    /\b\/\d{1,2}\b/,
+  ].filter((pattern) => pattern.test(combined)).length;
+  const reasoningScore = [
+    /\bwhy\b/,
+    /\bbest practice\b/,
+    /\bwhich statement\b/,
+    /\bwhat occurs next\b/,
+    /\bwill be used\b/,
+    /\bwill be installed\b/,
+    /\badvertise\b/,
+    /\boverlapping\b/,
+  ].filter((pattern) => pattern.test(combined)).length;
+  const matchingScore = /\bmatch each\b|\bmatch\b/.test(combined) ? 3 : 0;
+  const architectureScore = [
+    /\bnorthbound\b|\bsouthbound\b/,
+    /\bsdn\b|\bsda\b/,
+    /\baci\b|\bleaf nodes?\b|\bspine\b/,
+    /\bcontrol plane\b|\bdata plane\b|\bapplication plane\b/,
+    /\bfabric\b|\boverlay\b|\bunderlay\b/,
+  ].filter((pattern) => pattern.test(combined)).length;
+  const multiScore = question.multi ? 3 : 0;
+  const exhibitScore = question.hasExhibit ? 2 : 0;
+  return promptScore + optionScore + optionCountScore + configScore + reasoningScore + architectureScore + matchingScore + multiScore + exhibitScore;
+}
+
+function compareJeopardyQuestionDifficulty(a, b) {
+  const difficultyDelta = questionDifficulty(a) - questionDifficulty(b);
+  if (difficultyDelta) return difficultyDelta;
+  const answerDelta = a.answerIndexes.length - b.answerIndexes.length;
+  if (answerDelta) return answerDelta;
+  const optionsLengthDelta = a.options.join(" ").length - b.options.join(" ").length;
+  if (optionsLengthDelta) return optionsLengthDelta;
+  return a.prompt.length - b.prompt.length;
 }
 
 function defaultJeopardyTeams() {
@@ -238,6 +339,14 @@ function rankedJeopardyTeams(teams) {
     .map((team, index) => ({ ...team, originalIndex: index }))
     .sort((a, b) => (Number(b.score) || 0) - (Number(a.score) || 0) || a.originalIndex - b.originalIndex)
     .map((team, index) => ({ ...team, place: index + 1 }));
+}
+
+function nextJeopardyTeamId(teams, teamId) {
+  const ordered = orderJeopardyTeams(teams);
+  if (!ordered.length) return teamId || "";
+  const currentIndex = ordered.findIndex((team) => team.id === teamId);
+  const nextIndex = currentIndex >= 0 ? (currentIndex + 1) % ordered.length : 0;
+  return ordered[nextIndex]?.id || teamId || "";
 }
 
 function buildJeopardyEndGameSnapshot(teams, answered, allClues, finalScored) {
@@ -408,11 +517,12 @@ function buildJeopardyColumns(rawQuestions, gameSeed, deckId) {
     .filter((question) => question.prompt && question.answerText.length && !question.lab && !question.missingReferencedExhibit);
   const decked = normalized.filter((question) => deckId === "all" || String(question.source || "") === deckId);
   const pool = decked.length >= JEOPARDY_POINTS.length ? decked : normalized;
+  const questionTopicMatches = new Map(pool.map((question) => [question.id, bestTopicMatchForQuestion(question)]));
   const used = new Set();
   const columns = [];
   const topics = jeopardyShuffle(JEOPARDY_TOPIC_RULES, `${gameSeed}:${deckId}:topics`);
   const makeColumn = (topic, selected, columnIndex) => {
-    const sorted = [...selected].sort((a, b) => questionDifficulty(a) - questionDifficulty(b));
+    const sorted = [...selected].sort(compareJeopardyQuestionDifficulty);
     const topicKey = String(topic.topicKey || topic.id || topic.title || "");
     return {
       ...topic,
@@ -428,8 +538,8 @@ function buildJeopardyColumns(rawQuestions, gameSeed, deckId) {
 
   for (const topic of topics) {
     const ranked = pool
-      .filter((question) => !used.has(question.id) && topicScore(question, topic) > 0)
-      .sort((a, b) => questionDifficulty(a) - questionDifficulty(b));
+      .filter((question) => !used.has(question.id) && questionTopicMatches.get(question.id)?.topic.id === topic.id)
+      .sort(compareJeopardyQuestionDifficulty);
     const candidates = jeopardyShuffle(ranked, `${gameSeed}:${deckId}:${topic.id}`);
     if (candidates.length < JEOPARDY_POINTS.length) continue;
     const selected = candidates.slice(0, JEOPARDY_POINTS.length);
@@ -437,19 +547,20 @@ function buildJeopardyColumns(rawQuestions, gameSeed, deckId) {
     columns.push(makeColumn(topic, selected, columns.length));
   }
 
-  const leftovers = jeopardyShuffle(
-    pool.filter((question) => !used.has(question.id)),
-    `${gameSeed}:${deckId}:leftovers`
-  );
-  for (let index = 0; index + JEOPARDY_POINTS.length <= leftovers.length; index += JEOPARDY_POINTS.length) {
-    const selected = leftovers.slice(index, index + JEOPARDY_POINTS.length);
-    selected.forEach((question) => used.add(question.id));
-    const topic = bestTopicForQuestions(selected, columns.length);
-    columns.push(makeColumn({
-      ...topic,
-      topicKey: topic.id,
-      id: `${topic.id}-extra-${Math.floor(index / JEOPARDY_POINTS.length) + 1}`,
-    }, selected, columns.length));
+  for (const topic of topics) {
+    const leftovers = jeopardyShuffle(
+      pool.filter((question) => !used.has(question.id) && questionTopicMatches.get(question.id)?.topic.id === topic.id),
+      `${gameSeed}:${deckId}:${topic.id}:leftovers`
+    );
+    for (let index = 0; index + JEOPARDY_POINTS.length <= leftovers.length; index += JEOPARDY_POINTS.length) {
+      const selected = leftovers.slice(index, index + JEOPARDY_POINTS.length);
+      selected.forEach((question) => used.add(question.id));
+      columns.push(makeColumn({
+        ...topic,
+        topicKey: topic.id,
+        id: `${topic.id}-extra-${Math.floor(index / JEOPARDY_POINTS.length) + 1}`,
+      }, selected, columns.length));
+    }
   }
 
   if (!columns.length) {
@@ -479,6 +590,44 @@ function buildJeopardyBoard(rawQuestions, gameSeed, deckId, boardRound = 0, boar
   return visibleColumns.map((column) => ({
     ...column,
     clues: column.clues.map((clue) => ({ ...clue, dailyDouble: dailyDoubleIds.has(clue.id) })),
+  }));
+}
+
+function buildJeopardyDragDropTestBoard(rawQuestions, gameSeed, deckId, boardRound = 0) {
+  const normalized = (rawQuestions || [])
+    .map(normalizeJeopardyQuestion)
+    .filter((question) => question.prompt && question.pairs?.length && question.answerText.length && !question.lab && !question.missingReferencedExhibit);
+  const decked = normalized.filter((question) => deckId === "all" || String(question.source || "") === deckId);
+  const pool = decked.length ? decked : normalized;
+  if (!pool.length) return buildJeopardyBoard(rawQuestions, gameSeed, deckId, boardRound, []);
+
+  const shuffled = jeopardyShuffle(pool, `${gameSeed}:${deckId}:${boardRound}:dragdrop-test`);
+  const dailyDoubleIds = new Set(
+    jeopardyShuffle(
+      Array.from({ length: JEOPARDY_VISIBLE_COLUMNS * JEOPARDY_POINTS.length }, (_, index) => `dragdrop-test-${index}`),
+      `${gameSeed}:${deckId}:${boardRound}:dragdrop-test-daily-doubles`
+    ).slice(0, JEOPARDY_DAILY_DOUBLES)
+  );
+
+  return Array.from({ length: JEOPARDY_VISIBLE_COLUMNS }, (_, columnIndex) => ({
+    id: `dragdrop-test-column-${columnIndex + 1}`,
+    topicKey: `dragdrop-test-${columnIndex + 1}`,
+    title: `Drag Drop ${columnIndex + 1}`,
+    clues: JEOPARDY_POINTS.map((points, rowIndex) => {
+      const boardIndex = columnIndex * JEOPARDY_POINTS.length + rowIndex;
+      const sourceQuestion = shuffled[boardIndex % shuffled.length];
+      const clueId = `dragdrop-test-${boardIndex}`;
+      return {
+        id: clueId,
+        points,
+        category: `Drag Drop ${columnIndex + 1}`,
+        dailyDouble: dailyDoubleIds.has(clueId),
+        question: {
+          ...sourceQuestion,
+          id: `${sourceQuestion.id}-dragdrop-test-${columnIndex + 1}-${rowIndex + 1}`,
+        },
+      };
+    }),
   }));
 }
 
@@ -609,8 +758,197 @@ const JeopardyTopologyExhibit = ({ exhibit }) => {
   );
 };
 
+function parseJeopardyPairSelection(selection) {
+  const text = String(selection || "");
+  if (!text.includes("->")) return null;
+  const [term, ...rest] = text.split("->");
+  const description = rest.join("->").trim();
+  if (!term.trim() || !description) return null;
+  return { term: term.trim(), description };
+}
+
+function selectedJeopardyPairsByTerm(selected = []) {
+  return selected.reduce((items, selection) => {
+    const parsed = parseJeopardyPairSelection(selection);
+    if (parsed) items[parsed.term] = parsed.description;
+    return items;
+  }, {});
+}
+
+function makeJeopardyPairSelection(term, description) {
+  return `${term} -> ${description}`;
+}
+
+function shuffleJeopardyPairChoices(pairs, seed) {
+  return jeopardyShuffle((pairs || []).map(([, description]) => description), seed);
+}
+
+const JeopardyMatchQuestion = ({ question, selectedAnswers, answerShown, onChange }) => {
+  const [activeTerm, setActiveTerm] = useJeopardyState("");
+  const [lines, setLines] = useJeopardyState([]);
+  const rootRef = useJeopardyRef(null);
+  const termRefs = useJeopardyRef({});
+  const choiceRefs = useJeopardyRef({});
+  const selectedByTerm = selectedJeopardyPairsByTerm(selectedAnswers);
+  const correctByTerm = Object.fromEntries((question.pairs || []).map(([term, description]) => [term, description]));
+  const choices = useJeopardyMemo(
+    () => shuffleJeopardyPairChoices(question.pairs, `${question.id}:jeopardy-match-choices`),
+    [question.id]
+  );
+  const termForChoice = Object.fromEntries(Object.entries(selectedByTerm).map(([term, description]) => [description, term]));
+
+  const connect = (term, description) => {
+    if (!term || !description || answerShown) return;
+    onChange(term, description);
+    setActiveTerm("");
+  };
+
+  const measureLines = () => {
+    const root = rootRef.current;
+    if (!root) return;
+    const rootBox = root.getBoundingClientRect();
+    const nextLines = Object.entries(selectedByTerm).flatMap(([term, description]) => {
+      const termEl = termRefs.current[term];
+      const choiceEl = choiceRefs.current[description];
+      if (!termEl || !choiceEl) return [];
+      const termBox = termEl.getBoundingClientRect();
+      const choiceBox = choiceEl.getBoundingClientRect();
+      return [{
+        key: `${term}->${description}`,
+        x1: termBox.right - rootBox.left - 2,
+        y1: termBox.top - rootBox.top + termBox.height / 2,
+        x2: choiceBox.left - rootBox.left + 2,
+        y2: choiceBox.top - rootBox.top + choiceBox.height / 2,
+        status: answerShown ? (correctByTerm[term] === description ? "correct" : "incorrect") : "",
+      }];
+    });
+    setLines(nextLines);
+  };
+
+  useJeopardyEffect(() => {
+    measureLines();
+    const handle = () => measureLines();
+    window.addEventListener("resize", handle);
+    const observer = typeof ResizeObserver === "function" ? new ResizeObserver(handle) : null;
+    if (observer && rootRef.current) observer.observe(rootRef.current);
+    return () => {
+      window.removeEventListener("resize", handle);
+      observer?.disconnect();
+    };
+  }, [selectedAnswers.join("|"), choices.join("|"), answerShown, question.id]);
+
+  const handleDragStart = (event, term) => {
+    event.dataTransfer.effectAllowed = "move";
+    event.dataTransfer.setData("text/x-jeopardy-match-term", term);
+    event.dataTransfer.setData("text/plain", term);
+    setActiveTerm(term);
+  };
+
+  const handleDragOver = (event) => {
+    if (!Array.from(event.dataTransfer?.types || []).includes("text/x-jeopardy-match-term")) return;
+    event.preventDefault();
+    event.dataTransfer.dropEffect = "move";
+  };
+
+  const handleDrop = (event, description) => {
+    const term = event.dataTransfer.getData("text/x-jeopardy-match-term");
+    if (!term) return;
+    event.preventDefault();
+    connect(term, description);
+  };
+
+  const clearTerm = (event, term) => {
+    event.stopPropagation();
+    if (!answerShown) onChange(term, "");
+  };
+
+  return (
+    <div className="jeopardy-match" ref={rootRef}>
+      <svg className="jeopardy-match-lines" aria-hidden="true">
+        {lines.map((line) => (
+          <line
+            key={line.key}
+            x1={line.x1}
+            y1={line.y1}
+            x2={line.x2}
+            y2={line.y2}
+            className={line.status}
+          />
+        ))}
+      </svg>
+      <div className="jeopardy-match-column terms" aria-label="Drag terms">
+        {(question.pairs || []).map(([term], index) => {
+          const value = selectedByTerm[term] || "";
+          const status = answerShown && value ? (value === correctByTerm[term] ? "correct" : "incorrect") : "";
+          return (
+            <button
+              type="button"
+              key={term}
+              draggable={!answerShown}
+              className={[
+                "jeopardy-match-card",
+                "term",
+                activeTerm === term ? "active" : "",
+                value ? "matched" : "",
+                status,
+              ].filter(Boolean).join(" ")}
+              ref={(node) => {
+                if (node) termRefs.current[term] = node;
+                else delete termRefs.current[term];
+              }}
+              disabled={answerShown}
+              onClick={() => setActiveTerm(activeTerm === term ? "" : term)}
+              onDragStart={(event) => handleDragStart(event, term)}
+            >
+              <span className="jeopardy-match-marker">{index + 1}</span>
+              <span className="jeopardy-match-text">{term}</span>
+              {value && !answerShown && (
+                <span className="jeopardy-match-clear" aria-label="Clear match" onClick={(event) => clearTerm(event, term)}>x</span>
+              )}
+            </button>
+          );
+        })}
+      </div>
+
+      <div className="jeopardy-match-column choices" aria-label="Drop definitions">
+        {choices.map((description, index) => {
+          const term = termForChoice[description] || "";
+          const status = answerShown && term ? (correctByTerm[term] === description ? "correct" : "incorrect") : "";
+          return (
+            <button
+              type="button"
+              key={description}
+              className={[
+                "jeopardy-match-card",
+                "choice",
+                activeTerm ? "drop-ready" : "",
+                term ? "matched" : "",
+                status,
+              ].filter(Boolean).join(" ")}
+              ref={(node) => {
+                if (node) choiceRefs.current[description] = node;
+                else delete choiceRefs.current[description];
+              }}
+              disabled={answerShown}
+              onClick={() => activeTerm && connect(activeTerm, description)}
+              onDragOver={handleDragOver}
+              onDrop={(event) => handleDrop(event, description)}
+            >
+              <span className="jeopardy-match-marker">{String.fromCharCode(65 + index)}</span>
+              <span className="jeopardy-match-text">{description}</span>
+              {term && <span className="jeopardy-match-pill">{term}</span>}
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
+};
+
 function JeopardyPage() {
-  const rawQuestions = window.QUESTIONS_RAW || [];
+  const allRawQuestions = window.QUESTIONS_RAW || [];
+  const dragDropTestMode = /^\/jeopardy-dragdrop-test\/?$/.test(location.pathname) || new URLSearchParams(location.search).get("test") === "dragdrop";
+  const rawQuestions = dragDropTestMode ? allRawQuestions.filter((item) => Array.isArray(item?.pairs) && item.pairs.length) : allRawQuestions;
   const decks = useJeopardyMemo(() => makeDeckOptions(rawQuestions), [rawQuestions.length]);
   const [deckId, setDeckId] = useJeopardyState(() => {
     try { return JSON.parse(localStorage.getItem(JEOPARDY_STORAGE_KEY) || "{}").deckId || "all"; }
@@ -661,6 +999,7 @@ function JeopardyPage() {
     catch (e) { return "team-1"; }
   });
   const [dailyDoubleWager, setDailyDoubleWager] = useJeopardyState("");
+  const [toast, setToast] = useJeopardyState(null);
   const [boardPhase, setBoardPhase] = useJeopardyState("");
   const [finalOpen, setFinalOpen] = useJeopardyState(false);
   const [endGameOpen, setEndGameOpen] = useJeopardyState(false);
@@ -687,7 +1026,12 @@ function JeopardyPage() {
   const settingsButtonRef = useJeopardyRef(null);
   const settingsCardRef = useJeopardyRef(null);
 
-  const board = useJeopardyMemo(() => buildJeopardyBoard(rawQuestions, seed, deckId, boardRound, boardHistory), [rawQuestions.length, seed, deckId, boardRound, boardHistory]);
+  const board = useJeopardyMemo(
+    () => dragDropTestMode
+      ? buildJeopardyDragDropTestBoard(rawQuestions, seed, deckId, boardRound)
+      : buildJeopardyBoard(rawQuestions, seed, deckId, boardRound, boardHistory),
+    [rawQuestions.length, seed, deckId, boardRound, boardHistory, dragDropTestMode]
+  );
   const allClues = useJeopardyMemo(() => board.flatMap((column) => column.clues), [board]);
   const orderedTeams = useJeopardyMemo(() => orderJeopardyTeams(teams), [teams]);
   const selectedDeck = decks.find((deck) => deck.id === deckId) || decks[0] || { id: "all", title: "All Versions" };
@@ -726,6 +1070,12 @@ function JeopardyPage() {
   useJeopardyEffect(() => {
     localStorage.setItem(JEOPARDY_STORAGE_KEY, JSON.stringify({ deckId, seed, boardRound, boardHistory, teams, answered, musicEnabled, finalScored, scoreMultiplier, activeTeamId }));
   }, [deckId, seed, boardRound, boardHistory, teams, answered, musicEnabled, finalScored, scoreMultiplier, activeTeamId]);
+
+  useJeopardyEffect(() => {
+    if (!toast) return;
+    const handle = window.setTimeout(() => setToast(null), 3200);
+    return () => window.clearTimeout(handle);
+  }, [toast]);
 
   useJeopardyEffect(() => {
     if (!teams.some((team) => team.id === activeTeamId)) setActiveTeamId(orderedTeams[0]?.id || "team-1");
@@ -781,6 +1131,11 @@ function JeopardyPage() {
     if (!activeClue) return;
     const handle = (event) => {
       if (event.metaKey || event.ctrlKey || event.altKey) return;
+      if (event.key === "Escape") {
+        event.preventDefault();
+        closeClue();
+        return;
+      }
       const key = String(event.key || "").toLowerCase();
       const index = key.length === 1 ? key.charCodeAt(0) - 97 : -1;
       if (index >= 0 && index < activeClue.question.options.length) {
@@ -927,11 +1282,36 @@ function JeopardyPage() {
 
   const clueValue = (clue = activeClue) => (Number(clue?.points) || 0) * scoreMultiplier;
 
-  const clueScoreDelta = (delta, clue = activeClue) => {
+  const maxDailyDoubleWager = (team, clue = activeClue) => {
+    return Math.max(clueValue(clue), Math.max(0, Number(team?.score) || 0));
+  };
+
+  const clampWagerInput = (value, maxWager) => {
+    if (value === "") return "";
+    const wager = Number(value);
+    if (!Number.isFinite(wager)) return "";
+    return String(Math.min(maxWager, Math.max(0, Math.floor(wager))));
+  };
+
+  const showToast = (message) => {
+    setToast({ id: Date.now(), message });
+  };
+
+  const handleDailyDoubleWagerChange = (value) => {
+    const wager = Number(value);
+    if (Number.isFinite(wager) && wager > activeDailyDoubleMax) {
+      showToast(`You can only wager up to ${formatJeopardyScore(activeDailyDoubleMax)}: your current score or the clue value, whichever is higher.`);
+    }
+    setDailyDoubleWager(clampWagerInput(value, activeDailyDoubleMax));
+  };
+
+  const clueScoreDelta = (delta, clue = activeClue, teamId = activeTeamId) => {
     if (!clue) return 0;
     const sign = delta < 0 ? -1 : 1;
     const wager = Number(dailyDoubleWager);
-    const value = clue.dailyDouble && Number.isFinite(wager) && wager > 0 ? wager : clueValue(clue);
+    const team = teams.find((item) => item.id === teamId);
+    const maxWager = maxDailyDoubleWager(team, clue);
+    const value = clue.dailyDouble && Number.isFinite(wager) && wager > 0 ? Math.min(wager, maxWager) : clueValue(clue);
     return sign * value;
   };
 
@@ -962,6 +1342,11 @@ function JeopardyPage() {
     stopMusic();
   };
 
+  const endFromFinalJeopardy = () => {
+    setFinalOpen(false);
+    openEndGame();
+  };
+
   const revealAnswer = () => {
     if (answerShown) return;
     playSfx("answerReveal");
@@ -969,8 +1354,20 @@ function JeopardyPage() {
     stopMusic();
   };
 
+  const updatePairChoice = (term, description) => {
+    if (!activeClue || answerShown) return;
+    const nextAnswers = selectedAnswers.filter((selection) => {
+      const parsed = parseJeopardyPairSelection(selection);
+      return parsed && parsed.term !== term && parsed.description !== description;
+    });
+    if (description) nextAnswers.push(makeJeopardyPairSelection(term, description));
+    setSelectedAnswers(nextAnswers);
+    if (nextAnswers.length >= activeClue.question.pairs.length) revealAnswer();
+  };
+
   const toggleChoice = (index) => {
     if (!activeClue || answerShown) return;
+    if (activeClue.question.pairs?.length) return;
     if (activeClue.question.multi) {
       const requiredAnswers = activeClue.question.answerIndexes.length;
       const alreadySelected = selectedAnswers.includes(index);
@@ -1022,8 +1419,8 @@ function JeopardyPage() {
   const award = (teamId, delta, clue = activeClue) => {
     if (!teamId || !clue) return;
     playSfx(delta >= 0 ? "correct" : "incorrect");
-    const scoreDelta = clueScoreDelta(delta, clue);
-    setActiveTeamId(teamId);
+    const scoreDelta = clueScoreDelta(delta, clue, teamId);
+    setActiveTeamId(delta > 0 ? nextJeopardyTeamId(teams, teamId) : teamId);
     setTeams((items) => items.map((team) => team.id === teamId ? { ...team, score: team.score + scoreDelta } : team));
     setAnswered((items) => ({ ...items, [clue.id]: { teamId, delta: scoreDelta, dailyDouble: !!clue.dailyDouble, at: Date.now() } }));
     closeClue({ fadeSfx: false });
@@ -1138,6 +1535,9 @@ function JeopardyPage() {
       return { ...items, [teamId]: { correct, wager, at: Date.now() } };
     });
   };
+
+  const activeTeam = orderedTeams.find((team) => team.id === activeTeamId) || orderedTeams[0] || null;
+  const activeDailyDoubleMax = activeClue?.dailyDouble ? maxDailyDoubleWager(activeTeam, activeClue) : 0;
 
   if (!rawQuestions.length) {
     return (
@@ -1316,25 +1716,34 @@ function JeopardyPage() {
 
                 <JeopardyQuestionExhibit question={activeClue.question} />
 
-                <ol className="jeopardy-choice-list">
-                  {activeClue.question.options.map((option, index) => (
-                    <li key={`${activeClue.id}-option-${index}`}>
-                      <button
-                        type="button"
-                        className={[
-                          "jeopardy-choice",
-                          selectedAnswers.includes(index) ? "selected" : "",
-                          answerShown && activeClue.question.answerIndexes.includes(index) ? "correct" : "",
-                          answerShown && selectedAnswers.includes(index) && !activeClue.question.answerIndexes.includes(index) ? "incorrect" : "",
-                        ].filter(Boolean).join(" ")}
-                        onClick={() => toggleChoice(index)}
-                      >
-                        <span className="jeopardy-choice-marker">{String.fromCharCode(65 + index)}</span>
-                        <span className="jeopardy-choice-text">{option}</span>
-                      </button>
-                    </li>
-                  ))}
-                </ol>
+                {activeClue.question.pairs?.length ? (
+                  <JeopardyMatchQuestion
+                    question={activeClue.question}
+                    selectedAnswers={selectedAnswers}
+                    answerShown={answerShown}
+                    onChange={updatePairChoice}
+                  />
+                ) : (
+                  <ol className="jeopardy-choice-list">
+                    {activeClue.question.options.map((option, index) => (
+                      <li key={`${activeClue.id}-option-${index}`}>
+                        <button
+                          type="button"
+                          className={[
+                            "jeopardy-choice",
+                            selectedAnswers.includes(index) ? "selected" : "",
+                            answerShown && activeClue.question.answerIndexes.includes(index) ? "correct" : "",
+                            answerShown && selectedAnswers.includes(index) && !activeClue.question.answerIndexes.includes(index) ? "incorrect" : "",
+                          ].filter(Boolean).join(" ")}
+                          onClick={() => toggleChoice(index)}
+                        >
+                          <span className="jeopardy-choice-marker">{String.fromCharCode(65 + index)}</span>
+                          <span className="jeopardy-choice-text">{option}</span>
+                        </button>
+                      </li>
+                    ))}
+                  </ol>
+                )}
 
                 {answerShown && activeClue.question.explanation && (
                   <div className="jeopardy-explanation">{activeClue.question.explanation}</div>
@@ -1345,13 +1754,14 @@ function JeopardyPage() {
             <div className="jeopardy-awards bottom">
               {activeClue.dailyDouble && (
                 <label className="jeopardy-daily-wager">
-                  <span>Daily Double Wager</span>
+                  <span>Daily Double Wager - Max {formatJeopardyScore(activeDailyDoubleMax)}</span>
                   <input
                     type="number"
                     min="0"
+                    max={activeDailyDoubleMax}
                     step="100"
                     value={dailyDoubleWager}
-                    onChange={(event) => setDailyDoubleWager(event.target.value)}
+                    onChange={(event) => handleDailyDoubleWagerChange(event.target.value)}
                   />
                 </label>
               )}
@@ -1365,7 +1775,10 @@ function JeopardyPage() {
               <div className="jeopardy-award-teams">
                 {orderedTeams.map((team) => (
                   <div className={`jeopardy-award-team ${team.id === activeTeamId ? "active" : ""}`} key={team.id}>
-                    <span>{team.name}</span>
+                    <div className="jeopardy-award-team-score">
+                      <span>{team.name}</span>
+                      <strong>{formatJeopardyScore(team.score)}</strong>
+                    </div>
                     <button type="button" onClick={() => award(team.id, activeClue.points)}>Correct</button>
                     <button type="button" onClick={() => award(team.id, -activeClue.points)}>Incorrect</button>
                   </div>
@@ -1395,7 +1808,12 @@ function JeopardyPage() {
                 <div className="jeopardy-modal-kicker">Final Jeopardy</div>
                 <h2 id="jeopardy-final-title">{finalClue.category}</h2>
               </div>
-              <button type="button" className="jeopardy-close" onClick={() => { setFinalOpen(false); fadeOutAllAudio(); }}>Close</button>
+              <div className="jeopardy-final-head-actions">
+                <button type="button" className="jeopardy-btn danger" onClick={endFromFinalJeopardy}>End Game</button>
+                <button type="button" className="jeopardy-close" aria-label="Close Final Jeopardy" onClick={() => { setFinalOpen(false); fadeOutAllAudio(); }}>
+                  <span aria-hidden="true">&times;</span>
+                </button>
+              </div>
             </div>
             <div className="jeopardy-modal-body">
               <p className="jeopardy-final-prompt">{finalClue.question.prompt}</p>
@@ -1410,7 +1828,10 @@ function JeopardyPage() {
               <div className="jeopardy-final-grid">
                 {orderedTeams.map((team) => (
                   <div className="jeopardy-final-team" key={team.id}>
-                    <span>{team.name}</span>
+                    <div className="jeopardy-final-team-score">
+                      <span>{team.name}</span>
+                      <strong>{formatJeopardyScore(team.score)}</strong>
+                    </div>
                     <input
                       type="number"
                       min="0"
@@ -1427,6 +1848,12 @@ function JeopardyPage() {
               </div>
             </div>
           </div>
+        </div>
+      )}
+
+      {toast && (
+        <div className="jeopardy-toast" role="status" aria-live="polite" key={toast.id}>
+          {toast.message}
         </div>
       )}
 

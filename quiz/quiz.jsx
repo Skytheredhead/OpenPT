@@ -227,11 +227,13 @@ const PracticeRunner = ({ state, setState, onFinish, onExit }) => {
       feedbackMsg = rand(wrongMessages);
     }
   }
+  const hasSideExhibit = hasQuestionSideExhibit(q);
 
   return (
     <div className="run-shell footer-bar">
       <div className="run-stage">
-        <div className="qcard qcard-enter">
+        <div className={`qcard qcard-enter ${hasSideExhibit ? 'has-side-exhibit' : ''}`}>
+          <div className="q-main-card">
           <div className="qcard-meta">
             <span>{q.semesterLabel} / {q.examLabel} / question {currentPosition} of {state.quizIds.length}</span>
             {attemptCount > 0 && !state.answered && <span className="tag repeat">repeat ×{attemptCount}</span>}
@@ -239,7 +241,7 @@ const PracticeRunner = ({ state, setState, onFinish, onExit }) => {
 
           <h2 className="qcard-text">{q.question}</h2>
 
-          {!q.hasLab && <QuestionExhibit q={q} />}
+          {!q.hasLab && !hasSideExhibit && <QuestionExhibit q={q} />}
 
           <AnswerTransition transitionKey={`practice-${state.activeId}-${q.hasLab ? 'lab' : q.pairs ? 'pairs' : 'opts'}`}>
             {q.hasLab ? (
@@ -308,6 +310,13 @@ const PracticeRunner = ({ state, setState, onFinish, onExit }) => {
               </button>
             )}
           </div>
+          </div>
+
+          {hasSideExhibit && (
+            <aside className="q-exhibit-card">
+              <QuestionExhibit q={q} />
+            </aside>
+          )}
         </div>
 
         {celebration && (
@@ -476,18 +485,20 @@ const QuizRunner = ({ state, setState, onFinish, onExit }) => {
   const positionCount = idx + 1;
   const progress = total ? positionCount / total : 0;
   const isLast = idx === total - 1;
+  const hasSideExhibit = hasQuestionSideExhibit(q);
 
   return (
     <div className="run-shell footer-bar">
       <div className="run-stage">
-        <div className="qcard qcard-enter">
+        <div className={`qcard qcard-enter ${hasSideExhibit ? 'has-side-exhibit' : ''}`}>
+          <div className="q-main-card">
           <div className="qcard-meta">
             <span>{q.semesterLabel} / {q.examLabel} / question {idx + 1} of {total}</span>
           </div>
 
           <h2 className="qcard-text">{q.question}</h2>
 
-          {!q.hasLab && <QuestionExhibit q={q} />}
+          {!q.hasLab && !hasSideExhibit && <QuestionExhibit q={q} />}
 
           <AnswerTransition transitionKey={`quiz-${qid}-${q.hasLab ? 'lab' : q.pairs ? 'pairs' : 'opts'}`}>
             {q.hasLab ? (
@@ -549,6 +560,12 @@ const QuizRunner = ({ state, setState, onFinish, onExit }) => {
             )}
           </div>
 
+          </div>
+          {hasSideExhibit && (
+            <aside className="q-exhibit-card">
+              <QuestionExhibit q={q} />
+            </aside>
+          )}
         </div>
       </div>
 
@@ -589,6 +606,10 @@ const QuestionExhibit = ({ q }) => {
     </div>
   );
 };
+
+function hasQuestionSideExhibit(q) {
+  return !q?.hasLab && (Boolean(q.exhibit) || Boolean(q.code?.length) || Boolean(q.hasExhibit));
+}
 
 const LabQuestionPanel = ({ q, mode, answered = false, progress = null, onSubmit }) => {
   const [open, setOpen] = useStateR(false);

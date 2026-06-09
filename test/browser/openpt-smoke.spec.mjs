@@ -282,6 +282,12 @@ test("jeopardy board and scoring flow work", async ({ page }) => {
   expect(headerAlignment.childCenters).toEqual([headerAlignment.center, headerAlignment.center]);
 
   await page.locator(".jeopardy-board .jeopardy-tile").first().click();
+  await expect(page.locator(".jeopardy-modal")).toBeVisible();
+  await page.keyboard.press("Escape");
+  await expect(page.locator(".jeopardy-modal")).toBeHidden();
+  await expect(page.locator(".jeopardy-tile.answered")).toHaveCount(0);
+
+  await page.locator(".jeopardy-board .jeopardy-tile").first().click();
   await page.getByRole("button", { name: "Show Choices" }).click();
   await expect(page.locator(".jeopardy-choice-list li")).toHaveCount(4);
   const choiceLayout = await page.locator(".jeopardy-modal").evaluate((modal) => {
@@ -313,6 +319,39 @@ test("jeopardy board and scoring flow work", async ({ page }) => {
   await expect(firstFinalTeam.locator("button").first()).toBeDisabled();
   await firstFinalTeam.locator("button").first().click({ force: true }).catch(() => {});
   await expect(page.locator(".jeopardy-team strong").first()).toHaveText("150");
+
+  expect(errors, "browser console/page errors").toEqual([]);
+});
+
+test("jeopardy daily double wagers cannot exceed the legal maximum", async ({ page }) => {
+  const errors = collectPageErrors(page);
+  await page.addInitScript(() => {
+    localStorage.setItem("openpt:jeopardy", JSON.stringify({
+      deckId: "all",
+      seed: "automation-seed",
+      teams: [
+        { id: "team-1", name: "Team 1", score: 500 },
+        { id: "team-2", name: "Team 2", score: 0 },
+        { id: "team-3", name: "Team 3", score: 0 },
+      ],
+      answered: {},
+      musicEnabled: false,
+      finalScored: {},
+      activeTeamId: "team-1",
+    }));
+  });
+
+  await page.goto("/jeopardy");
+  await page.locator('.jeopardy-board .jeopardy-tile[data-daily-double="true"]').first().click();
+  const wagerInput = page.locator(".jeopardy-daily-wager input");
+  await expect(wagerInput).toBeVisible();
+  await expect(page.locator(".jeopardy-daily-wager")).toContainText("Max 500");
+  await wagerInput.fill("100000");
+  await expect(wagerInput).toHaveValue("500");
+  await expect(page.locator(".jeopardy-toast")).toContainText("You can only wager up to 500");
+  await expect(page.locator(".jeopardy-toast")).toContainText("your current score or the clue value");
+  await page.locator(".jeopardy-awards button", { hasText: /^Correct$/ }).first().click();
+  await expect(page.locator(".jeopardy-team strong").first()).toHaveText("1000");
 
   expect(errors, "browser console/page errors").toEqual([]);
 });

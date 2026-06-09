@@ -8,6 +8,7 @@ function Topology(props) {
     onLinkRequest, onPacketRequest, simRunning, packets, activeHopDeviceId,
     viewState, onViewStateChange,
     starterScreenVisible, onCreateProject, onCreateStarter, onImportPacketTracer,
+    onOpenGames, onOpenJeopardy, onOpenLearn,
     selectedLinkId, onSelectLink, onLinkContextMenu, onMarqueeSelect,
   } = props;
   const selSet = React.useMemo(() => new Set(selectedIds || []), [selectedIds]);
@@ -87,14 +88,24 @@ function Topology(props) {
     return { x: (px - r.left - currentPan.x) / currentPan.k, y: (py - r.top - currentPan.y) / currentPan.k };
   };
 
+  const isDeviceDrag = (e) => Array.from(e.dataTransfer?.types || []).includes("text/x-openpt-device");
+
   // ── Drop new device from palette
   const onDrop = (e) => {
     const kind = e.dataTransfer.getData("text/x-openpt-device");
     if (!kind) return;
+    e.preventDefault();
+    e.stopPropagation();
     const p = screenToWorld(e.clientX, e.clientY);
     paletteDropRef.current = Object.keys(devices).length === 0;
     onAddDevice(kind, p.x, p.y);
+  };
+
+  const onDragOver = (e) => {
+    if (!isDeviceDrag(e)) return;
     e.preventDefault();
+    e.stopPropagation();
+    e.dataTransfer.dropEffect = "copy";
   };
 
   // ── Pan with middle/right drag
@@ -463,7 +474,8 @@ function Topology(props) {
       ref={wrapRef}
       className="canvas-wrap"
       onDrop={onDrop}
-      onDragOver={(e) => e.preventDefault()}
+      onDragEnter={onDragOver}
+      onDragOver={onDragOver}
       onMouseDown={onMouseDownBg}
       style={{
         backgroundPosition: `${pan.x}px ${pan.y}px`,
@@ -551,6 +563,9 @@ function Topology(props) {
             <button type="button" className="starter-action primary" onClick={(e) => { e.stopPropagation(); onCreateProject && onCreateProject(); }}>New Blank</button>
             <button type="button" className="starter-action" onClick={(e) => { e.stopPropagation(); onCreateStarter && onCreateStarter(); }}>Starter Lab</button>
             <button type="button" className="starter-action" onClick={(e) => { e.stopPropagation(); onImportPacketTracer && onImportPacketTracer(); }}>Import PKA File</button>
+            <button type="button" className="starter-action" onClick={(e) => { e.stopPropagation(); onOpenGames && onOpenGames(); }}>Games</button>
+            <button type="button" className="starter-action" onClick={(e) => { e.stopPropagation(); onOpenJeopardy && onOpenJeopardy(); }}>Jeopardy</button>
+            <button type="button" className="starter-action" onClick={(e) => { e.stopPropagation(); onOpenLearn && onOpenLearn(); }}>Learn</button>
           </div>
         </div>
       )}
