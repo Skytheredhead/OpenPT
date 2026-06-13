@@ -103,7 +103,10 @@ function StudyRunner({ state, setState, client, onFinish, onExit }) {
     setBusy(true);
     setError("");
     try {
-      const report = await client.finishStudySession(state.sessionId, window.QUESTIONS.filter(q => q.bank?.startsWith("ccna/")).length);
+      const totalQuestions = window.OpenPTQuizBanks?.questionKeysForBanks
+        ? window.OpenPTQuizBanks.questionKeysForBanks(window.QUESTIONS || [], state.bankKeys || ["ccna/all"]).length
+        : window.QUESTIONS.filter(q => q.bank?.startsWith("ccna/")).length;
+      const report = await client.finishStudySession(state.sessionId, totalQuestions);
       setState(prev => ({ ...prev, endedAt: Date.now(), report }));
       onFinish();
     } catch (err) {

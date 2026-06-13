@@ -62,6 +62,21 @@ test("CCNA-B authored lab registry covers quiz A, B, and C lab items", () => {
   }
 });
 
+test("authored labs can be matched to Learn lesson question banks", () => {
+  const labs = loadRegistry();
+  const quizOne = labs.labsForBanks(["ccna-b/quiz-01"]);
+  assert.deepEqual(Array.from(quizOne, (lab) => lab.questionSlide), [48, 49, 50, 51]);
+  assert.equal(quizOne.every((lab) => lab.quizBank === "ccna-b/quiz-01"), true);
+
+  const bossRush = labs.labsForBanks(["ccna-b/all"]);
+  assert.equal(bossRush.length, labs.all.length);
+  assert.equal(bossRush[0].id, "ccna-b-q1-48-etherchannel-vlan");
+  assert.equal(bossRush.at(-1).id, "ccna-b-q3-50-dhcp-relay");
+
+  const explicit = labs.labsForRefs(["ccna-b-q2-54-nat-pat", "missing", "ccna-b-q1-49-dhcp-routerb"]);
+  assert.deepEqual(Array.from(explicit, (lab) => lab.id), ["ccna-b-q1-49-dhcp-routerb", "ccna-b-q2-54-nat-pat"]);
+});
+
 test("every authored lab factory returns simulator-ready state and checks", () => {
   const labs = loadRegistry();
   for (const meta of labs.all) {

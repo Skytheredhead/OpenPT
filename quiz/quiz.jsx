@@ -593,6 +593,7 @@ const QuizRunner = ({ state, setState, onFinish, onExit }) => {
 const QuestionExhibit = ({ q }) => {
   const blocks = [];
   if (q.exhibit?.type === 'topology') blocks.push(<TopologyExhibit key="topology" exhibit={q.exhibit} />);
+  if (q.exhibit?.type === 'cable-termination') blocks.push(<CableTerminationExhibit key="cable" />);
   if (q.code?.length) blocks.push(<CodeExhibit key="code" lines={q.code} />);
   if (blocks.length) return <div className="q-exhibit-stack">{blocks}</div>;
   if (!q.hasExhibit) return null;
@@ -893,6 +894,23 @@ const CodeExhibit = ({ lines }) => (
     {lines.map((line, idx) => <div key={idx}>{line}</div>)}
   </div>
 );
+
+const CableTerminationExhibit = () => {
+  const wires = ['blue', 'orange', 'green', 'brown'];
+  return (
+    <div className="qcable-exhibit" aria-label="Cable termination exhibit">
+      <div className="qcable-jacket" />
+      <div className="qcable-fan">
+        {wires.map((wire, idx) => (
+          <span key={wire} className={`qcable-wire ${wire}`} style={{ '--wire-index': idx }} />
+        ))}
+      </div>
+      <div className="qcable-plug">
+        {Array.from({ length: 8 }, (_, idx) => <span key={idx} />)}
+      </div>
+    </div>
+  );
+};
 
 function fitQuizTopologyNodes(nodes) {
   if (!nodes.length) return [];

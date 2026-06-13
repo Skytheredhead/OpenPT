@@ -377,7 +377,8 @@
   margin: -4px 0 24px;
 }
 .q-exhibit-stack .qtopology-exhibit,
-.q-exhibit-stack .qcode-exhibit {
+.q-exhibit-stack .qcode-exhibit,
+.q-exhibit-stack .qcable-exhibit {
   margin: 0;
 }
 
@@ -476,6 +477,79 @@
   color: var(--fg-0);
   text-align: center;
   white-space: pre-line;
+}
+
+.qcable-exhibit {
+  position: relative;
+  height: 220px;
+  margin: -4px 0 24px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background:
+    radial-gradient(circle at center, var(--grid-dot) 0.8px, transparent 1px),
+    color-mix(in oklab, var(--bg-0) 74%, var(--bg-1));
+  background-size: 22px 22px, auto;
+  overflow: hidden;
+}
+.qcable-jacket {
+  position: absolute;
+  left: 8%;
+  top: 86px;
+  width: 38%;
+  height: 54px;
+  border-radius: 28px 10px 10px 28px;
+  background: linear-gradient(90deg, var(--bg-hi), var(--bg-2));
+  border: 1px solid var(--line);
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.05), 0 12px 26px rgba(0,0,0,.24);
+}
+.qcable-fan {
+  position: absolute;
+  left: 42%;
+  top: 72px;
+  width: 34%;
+  height: 84px;
+}
+.qcable-wire {
+  position: absolute;
+  left: 0;
+  top: calc(7px + var(--wire-index) * 17px);
+  width: 100%;
+  height: 5px;
+  border-radius: 999px;
+  transform-origin: left center;
+  transform: rotate(calc((var(--wire-index) - 1.5) * 8deg));
+  box-shadow: 0 0 0 1px rgba(0,0,0,.18), 0 5px 14px rgba(0,0,0,.22);
+}
+.qcable-wire.blue { background: oklch(0.70 0.12 245); }
+.qcable-wire.orange { background: oklch(0.75 0.16 55); }
+.qcable-wire.green { background: oklch(0.70 0.14 150); }
+.qcable-wire.brown { background: oklch(0.58 0.09 65); }
+.qcable-wire::after {
+  content: "";
+  position: absolute;
+  inset: 1px 0 auto;
+  height: 1px;
+  background: rgba(255,255,255,.55);
+}
+.qcable-plug {
+  position: absolute;
+  right: 8%;
+  top: 70px;
+  width: 19%;
+  height: 90px;
+  display: grid;
+  grid-template-columns: repeat(8, 1fr);
+  gap: 2px;
+  padding: 12px 9px 16px;
+  border-radius: 7px 12px 12px 7px;
+  border: 1px solid var(--line);
+  background: color-mix(in oklab, var(--bg-1) 62%, transparent);
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.06), 0 12px 26px rgba(0,0,0,.24);
+}
+.qcable-plug span {
+  border-radius: 2px;
+  background: color-mix(in oklab, var(--fg-1) 52%, transparent);
+  box-shadow: inset 0 -10px 0 color-mix(in oklab, var(--bg-0) 55%, transparent);
 }
 
 .answer-transition {
@@ -1034,6 +1108,7 @@
 .diagram-review-assets .q-exhibit-stack,
 .diagram-review-assets .qtopology-exhibit,
 .diagram-review-assets .qcode-exhibit,
+.diagram-review-assets .qcable-exhibit,
 .diagram-review-assets .pair-review-table {
   margin-bottom: 14px;
 }
@@ -1638,14 +1713,16 @@
 .qcard-enter .qcard-text,
 .qcard-enter .qstage-exhibit,
 .qcard-enter .qcode-exhibit,
-.qcard-enter .qtopology-exhibit {
+.qcard-enter .qtopology-exhibit,
+.qcard-enter .qcable-exhibit {
   animation: q-row-in .5s cubic-bezier(.22,.85,.2,1) both;
 }
 .qcard-enter .qcard-meta { animation-delay: 60ms; }
 .qcard-enter .qcard-text { animation-delay: 120ms; }
 .qcard-enter .qstage-exhibit,
 .qcard-enter .qcode-exhibit,
-.qcard-enter .qtopology-exhibit { animation-delay: 180ms; }
+.qcard-enter .qtopology-exhibit,
+.qcard-enter .qcable-exhibit { animation-delay: 180ms; }
 @keyframes q-row-in {
   from { opacity: 0; transform: translateY(10px); filter: blur(4px); }
   to   { opacity: 1; transform: translateY(0);    filter: blur(0); }
@@ -1713,6 +1790,9 @@
   }
   .qcard.has-side-exhibit .qtopology-exhibit {
     height: min(52vh, 480px);
+  }
+  .qcard.has-side-exhibit .qcable-exhibit {
+    height: min(38vh, 320px);
   }
 }
 
@@ -2649,6 +2729,10 @@
   }
   .qtopology-exhibit {
     height: 230px;
+    margin-bottom: 18px;
+  }
+  .qcable-exhibit {
+    height: 180px;
     margin-bottom: 18px;
   }
   .qtopology-glyph {

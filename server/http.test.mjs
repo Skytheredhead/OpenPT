@@ -181,7 +181,8 @@ test("email verification gates login and uses single-use token", { timeout: 15_0
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ token: registered.verification.token }),
     });
-    assert.equal(reused.status, 400);
+    assert.equal(reused.status, 200);
+    assert.equal((await reused.json()).alreadyVerified, true);
 
     const session = await loginSession(baseUrl, email);
     assert.equal(session.user.email, email);
@@ -377,7 +378,7 @@ test("ccna lesson endpoints require auth, csrf, and server-calculated XP", { tim
     });
     assert.equal(summary.status, 200);
     const summaryBody = await summary.json();
-    assert.equal(summaryBody.dashboard.totalLessons, 13);
+    assert.equal(summaryBody.dashboard.totalLessons, 50);
     assert.equal(summaryBody.dashboard.completedLessons, 0);
 
     const start = await fetch(`${baseUrl}/api/lessons/ccna/${lesson.id}/start`, {

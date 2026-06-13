@@ -6,6 +6,201 @@
     return JSON.parse(JSON.stringify(value));
   }
 
+  function generatedStepXp(totalXp, capstone = false) {
+    const weights = capstone ? [0.2, 0.25, 0.25, 0.3] : [0.18, 0.24, 0.24, 0.34];
+    const raw = weights.map((weight) => Math.max(1, Math.floor(totalXp * weight)));
+    let remaining = Math.max(0, totalXp - raw.reduce((sum, value) => sum + value, 0));
+    for (let index = raw.length - 1; remaining > 0; index = (index - 1 + raw.length) % raw.length) {
+      raw[index] += 1;
+      remaining -= 1;
+    }
+    return raw;
+  }
+
+  function cleanBankLabel(bank) {
+    return String(bank || "")
+      .replace(/^ccna\//, "CCNA ")
+      .replace(/^ccna-b\//, "CCNA-B ")
+      .replace(/sem-0?(\d)/, "Sem $1")
+      .replace(/m-(\d+)-(\d+)/, "Mod $1-$2")
+      .replace(/final-review/, "Final Review")
+      .replace(/quiz-0?(\d)/, "Quiz $1")
+      .replace(/\/final$/, " Final")
+      .replace(/\//g, " / ");
+  }
+
+  function defaultFocusTags(lesson) {
+    const text = `${lesson.title || ""} ${lesson.moduleBank || ""}`.toLowerCase();
+    const tags = [];
+    const add = (label, pattern) => {
+      if (pattern.test(text)) tags.push(label);
+    };
+    add("OSI", /protocol|model|encapsulation|m-1-3/);
+    add("Ethernet", /ethernet|mac|arp|cabling|m-4-7/);
+    add("IPv4", /ipv4|router|gateway|route|m-8-10|m-11-13/);
+    add("services", /dhcp|dns|http|service|m-14-15/);
+    add("security", /security|ssh|hardening|m-16-17/);
+    add("capstone", /capstone|final/);
+    return tags.length ? tags : ["CCNA"];
+  }
+
+  function defaultLabIdea(lesson) {
+    const banks = lesson.questionBanks || [lesson.moduleBank].filter(Boolean);
+    return {
+      title: `${lesson.title || "Guided mission"} lab`,
+      goal: "Turn the lesson idea into a quick explain-build-prove loop.",
+      topology: "Use the loaded OpenPT topology for this mission.",
+      proof: banks.length
+        ? `Finish the checkpoint and drill ${banks.map(cleanBankLabel).join(", ")}.`
+        : "Finish the checkpoint and explain the expected result.",
+    };
+  }
+
+  function normalizeLessonMetadata(lesson) {
+    const questionBanks = Array.isArray(lesson.questionBanks) && lesson.questionBanks.length
+      ? lesson.questionBanks
+      : [lesson.moduleBank].filter(Boolean);
+    const focusTags = Array.isArray(lesson.focusTags) && lesson.focusTags.length
+      ? lesson.focusTags
+      : defaultFocusTags({ ...lesson, questionBanks });
+    const ccnaBWeight = lesson.ccnaBWeight || (questionBanks.some((bank) => String(bank).startsWith("ccna-b/")) ? "high" : "none");
+    return {
+      ...lesson,
+      focusTags,
+      questionBanks,
+      ccnaBWeight,
+      labIdea: lesson.labIdea || defaultLabIdea({ ...lesson, questionBanks, focusTags }),
+    };
+  }
+
+  function lessonFromBlueprint(blueprint) {
+    const xp = Math.max(1, Number(blueprint.xp || 100));
+    const banks = Array.isArray(blueprint.questionBanks) ? blueprint.questionBanks : [];
+    const focus = Array.isArray(blueprint.focusTags) ? blueprint.focusTags : [];
+    const lab = blueprint.labIdea || defaultLabIdea({ ...blueprint, questionBanks: banks, focusTags: focus });
+    const [predictXp, buildXp, drillXp, proveXp] = generatedStepXp(xp, Number(blueprint.estimatedMinutes || 0) >= 20);
+    const drillText = banks.length ? banks.map(cleanBankLabel).join(", ") : cleanBankLabel(blueprint.moduleBank);
+
+    return normalizeLessonMetadata({
+      ...blueprint,
+      steps: [
+        {
+          id: "predict",
+          kind: "predict",
+          prompt: `Before touching the lab, predict the key rule for ${blueprint.title}.`,
+          checks: [{ type: "manual" }],
+          hints: [
+            `Focus on ${focus.slice(0, 3).join(", ") || "the topic"} before memorizing commands.`,
+            "Say what should happen first, then prove or correct it.",
+          ],
+          commandCoach: "No command yet. Make the rule explicit in one sentence before the build step.",
+          explanation: `This primes retrieval: ${blueprint.title} should start as a rule you can explain without answer choices.`,
+          xp: predictXp,
+        },
+        {
+          id: "lab-idea",
+          kind: "build",
+          prompt: `${lab.title}: ${lab.goal}`,
+          checks: [{ type: "manual" }],
+          hints: [
+            `Topology idea: ${lab.topology}`,
+            "Use the simulator canvas as a memory hook even when the exact feature is a concept review.",
+          ],
+          commandCoach: `Lab idea\nTopology: ${lab.topology}\nProof target: ${lab.proof}`,
+          explanation: "A small topology story makes the quiz wording easier to decode under time pressure.",
+          xp: buildXp,
+        },
+        {
+          id: "drill-linked-banks",
+          kind: "drill",
+          prompt: `Run a focused drill from ${drillText} and explain every miss.`,
+          checks: [{ type: "manual" }],
+          hints: [
+            "Misses become useful only when you name the trap: command, concept, wording, or subnet math.",
+            "For CCNA-B, re-read code and exhibit prompts before choosing the answer.",
+          ],
+          commandCoach: `Quiz banks: ${banks.join(", ") || blueprint.moduleBank}\nGoal: fast correct answers, not slow recognition.`,
+          explanation: "The drill step connects simulator memory to the exact question style used in the imported banks.",
+          xp: drillXp,
+        },
+        {
+          id: "prove",
+          kind: "prove",
+          prompt: `Prove mastery: ${lab.proof}`,
+          checks: [{ type: "manual" }],
+          hints: [
+            "If you cannot explain why the wrong answers are wrong, repeat a smaller drill.",
+            "End with one sentence you could write from memory tomorrow.",
+          ],
+          commandCoach: "Write the proof in your own words, then mark this checkpoint complete.",
+          explanation: "The final proof creates the memory trace that survives a cram session.",
+          xp: proveXp,
+        },
+      ],
+    });
+  }
+
+  function expandLessonCatalog(rawCatalog) {
+    const catalog = clone(rawCatalog || {});
+    const modules = Array.isArray(catalog.modules) ? catalog.modules : [];
+    const moduleOrder = new Map(modules.map((module, index) => [module.id, index]));
+    const authored = (catalog.lessons || []).map((lesson, index) => ({
+      ...normalizeLessonMetadata(lesson),
+      __order: index,
+    }));
+    const generated = (catalog.lessonBlueprints || []).map((blueprint, index) => ({
+      ...lessonFromBlueprint(blueprint),
+      __order: authored.length + index,
+    }));
+    catalog.lessons = [...authored, ...generated]
+      .sort((a, b) => (
+        (moduleOrder.get(a.moduleBank) ?? 9999) - (moduleOrder.get(b.moduleBank) ?? 9999) ||
+        a.__order - b.__order
+      ))
+      .map(({ __order, ...lesson }) => lesson);
+    return catalog;
+  }
+
+  function labSourceLabel(lab) {
+    const bank = cleanBankLabel(lab?.quizBank || "ccna-b");
+    return [bank, lab?.questionSlide ? `Question ${lab.questionSlide}` : ""].filter(Boolean).join(" / ");
+  }
+
+  function labSummary(lab) {
+    if (!lab) return null;
+    return {
+      id: lab.id,
+      key: lab.id,
+      title: lab.title,
+      quizBank: lab.quizBank,
+      questionSlide: lab.questionSlide,
+      estimatedMinutes: lab.estimatedMinutes,
+      sourceLabel: labSourceLabel(lab),
+    };
+  }
+
+  function labsForLesson(lesson) {
+    if (!lesson) return [];
+    const refs = Array.isArray(lesson.labRefs) ? lesson.labRefs : [];
+    const labs = refs.length
+      ? window.OpenPTLabs?.labsForRefs?.(refs) || refs.map((id) => window.OpenPTLabs?.metadata?.(id)).filter(Boolean)
+      : window.OpenPTLabs?.labsForBanks?.(lesson.questionBanks || []) || [];
+    return labs.map(labSummary).filter(Boolean);
+  }
+
+  function labCompletionStepId(lesson, completedStepIds = []) {
+    const completed = new Set(completedStepIds || []);
+    const steps = lesson?.steps || [];
+    const buildSteps = steps.filter((step) => step.kind === "build");
+    return (
+      buildSteps.find((step) => !completed.has(step.id))?.id ||
+      buildSteps[0]?.id ||
+      steps.find((step) => !completed.has(step.id))?.id ||
+      steps[0]?.id ||
+      null
+    );
+  }
+
   function iface(seed = {}) {
     return { ip: "", mask: "", gw: "", up: true, admUp: true, desc: "", ...seed };
   }
@@ -60,12 +255,15 @@
 
   function activityForLesson(lesson) {
     const items = assessmentChecks(lesson);
+    const labIdea = lesson.labIdea
+      ? `<p><strong>Lab idea:</strong> ${lesson.labIdea.goal}</p><p><strong>Proof:</strong> ${lesson.labIdea.proof}</p>`
+      : "";
     return {
       title: lesson.title,
       sourceName: `${lesson.id}.opt`,
       labKey: lesson.id,
       lessonId: lesson.id,
-      instructionsHtml: `<h2>${lesson.title}</h2><p>Follow the coach sidebar. Every checkpoint is tied to simulator state.</p>`,
+      instructionsHtml: `<h2>${lesson.title}</h2><p>Follow the coach sidebar. Every checkpoint is tied to simulator state or a deliberate study proof.</p>${labIdea}`,
       hints: (lesson.steps || []).flatMap((step) => step.hints || []).slice(0, 12),
       answerCommands: answerCommandsFromLesson(lesson),
       assessmentItems: items,
@@ -218,12 +416,36 @@
       catalogPromise = fetch(CATALOG_URL).then((res) => {
         if (!res.ok) throw new Error("Could not load CCNA lesson catalog.");
         return res.json();
-      });
+      }).then(expandLessonCatalog);
     }
     return clone(await catalogPromise);
   }
 
-  function buildLessonLab(lesson) {
+  function buildLessonLab(lesson, options = {}) {
+    const labId = typeof options === "string" ? options : options?.labId;
+    if (labId) {
+      const built = window.OpenPTLabs?.build?.(labId);
+      if (!built) throw new Error(`Unknown lesson lab: ${labId}`);
+      const meta = labSummary(window.OpenPTLabs?.metadata?.(labId)) || labsForLesson(lesson).find((lab) => lab.id === labId);
+      return {
+        title: built.title || meta?.title || lesson.title,
+        fileName: `${labId}.opt`,
+        devices: built.devices,
+        links: built.links,
+        activity: {
+          ...(built.activity || {}),
+          labKey: labId,
+          lessonId: lesson.id,
+          sourceLessonId: lesson.id,
+          sourceName: built.activity?.sourceName || `${labId}.opt`,
+          gradingProfile: {
+            ...(built.activity?.gradingProfile || {}),
+            mode: "ccna-guided-lab",
+          },
+        },
+        lab: meta || null,
+      };
+    }
     const factory = factories[lesson.labFactory];
     if (!factory) throw new Error(`Unknown lesson lab factory: ${lesson.labFactory}`);
     const lab = factory(lesson);
@@ -295,7 +517,73 @@
     return new Set((dashboard?.lessons || []).filter((lesson) => lesson.status === "completed").map((lesson) => lesson.id));
   }
 
-  function LessonPathView({ catalog, dashboard, user, loading, onStartLesson, onSignIn, onBackToLab }) {
+  function semesterLabel(catalog, semesterId) {
+    return catalog?.semesters?.find((semester) => semester.id === semesterId)?.title || semesterId || "Semester";
+  }
+
+  function quizBankHref(bank, mode = "practice") {
+    return `/quiz/?bank=${encodeURIComponent(bank)}&mode=${encodeURIComponent(mode)}`;
+  }
+
+  function QuestionBankLinks({ banks = [], compact = false }) {
+    const visibleBanks = [...new Set(banks)].filter(Boolean);
+    if (!visibleBanks.length) return null;
+    return (
+      <div className={compact ? "learn-bank-links compact" : "learn-bank-links"}>
+        {visibleBanks.map((bank) => (
+          <a key={bank} href={quizBankHref(bank)} target="_blank" rel="noreferrer">{cleanBankLabel(bank)}</a>
+        ))}
+      </div>
+    );
+  }
+
+  function FocusTags({ tags = [], ccnaBWeight = "none" }) {
+    const visibleTags = [...new Set(tags)].filter(Boolean).slice(0, 5);
+    if (ccnaBWeight !== "none") visibleTags.push(ccnaBWeight === "high" ? "CCNA-B high" : "CCNA-B light");
+    if (!visibleTags.length) return null;
+    return (
+      <div className="learn-focus-tags">
+        {visibleTags.map((tag) => <span key={tag}>{tag}</span>)}
+      </div>
+    );
+  }
+
+  function LessonLabCards({ lesson, user, compact = false, activeLab = null, labProgress = null, onOpenLab }) {
+    const labs = labsForLesson(lesson);
+    if (!labs.length) return null;
+    const visibleLabs = compact ? labs.slice(0, 3) : labs;
+    const extraCount = Math.max(0, labs.length - visibleLabs.length);
+    return (
+      <div className={compact ? "learn-linked-labs compact" : "learn-linked-labs"}>
+        <div className="learn-linked-labs-head">
+          <span>Labs</span>
+          <strong>{labs.length}</strong>
+        </div>
+        <div className="learn-linked-lab-list">
+          {visibleLabs.map((lab) => {
+            const isActive = activeLab?.labId === lab.id;
+            const progress = isActive ? labProgress : null;
+            return (
+              <button
+                type="button"
+                key={lab.id}
+                className={`learn-linked-lab ${isActive ? "active" : ""}`}
+                disabled={!user}
+                onClick={() => onOpenLab?.(lab.id)}
+              >
+                <span>{lab.sourceLabel}</span>
+                <strong>{lab.title}</strong>
+                <em>{progress?.score || `${lab.estimatedMinutes || 8} min`}</em>
+              </button>
+            );
+          })}
+          {extraCount > 0 && <div className="learn-linked-lab-more">+{extraCount} more</div>}
+        </div>
+      </div>
+    );
+  }
+
+  function LessonPathView({ catalog, dashboard, user, loading, onStartLesson, onStartLab, onSignIn, onBackToLab }) {
     const lessons = catalog?.lessons || [];
     const modules = catalog?.modules || [];
     const completed = completedLessonIds(dashboard);
@@ -313,8 +601,8 @@
           <section className="learn-hero">
             <div>
               <div className="learn-kicker">CCNA Guided Lesson Mode</div>
-              <h1>Build the network, then explain why it works.</h1>
-              <p>Semester 1 missions use the simulator as the lesson. Prediction, hints, commands, and explanations unlock as you prove real checkpoints.</p>
+              <h1>Build the network, drill the questions, then explain why it works.</h1>
+              <p>A balanced cram path for all three CCNA semesters. Sem 3 leans into CCNA-B with focused quiz-bank drills, lab ideas, and proof checkpoints.</p>
             </div>
             <div className="learn-score-strip">
               <div><span>XP</span><strong>{dashboard?.earnedXp || 0}/{dashboard?.totalXp || 0}</strong></div>
@@ -343,7 +631,7 @@
                 <div className="learn-module" key={module.id}>
                   <div className="learn-module-head">
                     <div>
-                      <span>{module.semester === "sem-01" ? "Semester 1" : "Planned"}</span>
+                      <span>{semesterLabel(catalog, module.semester)} / {moduleLessons.length} mission{moduleLessons.length === 1 ? "" : "s"}</span>
                       <h2>{module.title}</h2>
                     </div>
                     {badge?.earned && <strong className="learn-badge">Badge earned</strong>}
@@ -362,7 +650,21 @@
                             <span>{lesson.xp} XP</span>
                           </div>
                           <h3>{lesson.title}</h3>
+                          <FocusTags tags={lesson.focusTags} ccnaBWeight={lesson.ccnaBWeight} />
                           <p>{missing.length ? `Soft gate: ${missing.length} earlier mission${missing.length === 1 ? "" : "s"} recommended first.` : "Ready when you are."}</p>
+                          {lesson.labIdea && (
+                            <div className="learn-lab-idea">
+                              <strong>{lesson.labIdea.title}</strong>
+                              <span>{lesson.labIdea.goal}</span>
+                            </div>
+                          )}
+                          <QuestionBankLinks banks={lesson.questionBanks} compact />
+                          <LessonLabCards
+                            lesson={lesson}
+                            user={user}
+                            compact
+                            onOpenLab={(labId) => onStartLab?.(lesson.id, labId)}
+                          />
                           <div className="learn-progress-line">
                             <span style={{ width: `${progress?.bestPercent || 0}%` }} />
                           </div>
@@ -397,7 +699,7 @@
     );
   }
 
-  function LessonCoachSidebar({ catalog, lessonSession, activity, devices, links, onClose, onHint, onManualComplete, onStepSelect, onFinish, onReturnToPath }) {
+  function LessonCoachSidebar({ catalog, lessonSession, activity, devices, links, activeLab, labProgress, onClose, onHint, onManualComplete, onStepSelect, onFinish, onReturnToPath, onOpenLab }) {
     const lesson = (catalog?.lessons || []).find((item) => item.id === lessonSession?.lessonId);
     if (!lesson) return null;
     const completed = new Set(lessonSession.completedStepIds || []);
@@ -415,6 +717,23 @@
             <strong>{lesson.title}</strong>
           </div>
           <button type="button" className="server-module-close" onClick={onClose} title="Hide coach">x</button>
+        </div>
+        <div className="learn-coach-context">
+          <FocusTags tags={lesson.focusTags} ccnaBWeight={lesson.ccnaBWeight} />
+          {lesson.labIdea && (
+            <div className="learn-lab-idea">
+              <strong>{lesson.labIdea.title}</strong>
+              <span>{lesson.labIdea.topology}</span>
+            </div>
+          )}
+          <QuestionBankLinks banks={lesson.questionBanks} compact />
+          <LessonLabCards
+            lesson={lesson}
+            user
+            activeLab={activeLab}
+            labProgress={labProgress}
+            onOpenLab={onOpenLab}
+          />
         </div>
         <div className="learn-coach-progress">
           <div><span>{completed.size}/{lesson.steps.length} checkpoints</span><strong>{lessonSession.earnedXp || 0} XP earned here</strong></div>
@@ -489,6 +808,8 @@
   window.OpenPTLearn = {
     loadLessonCatalog,
     buildLessonLab,
+    labsForLesson,
+    labCompletionStepId,
     stepChecksMet,
     checkMet,
     pingKey,

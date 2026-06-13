@@ -2,7 +2,7 @@
 
 const { useState, useEffect, useMemo } = React;
 
-// Catalog for imported and planned CCNA quiz banks.
+// Catalog for imported CCNA and CCNA-B quiz banks.
 const CATALOG = [
   {
     id: 'ccna', label: 'CCNA',
@@ -40,6 +40,7 @@ const CATALOG = [
   {
     id: 'ccna-b', label: 'CCNA-B',
     exams: [
+      { id: 'all', label: 'ALL CCNA-B', available: true, count: 222, allQuestions: true },
       { id: 'quiz-01', label: 'Quiz 1', available: true, count: 74 },
       { id: 'quiz-02', label: 'Quiz 2', available: true, count: 74 },
       { id: 'quiz-03', label: 'Quiz 3', available: true, count: 74 },
@@ -306,13 +307,13 @@ const SelectionCard = ({ selectedExam, mode, setMode, size, setSize, onLaunch, o
                   Start {mode}
                 </button>
                 {isAll && (
-                  <button type="button" className="sel-start study" onClick={() => onLaunchStudy()}>
+                  <button type="button" className="sel-start study" onClick={() => onLaunchStudy([selectedExam.key])}>
                     <Icon name="target" size={12} />
-                    CCNA Study Mode
+                    {selectedExam.courseId === 'ccna-b' ? 'CCNA-B Study Mode' : 'CCNA Study Mode'}
                   </button>
                 )}
               </div>
-              {isAll && (
+              {isAll && selectedExam.courseId === 'ccna' && (
                 <StudyLaunchDashboard dashboard={studyDashboard} user={user} count={count} />
               )}
             </div>

@@ -105,6 +105,11 @@ test("account tokens are hashed, single-use, and expire", async () => {
     const raw = store.db.prepare("SELECT token_hash FROM account_tokens WHERE user_id=?").get(user.id);
     assert.notEqual(raw.token_hash, issued.token);
     assert.equal(store.consumeAccountToken("email_verify", issued.token).userId, user.id);
+    store.verifyUserEmail(user.id);
+    const used = store.accountTokenStatus("email_verify", issued.token);
+    assert.equal(used.userId, user.id);
+    assert.ok(used.usedAt);
+    assert.ok(used.emailVerifiedAt);
     assert.equal(store.consumeAccountToken("email_verify", issued.token), null);
 
     const expired = store.createAccountToken(user.id, "password_reset", 1);

@@ -320,12 +320,42 @@
   const byId = Object.fromEntries(LABS.map((lab) => [lab.id, lab]));
   const byQuestion = Object.fromEntries(LABS.map((lab) => [`${lab.quizBank}:${lab.questionSlide}`, lab]));
 
+  function compareLabs(a, b) {
+    return (
+      String(a.quizBank || "").localeCompare(String(b.quizBank || "")) ||
+      Number(a.questionSlide || 0) - Number(b.questionSlide || 0) ||
+      String(a.title || "").localeCompare(String(b.title || ""))
+    );
+  }
+
+  function labsForBanks(banks = []) {
+    const wanted = new Set((banks || []).map((bank) => String(bank || "").trim()).filter(Boolean));
+    const allCcnaB = wanted.has("ccna-b/all");
+    return LABS
+      .filter((lab) => allCcnaB || wanted.has(lab.quizBank))
+      .sort(compareLabs);
+  }
+
+  function labsForRefs(refs = []) {
+    const seen = new Set();
+    const labs = [];
+    for (const ref of refs || []) {
+      const lab = byId[String(ref || "").trim()];
+      if (!lab || seen.has(lab.id)) continue;
+      seen.add(lab.id);
+      labs.push(lab);
+    }
+    return labs.sort(compareLabs);
+  }
+
   window.OpenPTLabs = {
     all: LABS,
     byId,
     byQuestion,
     metadata: (id) => byId[id] || null,
     metadataForQuestion: (bank, slide) => byQuestion[`${bank}:${slide}`] || null,
+    labsForBanks,
+    labsForRefs,
     build: (id) => {
       const lab = byId[id];
       return lab ? buildLab(lab) : null;

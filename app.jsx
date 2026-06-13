@@ -1667,6 +1667,8 @@ function App({ initialViewMode = null, initialHomeAction = null } = {}) {
   const createProjectInFlightRef = useRef(false);
   const latestSaveStateRef = useRef({});
   const lessonEventNonceRef = useRef(0);
+  const lessonLabProgressKeyRef = useRef("");
+  const lessonLabCompleteKeyRef = useRef("");
 
   useEffect(() => {
     try { localStorage.setItem("openpt:bottom-height", String(bottomPanelHeight)); } catch (e) {}
@@ -1830,7 +1832,50 @@ function App({ initialViewMode = null, initialHomeAction = null } = {}) {
     return `lesson:${lessonId}:${stepId || "lesson"}:${type}:${lessonEventNonceRef.current}`;
   };
 
-  const startGuidedLesson = async (lessonId) => {
+  const openGuidedLessonTab = (lesson, lab, { labId = null } = {}) => {
+    const norm = OPT_Engine.normalizeTopology(lab.devices, lab.links);
+    const before = captureAppSnapshot();
+    snapshotsRef.current[activeWid] = { devices, links, selectedIds, openConsoles, activeBottom, ptActivity, ptSidebarOpen };
+    const id = `${labId ? "lesson-lab" : "lesson"}-${Date.now()}`;
+    snapshotsRef.current[id] = {
+      devices: norm.devices,
+      links: norm.links,
+      selectedIds: [],
+      openConsoles: [],
+      activeBottom: "events",
+      ptActivity: lab.activity,
+      ptSidebarOpen: !!labId,
+    };
+    setTabs((ts) => [...ts, { id, name: `${lab.fileName}`, source: labId ? "ccna-lesson-lab" : "ccna-lesson" }]);
+    setActiveWid(id);
+    skipNextSnapshot.current = true;
+    setDevices(norm.devices);
+    setLinks(norm.links);
+    setSelectedIds([]);
+    setSelectedLinkId(null);
+    setOpenConsoles([]);
+    setActiveBottom("events");
+    setPtActivity(lab.activity);
+    setPtSidebarOpen(!!labId);
+    setStarterScreenVisible(false);
+    setEvents([]);
+    setPackets([]);
+    setPacketEvents([]);
+    setServerModuleOpen(false);
+    setAppsSidebarOpen(false);
+    setCloudProjectId(null);
+    setCloudVersion(0);
+    setCloudBaseDoc(null);
+    setCloudLease(null);
+    setShareToken(null);
+    setShareMode(null);
+    setSyncStatus({ state: "local", message: "Signed in" });
+    setLessonReward({ title: labId ? "Lab loaded" : "Mission loaded", detail: lab.title || lesson.title, xp: 0, nonce: Date.now() });
+    pushAppUndo(labId ? "opened guided lab" : "opened guided lesson", before);
+    navigateAppRoute(LEARN_URL);
+  };
+
+  const startGuidedLesson = async (lessonId, options = {}) => {
     if (!syncClient || !cloudUser) {
       setAccountInitial({ mode: "login" });
       setAccountOpen(true);
@@ -1847,61 +1892,45 @@ function App({ initialViewMode = null, initialHomeAction = null } = {}) {
       setToast({ kind: "err", msg: err.message || "Could not start lesson" });
       return;
     }
-    const lab = OpenPTLearn.buildLessonLab(lesson);
-    const norm = OPT_Engine.normalizeTopology(lab.devices, lab.links);
-    const before = captureAppSnapshot();
-    snapshotsRef.current[activeWid] = { devices, links, selectedIds, openConsoles, activeBottom, ptActivity, ptSidebarOpen };
-    const id = `lesson-${Date.now()}`;
-    snapshotsRef.current[id] = {
-      devices: norm.devices,
-      links: norm.links,
-      selectedIds: [],
-      openConsoles: [],
-      activeBottom: "events",
-      ptActivity: lab.activity,
-      ptSidebarOpen: false,
-    };
-    setTabs((ts) => [...ts, { id, name: `${lab.fileName}`, source: "ccna-lesson" }]);
-    setActiveWid(id);
-    skipNextSnapshot.current = true;
-    setDevices(norm.devices);
-    setLinks(norm.links);
-    setSelectedIds([]);
-    setSelectedLinkId(null);
-    setOpenConsoles([]);
-    setActiveBottom("events");
-    setPtActivity(lab.activity);
-    setPtSidebarOpen(false);
-    setStarterScreenVisible(false);
-    setEvents([]);
-    setPackets([]);
-    setPacketEvents([]);
-    setServerModuleOpen(false);
-    setAppsSidebarOpen(false);
-    setCloudProjectId(null);
-    setCloudVersion(0);
-    setCloudBaseDoc(null);
-    setCloudLease(null);
-    setShareToken(null);
-    setShareMode(null);
-    setSyncStatus({ state: "local", message: "Signed in" });
+    const labId = options?.labId || null;
+    const lab = OpenPTLearn.buildLessonLab(lesson, { labId });
     const progress = startResult.lesson || {};
     const completedSteps = progress.completedSteps || [];
     const firstIncomplete = (lesson.steps || []).find((step) => !completedSteps.includes(step.id))?.id || lesson.steps?.[0]?.id || null;
+    const labStepId = labId ? OpenPTLearn.labCompletionStepId?.(lesson, completedSteps) || firstIncomplete : null;
+    openGuidedLessonTab(lesson, lab, { labId });
     setLessonSession({
       lessonId: lesson.id,
-      stepId: progress.currentStepId || firstIncomplete,
+      stepId: labStepId || progress.currentStepId || firstIncomplete,
       completedStepIds: completedSteps,
       earnedXp: progress.xp || 0,
       proofs: { pings: {}, actions: {} },
       hintsShown: {},
       coachOpen: true,
       finished: progress.status === "completed",
+      activeLab: labId ? { labId, stepId: labStepId, completed: false, startedAt: Date.now() } : null,
       startedAt: Date.now(),
     });
-    setLessonReward({ title: "Mission loaded", detail: lesson.title, xp: 0, nonce: Date.now() });
-    pushAppUndo("opened guided lesson", before);
-    navigateAppRoute(LEARN_URL);
+  };
+
+  const openLessonLab = async (labId) => {
+    if (!lessonSession?.lessonId) return;
+    const catalog = await loadGuidedLessonCatalog();
+    const lesson = (catalog?.lessons || []).find((item) => item.id === lessonSession.lessonId);
+    if (!lesson || !OpenPTLearn?.buildLessonLab) return;
+    try {
+      const lab = OpenPTLearn.buildLessonLab(lesson, { labId });
+      const stepId = OpenPTLearn.labCompletionStepId?.(lesson, lessonSession.completedStepIds || []) || lessonSession.stepId;
+      openGuidedLessonTab(lesson, lab, { labId });
+      setLessonSession((current) => current ? {
+        ...current,
+        stepId,
+        coachOpen: true,
+        activeLab: { labId, stepId, completed: false, startedAt: Date.now() },
+      } : current);
+    } catch (err) {
+      setToast({ kind: "err", msg: err.message || "Could not open lesson lab" });
+    }
   };
 
   const recordLessonEvent = async (event) => {
@@ -2030,6 +2059,50 @@ function App({ initialViewMode = null, initialHomeAction = null } = {}) {
     }));
     if (ready) completeLessonStep(ready.id, "auto-check");
   }, [lessonSession, lessonCatalog, gradedPtActivity, devices, links, completeLessonStep]);
+  useEffect(() => {
+    const activeLab = lessonSession?.activeLab;
+    if (!activeLab?.labId || !gradedPtActivity?.progress || gradedPtActivity.labKey !== activeLab.labId) return;
+    const progress = gradedPtActivity.progress;
+    const percent = Math.round(Number(progress.percent || 0));
+    const correct = Number(progress.counts?.correct || 0);
+    const total = Number(progress.counts?.total || 0);
+    if (!total) return;
+    const progressKey = `${lessonSession.lessonId}:${activeLab.labId}:${correct}/${total}:${percent}`;
+    if (lessonLabProgressKeyRef.current !== progressKey) {
+      lessonLabProgressKeyRef.current = progressKey;
+      recordLessonEvent({
+        eventType: "lab-progress",
+        stepId: activeLab.stepId || lessonSession.stepId,
+        clientEventId: lessonClientEventId(lessonSession.lessonId, activeLab.stepId || lessonSession.stepId, "lab-progress"),
+        payload: { labId: activeLab.labId, percent, correct, total, score: progress.score || "" },
+      });
+    }
+    if (percent < 100 || activeLab.completed) return;
+    const completeKey = `${lessonSession.lessonId}:${activeLab.labId}:${activeLab.stepId || lessonSession.stepId}`;
+    if (lessonLabCompleteKeyRef.current === completeKey) return;
+    lessonLabCompleteKeyRef.current = completeKey;
+    completeLessonStep(activeLab.stepId || lessonSession.stepId, "lab", {
+      labId: activeLab.labId,
+      percent,
+      correct,
+      total,
+      score: progress.score || "",
+    });
+    setLessonSession((current) => {
+      if (!current?.activeLab || current.activeLab.labId !== activeLab.labId) return current;
+      return { ...current, activeLab: { ...current.activeLab, completed: true } };
+    });
+  }, [lessonSession, gradedPtActivity, completeLessonStep]);
+  const lessonActiveLabProgress = useMemo(() => {
+    const activeLab = lessonSession?.activeLab;
+    if (!activeLab?.labId || gradedPtActivity?.labKey !== activeLab.labId || !gradedPtActivity?.progress) return null;
+    return {
+      percent: Math.round(Number(gradedPtActivity.progress.percent || 0)),
+      score: gradedPtActivity.progress.score || "",
+      correct: Number(gradedPtActivity.progress.counts?.correct || 0),
+      total: Number(gradedPtActivity.progress.counts?.total || 0),
+    };
+  }, [lessonSession?.activeLab?.labId, gradedPtActivity]);
   const displayedImportReport = useMemo(() => {
     if (!lastImportReport) return null;
     const samePacketTracerImport = gradedPtActivity && (
@@ -4241,6 +4314,7 @@ function App({ initialViewMode = null, initialHomeAction = null } = {}) {
           user={cloudUser}
           loading={lessonCatalogLoading}
           onStartLesson={startGuidedLesson}
+          onStartLab={(lessonId, labId) => startGuidedLesson(lessonId, { labId })}
           onSignIn={openLessonSignIn}
           onBackToLab={() => navigateAppRoute("/lab")}
         />
@@ -4525,11 +4599,14 @@ function App({ initialViewMode = null, initialHomeAction = null } = {}) {
             activity={gradedPtActivity}
             devices={devices}
             links={links}
+            activeLab={lessonSession.activeLab}
+            labProgress={lessonActiveLabProgress}
             onClose={() => setLessonSession((current) => current ? { ...current, coachOpen: false } : current)}
             onHint={revealLessonHint}
             onManualComplete={(stepId) => completeLessonStep(stepId, "manual")}
             onStepSelect={(stepId) => setLessonSession((current) => current ? { ...current, stepId, coachOpen: true } : current)}
             onFinish={finishGuidedLesson}
+            onOpenLab={openLessonLab}
             onReturnToPath={() => {
               setLessonSession(null);
               refreshLessonDashboard();
@@ -5518,7 +5595,8 @@ function AccountDialog({ syncClient, user, initial, onClose, onSignedIn, onSigne
         setStatus(`Verification sent to ${data.email || email}.`);
         setMode("verify-sent");
       } else if (mode === "verify") {
-        await syncClient.verifyEmail(token);
+        const data = await syncClient.verifyEmail(token);
+        if (data.user?.email) setEmail(data.user.email);
         setStatus("Email verified. You can sign in now.");
         setMode("login");
       } else if (mode === "forgot") {

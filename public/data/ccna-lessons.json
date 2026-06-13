@@ -2,6 +2,7 @@
   "courseId": "ccna",
   "version": 1,
   "title": "CCNA Guided Lesson Mode",
+  "expectedLessonCount": 50,
   "semesters": [
     {
       "id": "sem-01",
@@ -12,14 +13,14 @@
     {
       "id": "sem-02",
       "title": "Semester 2",
-      "status": "planned",
-      "description": "Switching, wireless, routing, and first-hop redundancy lessons are planned."
+      "status": "available",
+      "description": "Switching, VLANs, STP, EtherChannel, DHCP, first-hop redundancy, wireless, and routing practice."
     },
     {
       "id": "sem-03",
       "title": "Semester 3",
-      "status": "planned",
-      "description": "Enterprise networking, security, automation, and WAN lessons are planned."
+      "status": "available",
+      "description": "OSPF, ACLs, NAT, WAN/VPN, security, monitoring, QoS, automation, and CCNA-B pressure review."
     }
   ],
   "modules": [
@@ -57,6 +58,66 @@
       "id": "ccna/sem-01/final",
       "semester": "sem-01",
       "title": "Semester 1 Final Skills Capstone"
+    },
+    {
+      "id": "ccna/sem-02/m-1-4",
+      "semester": "sem-02",
+      "title": "Modules 1-4: Switching Concepts, VLANs, Trunks, and Inter-VLAN Routing"
+    },
+    {
+      "id": "ccna/sem-02/m-5-6",
+      "semester": "sem-02",
+      "title": "Modules 5-6: STP and EtherChannel"
+    },
+    {
+      "id": "ccna/sem-02/m-7-9",
+      "semester": "sem-02",
+      "title": "Modules 7-9: DHCPv4, SLAAC/DHCPv6, and FHRP"
+    },
+    {
+      "id": "ccna/sem-02/m-10-13",
+      "semester": "sem-02",
+      "title": "Modules 10-13: LAN Security and Wireless"
+    },
+    {
+      "id": "ccna/sem-02/m-14-16",
+      "semester": "sem-02",
+      "title": "Modules 14-16: Routing Concepts, Static Routes, and Troubleshooting"
+    },
+    {
+      "id": "ccna/sem-02/final",
+      "semester": "sem-02",
+      "title": "Semester 2 Switching and Routing Capstone"
+    },
+    {
+      "id": "ccna/sem-03/m-1-2",
+      "semester": "sem-03",
+      "title": "Modules 1-2: Single-Area OSPFv2"
+    },
+    {
+      "id": "ccna/sem-03/m-3-5",
+      "semester": "sem-03",
+      "title": "Modules 3-5: ACLs and Security Concepts"
+    },
+    {
+      "id": "ccna/sem-03/m-6-8",
+      "semester": "sem-03",
+      "title": "Modules 6-8: NAT, WAN, and VPN"
+    },
+    {
+      "id": "ccna/sem-03/m-9-12",
+      "semester": "sem-03",
+      "title": "Modules 9-12: Monitoring, Troubleshooting, and QoS"
+    },
+    {
+      "id": "ccna/sem-03/m-13-14",
+      "semester": "sem-03",
+      "title": "Modules 13-14: Network Automation, Cloud, and Virtualization"
+    },
+    {
+      "id": "ccna-b/final-review",
+      "semester": "sem-03",
+      "title": "CCNA-B Boss Rush"
     }
   ],
   "moduleBanks": [
@@ -66,7 +127,19 @@
     "ccna/sem-01/m-11-13",
     "ccna/sem-01/m-14-15",
     "ccna/sem-01/m-16-17",
-    "ccna/sem-01/final"
+    "ccna/sem-01/final",
+    "ccna/sem-02/m-1-4",
+    "ccna/sem-02/m-5-6",
+    "ccna/sem-02/m-7-9",
+    "ccna/sem-02/m-10-13",
+    "ccna/sem-02/m-14-16",
+    "ccna/sem-02/final",
+    "ccna/sem-03/m-1-2",
+    "ccna/sem-03/m-3-5",
+    "ccna/sem-03/m-6-8",
+    "ccna/sem-03/m-9-12",
+    "ccna/sem-03/m-13-14",
+    "ccna-b/final-review"
   ],
   "labFactories": [
     "lan-two-hosts",
@@ -80,6 +153,526 @@
     "ssh-hardening",
     "small-office-capstone"
   ],
+  "lessonBlueprints": [
+    {
+      "id": "sem1-m1-3-osi-encapsulation",
+      "semester": "sem-01",
+      "moduleBank": "ccna/sem-01/m-1-3",
+      "title": "OSI and Encapsulation Speed Map",
+      "estimatedMinutes": 14,
+      "xp": 100,
+      "labFactory": "lan-two-hosts",
+      "prerequisites": ["sem1-m1-3-ios-modes-hostname"],
+      "focusTags": ["OSI", "TCP/IP", "encapsulation"],
+      "questionBanks": ["ccna/sem-01/m-1-3"],
+      "ccnaBWeight": "none",
+      "labIdea": { "title": "PDU walkdown", "goal": "Name what each layer adds before a packet crosses the LAN.", "topology": "PC1, SW1, and SRV1 on one small LAN.", "proof": "Explain the source and destination MAC, IP, and port fields for one request." }
+    },
+    {
+      "id": "sem1-m8-10-ipv6-and-gateways",
+      "semester": "sem-01",
+      "moduleBank": "ccna/sem-01/m-8-10",
+      "title": "IPv6, Prefixes, and Gateway Decisions",
+      "estimatedMinutes": 16,
+      "xp": 110,
+      "labFactory": "ipv4-two-lans",
+      "prerequisites": ["sem1-m8-10-router-basics-save"],
+      "focusTags": ["IPv6", "prefix", "default gateway"],
+      "questionBanks": ["ccna/sem-01/m-8-10", "ccna/sem-01/final"],
+      "ccnaBWeight": "none",
+      "labIdea": { "title": "Dual-stack local or remote", "goal": "Decide whether a host sends directly or to the gateway for IPv4 and IPv6 destinations.", "topology": "Two LANs connected through one router.", "proof": "Classify five destinations as local or remote and identify the next hop." }
+    },
+    {
+      "id": "sem1-m11-13-subnet-speed-drill",
+      "semester": "sem-01",
+      "moduleBank": "ccna/sem-01/m-11-13",
+      "title": "Subnet Boundaries Without Freezing",
+      "estimatedMinutes": 16,
+      "xp": 110,
+      "labFactory": "static-route-two-routers",
+      "prerequisites": ["sem1-m11-13-icmp-troubleshoot"],
+      "focusTags": ["subnetting", "prefix length", "host range"],
+      "questionBanks": ["ccna/sem-01/m-11-13", "ccna/sem-01/final"],
+      "ccnaBWeight": "light",
+      "labIdea": { "title": "Subnet boundary sprint", "goal": "Find network, broadcast, first host, and last host from common masks.", "topology": "Two-router branch addressing worksheet.", "proof": "Correctly derive boundaries for /26, /27, /28, and /30 examples." }
+    },
+    {
+      "id": "sem2-m1-4-switch-boot-interface-triage",
+      "semester": "sem-02",
+      "moduleBank": "ccna/sem-02/m-1-4",
+      "title": "Switch Boot and Interface Triage",
+      "estimatedMinutes": 15,
+      "xp": 110,
+      "labFactory": "cabling-link-state",
+      "prerequisites": ["sem1-final-small-office-capstone"],
+      "focusTags": ["switch boot", "duplex", "show interfaces"],
+      "questionBanks": ["ccna/sem-02/m-1-4", "ccna-b/quiz-02"],
+      "ccnaBWeight": "light",
+      "labIdea": { "title": "Interface symptom sorter", "goal": "Choose the right show command for link, duplex, speed, and boot-image symptoms.", "topology": "One switch connected to a router and one host.", "proof": "Match each symptom to the command that proves or disproves it." }
+    },
+    {
+      "id": "sem2-m1-4-vlan-trunk-router-stick",
+      "semester": "sem-02",
+      "moduleBank": "ccna/sem-02/m-1-4",
+      "title": "VLANs, Trunks, and Router-on-a-Stick",
+      "estimatedMinutes": 18,
+      "xp": 120,
+      "labFactory": "ipv4-two-lans",
+      "prerequisites": ["sem2-m1-4-switch-boot-interface-triage"],
+      "focusTags": ["VLAN", "trunk", "native VLAN", "inter-VLAN"],
+      "questionBanks": ["ccna/sem-02/m-1-4", "ccna-b/quiz-01"],
+      "ccnaBWeight": "high",
+      "labIdea": { "title": "Campus trunk sketch", "goal": "Separate users into VLANs and identify what must be tagged on the router link.", "topology": "Two access switches, one trunk, and one router-on-a-stick edge.", "proof": "Predict whether frames are tagged or untagged on access, trunk, and native VLAN links." }
+    },
+    {
+      "id": "sem2-m5-6-stp-root-election",
+      "semester": "sem-02",
+      "moduleBank": "ccna/sem-02/m-5-6",
+      "title": "STP Root Bridge and Port Roles",
+      "estimatedMinutes": 16,
+      "xp": 110,
+      "labFactory": "switch-mac-arp",
+      "prerequisites": ["sem2-m1-4-vlan-trunk-router-stick"],
+      "focusTags": ["STP", "root bridge", "port roles"],
+      "questionBanks": ["ccna/sem-02/m-5-6", "ccna-b/quiz-02"],
+      "ccnaBWeight": "high",
+      "labIdea": { "title": "Root bridge prediction", "goal": "Pick the root bridge and predict forwarding or blocking ports.", "topology": "Three redundant switches in a triangle.", "proof": "Explain the root path cost and why one redundant link blocks." }
+    },
+    {
+      "id": "sem2-m5-6-etherchannel-modes",
+      "semester": "sem-02",
+      "moduleBank": "ccna/sem-02/m-5-6",
+      "title": "EtherChannel Mode Memory",
+      "estimatedMinutes": 15,
+      "xp": 110,
+      "labFactory": "switch-mac-arp",
+      "prerequisites": ["sem2-m5-6-stp-root-election"],
+      "focusTags": ["EtherChannel", "LACP", "PAgP", "PortFast", "BPDU Guard"],
+      "questionBanks": ["ccna/sem-02/m-5-6"],
+      "ccnaBWeight": "light",
+      "labIdea": { "title": "Bundle and edge-port matrix", "goal": "Recognize which EtherChannel mode pairs form a channel and where PortFast/BPDU Guard belong.", "topology": "Two switches joined by two parallel links plus access edge ports.", "proof": "Complete a mode matrix for active, passive, desirable, auto, and on, then classify safe edge ports." }
+    },
+    {
+      "id": "sem2-m5-6-etherchannel-troubleshooting",
+      "semester": "sem-02",
+      "moduleBank": "ccna/sem-02/m-5-6",
+      "title": "EtherChannel Troubleshooting Checklist",
+      "estimatedMinutes": 16,
+      "xp": 110,
+      "labFactory": "cabling-link-state",
+      "prerequisites": ["sem2-m5-6-etherchannel-modes"],
+      "focusTags": ["EtherChannel", "troubleshooting", "consistency"],
+      "questionBanks": ["ccna/sem-02/m-5-6", "ccna/sem-02/final"],
+      "ccnaBWeight": "light",
+      "labIdea": { "title": "Bundle mismatch hunt", "goal": "Find mismatched speed, duplex, trunking, VLAN, and channel modes.", "topology": "Two-switch bundle with one intentional mismatch.", "proof": "List the first three checks before changing configuration." }
+    },
+    {
+      "id": "sem2-m7-9-dhcp-relay",
+      "semester": "sem-02",
+      "moduleBank": "ccna/sem-02/m-7-9",
+      "title": "DHCP Relay and Helper Address",
+      "estimatedMinutes": 15,
+      "xp": 110,
+      "labFactory": "dhcp-router",
+      "prerequisites": ["sem2-m5-6-etherchannel-troubleshooting"],
+      "focusTags": ["DHCPv4", "relay", "ip helper-address"],
+      "questionBanks": ["ccna/sem-02/m-7-9", "ccna-b/quiz-01"],
+      "ccnaBWeight": "high",
+      "labIdea": { "title": "Relay the broadcast", "goal": "Decide which interface gets the helper address and which server address it points to.", "topology": "Client LAN, relay router, WAN link, and remote DHCP server.", "proof": "Place the helper command and explain why it is not configured on the server LAN." }
+    },
+    {
+      "id": "sem2-m7-9-slaac-dhcpv6",
+      "semester": "sem-02",
+      "moduleBank": "ccna/sem-02/m-7-9",
+      "title": "SLAAC and DHCPv6 Address Stories",
+      "estimatedMinutes": 16,
+      "xp": 110,
+      "labFactory": "ipv4-two-lans",
+      "prerequisites": ["sem2-m7-9-dhcp-relay"],
+      "focusTags": ["SLAAC", "DHCPv6", "router advertisements"],
+      "questionBanks": ["ccna/sem-02/m-7-9", "ccna/sem-02/final"],
+      "ccnaBWeight": "light",
+      "labIdea": { "title": "IPv6 host bootstrap", "goal": "Distinguish SLAAC-only, stateless DHCPv6, and stateful DHCPv6 behavior.", "topology": "IPv6 LAN with router advertisements and one host.", "proof": "Match flags and services to the address information a host learns." }
+    },
+    {
+      "id": "sem2-m7-9-hsrp-active-standby",
+      "semester": "sem-02",
+      "moduleBank": "ccna/sem-02/m-7-9",
+      "title": "HSRP Active, Standby, Virtual IP",
+      "estimatedMinutes": 15,
+      "xp": 110,
+      "labFactory": "static-route-two-routers",
+      "prerequisites": ["sem2-m7-9-slaac-dhcpv6"],
+      "focusTags": ["HSRP", "FHRP", "virtual MAC"],
+      "questionBanks": ["ccna/sem-02/m-7-9", "ccna-b/quiz-01"],
+      "ccnaBWeight": "high",
+      "labIdea": { "title": "First-hop ownership", "goal": "Identify which router answers ARP for the virtual IP.", "topology": "Two routers share a LAN as redundant default gateways.", "proof": "Explain active vs standby behavior before and after the active router fails." }
+    },
+    {
+      "id": "sem2-m10-13-port-security-snooping",
+      "semester": "sem-02",
+      "moduleBank": "ccna/sem-02/m-10-13",
+      "title": "Port Security and DHCP Snooping",
+      "estimatedMinutes": 16,
+      "xp": 110,
+      "labFactory": "ios-switch",
+      "prerequisites": ["sem2-m7-9-hsrp-active-standby"],
+      "focusTags": ["port security", "DHCP snooping", "trusted port"],
+      "questionBanks": ["ccna/sem-02/m-10-13"],
+      "ccnaBWeight": "light",
+      "labIdea": { "title": "Trust the uplink", "goal": "Identify which ports can legitimately send DHCP server replies.", "topology": "Access switch with user ports, uplink, and DHCP server path.", "proof": "Mark trusted and untrusted ports and explain what a rogue server would trigger." }
+    },
+    {
+      "id": "sem2-m10-13-dai-trust-boundary",
+      "semester": "sem-02",
+      "moduleBank": "ccna/sem-02/m-10-13",
+      "title": "Dynamic ARP Inspection Trust Boundary",
+      "estimatedMinutes": 16,
+      "xp": 110,
+      "labFactory": "switch-mac-arp",
+      "prerequisites": ["sem2-m10-13-port-security-snooping"],
+      "focusTags": ["DAI", "ARP inspection", "trust"],
+      "questionBanks": ["ccna/sem-02/m-10-13", "ccna-b/quiz-01"],
+      "ccnaBWeight": "high",
+      "labIdea": { "title": "DAI trusted port map", "goal": "Tell trusted uplinks from default-untrusted access ports.", "topology": "Switch VLANs 11, 14, and 18 with one trusted uplink.", "proof": "Given a partial config, state which ports are trusted and which ARP packets fail." }
+    },
+    {
+      "id": "sem2-m10-13-wireless-ap-channel",
+      "semester": "sem-02",
+      "moduleBank": "ccna/sem-02/m-10-13",
+      "title": "Wireless AP Modes, SSIDs, and Channels",
+      "estimatedMinutes": 16,
+      "xp": 110,
+      "labFactory": "small-office-capstone",
+      "prerequisites": ["sem2-m10-13-dai-trust-boundary"],
+      "focusTags": ["wireless", "SSID", "nonoverlapping channels"],
+      "questionBanks": ["ccna/sem-02/m-10-13", "ccna-b/quiz-01"],
+      "ccnaBWeight": "high",
+      "labIdea": { "title": "Roaming WLAN design", "goal": "Use one SSID with unique nonoverlapping channels for expansion.", "topology": "Three access points covering adjacent office areas.", "proof": "Choose SSIDs and channels that support roaming without self-interference." }
+    },
+    {
+      "id": "sem2-m10-13-wlc-security",
+      "semester": "sem-02",
+      "moduleBank": "ccna/sem-02/m-10-13",
+      "title": "WLC Interfaces and Layer 2 Security",
+      "estimatedMinutes": 15,
+      "xp": 110,
+      "labFactory": "small-office-capstone",
+      "prerequisites": ["sem2-m10-13-wireless-ap-channel"],
+      "focusTags": ["WLC", "WPA2", "management interface"],
+      "questionBanks": ["ccna/sem-02/m-10-13", "ccna-b/quiz-01", "ccna-b/quiz-02"],
+      "ccnaBWeight": "high",
+      "labIdea": { "title": "WLC GUI choice drill", "goal": "Know where WPA/WPA2, web auth, and management-interface choices live.", "topology": "One WLC, two lightweight APs, and one WLAN profile.", "proof": "Classify each setting as Layer 2 security, Layer 3 security, or management." }
+    },
+    {
+      "id": "sem2-m14-16-routing-table-longest-match",
+      "semester": "sem-02",
+      "moduleBank": "ccna/sem-02/m-14-16",
+      "title": "Routing Table Longest-Match Reflex",
+      "estimatedMinutes": 16,
+      "xp": 110,
+      "labFactory": "static-route-two-routers",
+      "prerequisites": ["sem2-m10-13-wlc-security"],
+      "focusTags": ["routing table", "longest prefix", "administrative distance"],
+      "questionBanks": ["ccna/sem-02/m-14-16", "ccna-b/quiz-01"],
+      "ccnaBWeight": "high",
+      "labIdea": { "title": "Route-choice ladder", "goal": "Choose the route by longest prefix before administrative distance.", "topology": "Router with overlapping /16, /20, /24, and /28 routes.", "proof": "Pick next hops for destinations just inside and outside the most-specific prefix." }
+    },
+    {
+      "id": "sem2-m14-16-floating-default-routes",
+      "semester": "sem-02",
+      "moduleBank": "ccna/sem-02/m-14-16",
+      "title": "Floating Static and Default Routes",
+      "estimatedMinutes": 15,
+      "xp": 110,
+      "labFactory": "static-route-two-routers",
+      "prerequisites": ["sem2-m14-16-routing-table-longest-match"],
+      "focusTags": ["static route", "default route", "floating route"],
+      "questionBanks": ["ccna/sem-02/m-14-16", "ccna/sem-02/final"],
+      "ccnaBWeight": "light",
+      "labIdea": { "title": "Primary and backup exits", "goal": "Set a default route and recognize when a floating backup should appear.", "topology": "Branch router with primary and backup WAN next hops.", "proof": "Explain why the route with the higher AD waits until the primary path fails." }
+    },
+    {
+      "id": "sem2-final-campus-capstone",
+      "semester": "sem-02",
+      "moduleBank": "ccna/sem-02/final",
+      "title": "Semester 2 Campus Build Capstone",
+      "estimatedMinutes": 24,
+      "xp": 160,
+      "labFactory": "small-office-capstone",
+      "prerequisites": ["sem2-m14-16-floating-default-routes"],
+      "focusTags": ["VLAN", "DHCP", "HSRP", "wireless", "security"],
+      "questionBanks": ["ccna/sem-02/final"],
+      "ccnaBWeight": "light",
+      "labIdea": { "title": "Secure campus sketch", "goal": "Combine VLANs, DHCP relay, HSRP, wireless, and access-layer security.", "topology": "Two access switches, redundant gateways, DHCP server, APs, and users.", "proof": "Produce a build checklist and mark the first verification command for each feature." }
+    },
+    {
+      "id": "sem2-final-troubleshooting-capstone",
+      "semester": "sem-02",
+      "moduleBank": "ccna/sem-02/final",
+      "title": "Semester 2 Troubleshooting Capstone",
+      "estimatedMinutes": 22,
+      "xp": 150,
+      "labFactory": "small-office-capstone",
+      "prerequisites": ["sem2-final-campus-capstone"],
+      "focusTags": ["troubleshooting", "switching", "routing"],
+      "questionBanks": ["ccna/sem-02/final", "ccna-b/quiz-02"],
+      "ccnaBWeight": "light",
+      "labIdea": { "title": "Layered fault isolation", "goal": "Narrow a user connectivity failure through physical, VLAN, gateway, DHCP, and route checks.", "topology": "Small campus with one hidden switching or gateway issue.", "proof": "Write the shortest command sequence that isolates the failed layer." }
+    },
+    {
+      "id": "sem3-m1-2-ospf-router-id-wildcards",
+      "semester": "sem-03",
+      "moduleBank": "ccna/sem-03/m-1-2",
+      "title": "OSPF Router ID and Wildcard Masks",
+      "estimatedMinutes": 16,
+      "xp": 120,
+      "labFactory": "static-route-two-routers",
+      "prerequisites": ["sem2-final-troubleshooting-capstone"],
+      "focusTags": ["OSPF", "router ID", "wildcard mask"],
+      "questionBanks": ["ccna/sem-03/m-1-2", "ccna-b/quiz-01", "ccna-b/quiz-02"],
+      "ccnaBWeight": "high",
+      "labIdea": { "title": "Advertise exactly the intended networks", "goal": "Choose router IDs and wildcard masks without overmatching.", "topology": "Three OSPF routers with multiple connected networks.", "proof": "Write network statements for exact interface and subnet matches." }
+    },
+    {
+      "id": "sem3-m1-2-ospf-neighbor-fixes",
+      "semester": "sem-03",
+      "moduleBank": "ccna/sem-03/m-1-2",
+      "title": "OSPF Neighbor Adjacency Fixes",
+      "estimatedMinutes": 17,
+      "xp": 120,
+      "labFactory": "static-route-two-routers",
+      "prerequisites": ["sem3-m1-2-ospf-router-id-wildcards"],
+      "focusTags": ["OSPF", "area", "passive interface", "timers"],
+      "questionBanks": ["ccna/sem-03/m-1-2", "ccna-b/quiz-01", "ccna-b/quiz-02"],
+      "ccnaBWeight": "high",
+      "labIdea": { "title": "Adjacency failure sort", "goal": "Separate area mismatch, duplicate router ID, passive interface, and timer mismatch symptoms.", "topology": "Two OSPF neighbors that should reach Full state.", "proof": "Given show output, pick the exact mismatch that prevents adjacency." }
+    },
+    {
+      "id": "sem3-m1-2-ospf-dr-lsdb-spf",
+      "semester": "sem-03",
+      "moduleBank": "ccna/sem-03/m-1-2",
+      "title": "OSPF DR, BDR, LSDB, and SPF",
+      "estimatedMinutes": 18,
+      "xp": 130,
+      "labFactory": "small-office-capstone",
+      "prerequisites": ["sem3-m1-2-ospf-neighbor-fixes"],
+      "focusTags": ["OSPF", "DR", "BDR", "LSDB", "SPF"],
+      "questionBanks": ["ccna/sem-03/m-1-2", "ccna-b/quiz-01", "ccna-b/quiz-02"],
+      "ccnaBWeight": "high",
+      "labIdea": { "title": "Multiaccess OSPF election", "goal": "Predict DR and BDR, then connect the election to LSDB synchronization.", "topology": "Four routers on one shared Ethernet segment.", "proof": "Explain why DROTHER routers form Full adjacency with DR/BDR only." }
+    },
+    {
+      "id": "sem3-m3-5-acl-placement-verdicts",
+      "semester": "sem-03",
+      "moduleBank": "ccna/sem-03/m-3-5",
+      "title": "ACL Placement and Packet Verdicts",
+      "estimatedMinutes": 18,
+      "xp": 130,
+      "labFactory": "static-route-two-routers",
+      "prerequisites": ["sem3-m1-2-ospf-dr-lsdb-spf"],
+      "focusTags": ["ACL", "standard ACL", "extended ACL", "placement", "wildcard"],
+      "questionBanks": ["ccna/sem-03/m-3-5", "ccna-b/quiz-01", "ccna-b/quiz-02"],
+      "ccnaBWeight": "high",
+      "labIdea": { "title": "Permit or deny packets", "goal": "Read ACEs left to right and apply standard/extended placement and wildcard rules.", "topology": "Two LANs, server network, and WAN edge.", "proof": "Classify sample packets by source, destination, protocol, port, direction, and wildcard match." }
+    },
+    {
+      "id": "sem3-m3-5-named-acl-vty",
+      "semester": "sem-03",
+      "moduleBank": "ccna/sem-03/m-3-5",
+      "title": "Named ACL Editing and VTY Access-Class",
+      "estimatedMinutes": 16,
+      "xp": 120,
+      "labFactory": "ssh-hardening",
+      "prerequisites": ["sem3-m3-5-acl-placement-verdicts"],
+      "focusTags": ["named ACL", "sequence number", "access-class", "VTY"],
+      "questionBanks": ["ccna/sem-03/m-3-5", "ccna-b/quiz-01", "ccna-b/quiz-02"],
+      "ccnaBWeight": "high",
+      "labIdea": { "title": "Management ACL edit", "goal": "Add and remove ACL sequence entries without breaking the intended policy.", "topology": "Router VTY lines restricted to one management subnet.", "proof": "Explain why VTY filtering uses access-class rather than ip access-group." }
+    },
+    {
+      "id": "sem3-m3-5-acl-wildcard-speed",
+      "semester": "sem-03",
+      "moduleBank": "ccna/sem-03/m-3-5",
+      "title": "ACL Wildcard Speed Drill",
+      "estimatedMinutes": 15,
+      "xp": 110,
+      "labFactory": "static-route-two-routers",
+      "prerequisites": ["sem3-m3-5-named-acl-vty"],
+      "focusTags": ["ACL", "wildcard mask", "host", "any"],
+      "questionBanks": ["ccna/sem-03/m-3-5", "ccna-b/quiz-01", "ccna-b/quiz-02"],
+      "ccnaBWeight": "high",
+      "labIdea": { "title": "Wildcard mask reflex", "goal": "Convert prefixes to wildcard masks for ACL and OSPF contexts.", "topology": "Addressing worksheet with /20, /24, /27, and /29 subnets.", "proof": "Choose the ACE that matches exactly the requested subnet." }
+    },
+    {
+      "id": "sem3-m6-8-nat-pat-overload",
+      "semester": "sem-03",
+      "moduleBank": "ccna/sem-03/m-6-8",
+      "title": "NAT and PAT Overload Mechanics",
+      "estimatedMinutes": 16,
+      "xp": 120,
+      "labFactory": "static-route-two-routers",
+      "prerequisites": ["sem3-m3-5-acl-wildcard-speed"],
+      "focusTags": ["NAT", "PAT", "inside local", "inside global"],
+      "questionBanks": ["ccna/sem-03/m-6-8", "ccna-b/quiz-01", "ccna-b/quiz-03"],
+      "ccnaBWeight": "high",
+      "labIdea": { "title": "Translation role map", "goal": "Map inside local, inside global, outside local, and outside global addresses.", "topology": "Inside LAN, NAT router, ISP, and public server.", "proof": "Label each address in a packet before and after translation." }
+    },
+    {
+      "id": "sem3-m6-8-nat-troubleshooting",
+      "semester": "sem-03",
+      "moduleBank": "ccna/sem-03/m-6-8",
+      "title": "NAT Troubleshooting at the Edge",
+      "estimatedMinutes": 17,
+      "xp": 120,
+      "labFactory": "static-route-two-routers",
+      "prerequisites": ["sem3-m6-8-nat-pat-overload"],
+      "focusTags": ["NAT", "inside outside", "ACL match", "translations"],
+      "questionBanks": ["ccna/sem-03/m-6-8", "ccna-b/quiz-01", "ccna-b/quiz-03"],
+      "ccnaBWeight": "high",
+      "labIdea": { "title": "Why PAT failed", "goal": "Differentiate wrong inside/outside interfaces, wrong source ACL, and exhausted pool symptoms.", "topology": "PAT edge with one broken translation requirement.", "proof": "Name the first show command and the most likely config line to inspect." }
+    },
+    {
+      "id": "sem3-m6-8-wan-vpn-types",
+      "semester": "sem-03",
+      "moduleBank": "ccna/sem-03/m-6-8",
+      "title": "WAN and VPN Type Selection",
+      "estimatedMinutes": 16,
+      "xp": 120,
+      "labFactory": "small-office-capstone",
+      "prerequisites": ["sem3-m6-8-nat-troubleshooting"],
+      "focusTags": ["WAN", "VPN", "MPLS", "Ethernet WAN", "broadband"],
+      "questionBanks": ["ccna/sem-03/m-6-8", "ccna-b/quiz-01", "ccna-b/quiz-02"],
+      "ccnaBWeight": "high",
+      "labIdea": { "title": "Pick the link", "goal": "Choose WAN technology from bandwidth, traffic type, cost, distance, and security needs.", "topology": "HQ with metro branches, remote users, and partner networks.", "proof": "Rank the best WAN/VPN option for four business requirements." }
+    },
+    {
+      "id": "sem3-m6-8-ipsec-gre-dmvpn-ssl",
+      "semester": "sem-03",
+      "moduleBank": "ccna/sem-03/m-6-8",
+      "title": "IPsec, GRE, DMVPN, and SSL VPN",
+      "estimatedMinutes": 17,
+      "xp": 120,
+      "labFactory": "small-office-capstone",
+      "prerequisites": ["sem3-m6-8-wan-vpn-types"],
+      "focusTags": ["IPsec", "GRE", "DMVPN", "SSL VPN"],
+      "questionBanks": ["ccna/sem-03/m-6-8", "ccna-b/quiz-01", "ccna-b/quiz-02", "ccna-b/quiz-03"],
+      "ccnaBWeight": "high",
+      "labIdea": { "title": "Tunnel behavior sorter", "goal": "Know which VPN type supports site-to-site, remote access, multicast/broadcast, and full-mesh scaling.", "topology": "Hub-and-spoke enterprise with roaming users.", "proof": "Match each VPN type to the traffic it can carry and who manages it." }
+    },
+    {
+      "id": "sem3-m9-12-monitoring-protocols",
+      "semester": "sem-03",
+      "moduleBank": "ccna/sem-03/m-9-12",
+      "title": "CDP, LLDP, NTP, Syslog, SNMP, and NetFlow",
+      "estimatedMinutes": 17,
+      "xp": 120,
+      "labFactory": "small-office-capstone",
+      "prerequisites": ["sem3-m6-8-ipsec-gre-dmvpn-ssl"],
+      "focusTags": ["CDP", "LLDP", "NTP", "syslog", "SNMP", "NetFlow"],
+      "questionBanks": ["ccna/sem-03/m-9-12", "ccna-b/quiz-01", "ccna-b/quiz-02"],
+      "ccnaBWeight": "high",
+      "labIdea": { "title": "Monitoring role match", "goal": "Match each management protocol to what it discovers, records, synchronizes, or exports.", "topology": "Managed router, switch, syslog server, SNMP manager, and NTP source.", "proof": "Given a requirement, choose the protocol and the useful show command." }
+    },
+    {
+      "id": "sem3-m9-12-qos-classify-mark-trust",
+      "semester": "sem-03",
+      "moduleBank": "ccna/sem-03/m-9-12",
+      "title": "QoS Classification, Marking, and Trust Boundary",
+      "estimatedMinutes": 16,
+      "xp": 120,
+      "labFactory": "small-office-capstone",
+      "prerequisites": ["sem3-m9-12-monitoring-protocols"],
+      "focusTags": ["QoS", "classification", "marking", "trust boundary", "show command"],
+      "questionBanks": ["ccna/sem-03/m-9-12", "ccna-b/quiz-01", "ccna-b/quiz-02"],
+      "ccnaBWeight": "high",
+      "labIdea": { "title": "Mark near the source", "goal": "Classify traffic before marking and place the trust boundary correctly.", "topology": "IP phones, access switch, distribution switch, and WAN edge.", "proof": "Choose where initial marking should occur and why." }
+    },
+    {
+      "id": "sem3-m9-12-qos-queue-shape-police",
+      "semester": "sem-03",
+      "moduleBank": "ccna/sem-03/m-9-12",
+      "title": "QoS Queuing, Shaping, Policing, and WRED",
+      "estimatedMinutes": 16,
+      "xp": 120,
+      "labFactory": "small-office-capstone",
+      "prerequisites": ["sem3-m9-12-qos-classify-mark-trust"],
+      "focusTags": ["QoS", "queuing", "shaping", "policing", "WRED"],
+      "questionBanks": ["ccna/sem-03/m-9-12", "ccna-b/quiz-02"],
+      "ccnaBWeight": "high",
+      "labIdea": { "title": "QoS term sorter", "goal": "Tell apart buffering, scheduling, smoothing, dropping, and congestion avoidance.", "topology": "Converged WAN carrying voice, video, and data.", "proof": "Map each QoS term to the behavior users would observe." }
+    },
+    {
+      "id": "sem3-m13-14-api-data-formats",
+      "semester": "sem-03",
+      "moduleBank": "ccna/sem-03/m-13-14",
+      "title": "REST APIs and Data Formats",
+      "estimatedMinutes": 15,
+      "xp": 110,
+      "labFactory": "services-dns-http",
+      "prerequisites": ["sem3-m9-12-qos-queue-shape-police"],
+      "focusTags": ["REST", "API", "JSON", "XML", "YAML"],
+      "questionBanks": ["ccna/sem-03/m-13-14", "ccna-b/quiz-01", "ccna-b/quiz-03"],
+      "ccnaBWeight": "high",
+      "labIdea": { "title": "Read the payload", "goal": "Identify strings, numbers, arrays, and objects in JSON/XML/YAML examples.", "topology": "Controller API returns inventory and access policy data.", "proof": "Classify each key/value shape and choose the represented data format." }
+    },
+    {
+      "id": "sem3-m13-14-sdn-controllers",
+      "semester": "sem-03",
+      "moduleBank": "ccna/sem-03/m-13-14",
+      "title": "SDN, ACI, SDA, Cloud, and Virtualization",
+      "estimatedMinutes": 17,
+      "xp": 120,
+      "labFactory": "small-office-capstone",
+      "prerequisites": ["sem3-m13-14-api-data-formats"],
+      "focusTags": ["SDN", "northbound API", "southbound API", "ACI", "cloud", "virtualization"],
+      "questionBanks": ["ccna/sem-03/m-13-14", "ccna-b/quiz-01", "ccna-b/quiz-03"],
+      "ccnaBWeight": "high",
+      "labIdea": { "title": "Controller and virtual resource map", "goal": "Know which APIs face applications, which face infrastructure, and how cloud/hypervisor choices fit.", "topology": "Applications, controller, fabric switches, virtual hosts, recovery site, and endpoints.", "proof": "Place northbound and southbound calls in the right direction, then match requirements to cloud or hypervisor technology." }
+    },
+    {
+      "id": "sem3-ccna-b-quiz1-boss-rush",
+      "semester": "sem-03",
+      "moduleBank": "ccna-b/final-review",
+      "title": "CCNA-B Quiz 1 Boss Rush",
+      "estimatedMinutes": 24,
+      "xp": 170,
+      "labFactory": "small-office-capstone",
+      "prerequisites": ["sem3-m13-14-sdn-controllers"],
+      "focusTags": ["CCNA-B", "AAA", "wireless", "OSPF", "ACL", "automation"],
+      "questionBanks": ["ccna-b/quiz-01"],
+      "ccnaBWeight": "high",
+      "labIdea": { "title": "Quiz 1 pressure pass", "goal": "Run the CCNA-B Quiz 1 bank, then explain every miss by topic.", "topology": "Mixed exhibits, configs, and command-output questions.", "proof": "Finish a focused drill and write the top three weak topics to repeat." }
+    },
+    {
+      "id": "sem3-ccna-b-quiz2-boss-rush",
+      "semester": "sem-03",
+      "moduleBank": "ccna-b/final-review",
+      "title": "CCNA-B Quiz 2 Boss Rush",
+      "estimatedMinutes": 24,
+      "xp": 170,
+      "labFactory": "small-office-capstone",
+      "prerequisites": ["sem3-ccna-b-quiz1-boss-rush"],
+      "focusTags": ["CCNA-B", "OSPF", "NAT", "WAN", "monitoring", "QoS"],
+      "questionBanks": ["ccna-b/quiz-02"],
+      "ccnaBWeight": "high",
+      "labIdea": { "title": "Quiz 2 pressure pass", "goal": "Run the CCNA-B Quiz 2 bank and turn misses into command or concept flashcards.", "topology": "Mixed routing, security, WAN, and troubleshooting scenarios.", "proof": "Finish a focused drill and identify each miss as command, concept, or reading error." }
+    },
+    {
+      "id": "sem3-ccna-b-quiz3-boss-rush",
+      "semester": "sem-03",
+      "moduleBank": "ccna-b/final-review",
+      "title": "CCNA-B Quiz 3 Boss Rush",
+      "estimatedMinutes": 25,
+      "xp": 180,
+      "labFactory": "small-office-capstone",
+      "prerequisites": ["sem3-ccna-b-quiz2-boss-rush"],
+      "focusTags": ["CCNA-B", "security", "VPN", "automation", "lines", "final review"],
+      "questionBanks": ["ccna-b/quiz-03", "ccna-b/all"],
+      "ccnaBWeight": "high",
+      "labIdea": { "title": "Full CCNA-B rematch", "goal": "Mix all CCNA-B imports and keep repeating weak questions until they are fast.", "topology": "All imported CCNA-B questions, including code and exhibit-style prompts.", "proof": "Complete one CCNA-B all-bank study session and name the remaining weak cluster." }
+    }
+  ],
   "lessons": [
     {
       "id": "sem1-m1-3-network-roles",
@@ -90,6 +683,10 @@
       "prerequisites": [],
       "xp": 100,
       "labFactory": "lan-two-hosts",
+      "focusTags": ["endpoint", "infrastructure", "LAN", "encapsulation"],
+      "questionBanks": ["ccna/sem-01/m-1-3"],
+      "ccnaBWeight": "none",
+      "labIdea": { "title": "Two-host LAN role map", "goal": "Separate endpoint roles from infrastructure roles before traffic starts.", "topology": "PC1, PC2, SRV1, and SW1 on a single access LAN.", "proof": "Identify who creates data, who forwards frames, and why no router is needed for same-subnet traffic." },
       "steps": [
         {
           "id": "predict-traffic",
@@ -145,6 +742,10 @@
       "prerequisites": ["sem1-m1-3-network-roles"],
       "xp": 100,
       "labFactory": "ios-switch",
+      "focusTags": ["IOS modes", "hostname", "SVI", "startup-config"],
+      "questionBanks": ["ccna/sem-01/m-1-3"],
+      "ccnaBWeight": "none",
+      "labIdea": { "title": "IOS mode ladder", "goal": "Move from user EXEC to privileged EXEC to global and interface configuration without hesitation.", "topology": "One access switch with VLAN 1 management.", "proof": "Set hostname, management IP, no shutdown, then save and explain running vs startup config." },
       "steps": [
         {
           "id": "predict-mode",
@@ -201,6 +802,10 @@
       "prerequisites": ["sem1-m1-3-ios-modes-hostname"],
       "xp": 100,
       "labFactory": "cabling-link-state",
+      "focusTags": ["cabling", "Layer 1", "interface state", "no shutdown"],
+      "questionBanks": ["ccna/sem-01/m-4-7"],
+      "ccnaBWeight": "none",
+      "labIdea": { "title": "Cable and admin-state check", "goal": "Distinguish a missing physical path from an administratively disabled interface.", "topology": "R1 connected to SW1 with one router interface initially shut down.", "proof": "Bring the interface up and explain which evidence proves cable state versus admin state." },
       "steps": [
         {
           "id": "predict-layer1",
@@ -253,6 +858,10 @@
       "prerequisites": ["sem1-m4-7-cabling-link-state"],
       "xp": 110,
       "labFactory": "switch-mac-arp",
+      "focusTags": ["Ethernet", "MAC learning", "ARP", "VLAN"],
+      "questionBanks": ["ccna/sem-01/m-4-7"],
+      "ccnaBWeight": "none",
+      "labIdea": { "title": "MAC table before and after ping", "goal": "Watch ARP and source-MAC learning turn an unknown LAN into a known forwarding path.", "topology": "PC1 and PC2 connected to SW1 access ports in VLAN 10.", "proof": "Predict the first flooded frame, then prove the learned MAC entries after ping succeeds." },
       "steps": [
         {
           "id": "predict-unknown",
@@ -310,6 +919,10 @@
       "prerequisites": ["sem1-m4-7-arp-mac-learning"],
       "xp": 110,
       "labFactory": "ipv4-two-lans",
+      "focusTags": ["IPv4", "default gateway", "router interface", "local vs remote"],
+      "questionBanks": ["ccna/sem-01/m-8-10"],
+      "ccnaBWeight": "none",
+      "labIdea": { "title": "Default gateway decision tree", "goal": "Make the host decision between direct delivery and sending to the gateway.", "topology": "Two IPv4 LANs joined by one router with one interface per subnet.", "proof": "Explain the next hop for a same-subnet target and for a remote-subnet target." },
       "steps": [
         {
           "id": "predict-gateway",
@@ -368,6 +981,10 @@
       "prerequisites": ["sem1-m8-10-ipv4-router-interfaces"],
       "xp": 90,
       "labFactory": "ipv4-two-lans",
+      "focusTags": ["router CLI", "interfaces", "show commands", "copy run start"],
+      "questionBanks": ["ccna/sem-01/m-8-10"],
+      "ccnaBWeight": "none",
+      "labIdea": { "title": "Router interface persistence", "goal": "Configure, verify, and save router interface state as a repeatable loop.", "topology": "R1 with two LAN-facing interfaces and two attached hosts.", "proof": "Use show output to prove addresses and line state, then save the working configuration." },
       "steps": [
         {
           "id": "predict-running-startup",
@@ -423,6 +1040,10 @@
       "prerequisites": ["sem1-m8-10-router-basics-save"],
       "xp": 120,
       "labFactory": "static-route-two-routers",
+      "focusTags": ["static route", "next hop", "return route", "routing table"],
+      "questionBanks": ["ccna/sem-01/m-11-13"],
+      "ccnaBWeight": "light",
+      "labIdea": { "title": "Two-router return-route proof", "goal": "See static routing as two-way intent, not just a command to memorize.", "topology": "PC1 LAN, R1, R2, and PC2 LAN with one routed transit link.", "proof": "Add forward and return routes, then prove reachability and explain what would fail without the return path." },
       "steps": [
         {
           "id": "predict-missing-route",
@@ -475,6 +1096,10 @@
       "prerequisites": ["sem1-m11-13-static-route-path"],
       "xp": 100,
       "labFactory": "static-route-two-routers",
+      "focusTags": ["ICMP", "ping", "path isolation", "troubleshooting"],
+      "questionBanks": ["ccna/sem-01/m-11-13"],
+      "ccnaBWeight": "light",
+      "labIdea": { "title": "Ping failure isolation ladder", "goal": "Turn one failed ping into a short sequence of layer and route checks.", "topology": "Two routed LANs with one intentional addressing or route mistake.", "proof": "State the next command after each failed check and identify the broken layer." },
       "steps": [
         {
           "id": "predict-test-order",
@@ -527,6 +1152,10 @@
       "prerequisites": ["sem1-m11-13-icmp-troubleshoot"],
       "xp": 120,
       "labFactory": "dhcp-router",
+      "focusTags": ["DHCP", "DORA", "default gateway", "DNS option"],
+      "questionBanks": ["ccna/sem-01/m-14-15"],
+      "ccnaBWeight": "none",
+      "labIdea": { "title": "DHCP lease anatomy", "goal": "Connect DHCP scope settings to the address, gateway, and DNS values a host receives.", "topology": "One router serving DHCP to a small client LAN.", "proof": "Identify the DORA exchange and verify the leased IP, mask, gateway, and DNS option." },
       "steps": [
         {
           "id": "predict-dhcp-fields",
@@ -587,6 +1216,10 @@
       "prerequisites": ["sem1-m14-15-dhcp-service"],
       "xp": 100,
       "labFactory": "services-dns-http",
+      "focusTags": ["DNS", "HTTP", "ports", "client-server flow"],
+      "questionBanks": ["ccna/sem-01/m-14-15"],
+      "ccnaBWeight": "none",
+      "labIdea": { "title": "Name to IP to session", "goal": "Follow a web request from DNS lookup through TCP and HTTP.", "topology": "PC client, DNS server, and HTTP server on a reachable LAN.", "proof": "Show the DNS answer, identify TCP/80 or TCP/443, and explain why HTTP needs IP reachability first." },
       "steps": [
         {
           "id": "predict-name-flow",
@@ -642,6 +1275,10 @@
       "prerequisites": ["sem1-m14-15-dns-http-flow"],
       "xp": 130,
       "labFactory": "ssh-hardening",
+      "focusTags": ["SSH", "passwords", "VTY", "local user", "AAA basics"],
+      "questionBanks": ["ccna/sem-01/m-16-17", "ccna-b/quiz-03"],
+      "ccnaBWeight": "light",
+      "labIdea": { "title": "SSH-only management", "goal": "Replace weak remote access habits with local-user SSH management and basic password protection.", "topology": "One switch managed from a PC over the management VLAN.", "proof": "Configure local credentials, SSHv2, VTY login, and encrypted password storage, then reject Telnet mentally." },
       "steps": [
         {
           "id": "predict-telnet-risk",
@@ -713,6 +1350,10 @@
       "prerequisites": ["sem1-m16-17-ssh-hardening"],
       "xp": 100,
       "labFactory": "small-office-capstone",
+      "focusTags": ["small network", "addressing", "services", "verification"],
+      "questionBanks": ["ccna/sem-01/m-16-17", "ccna/sem-01/final"],
+      "ccnaBWeight": "none",
+      "labIdea": { "title": "Small-office build checklist", "goal": "Turn the Semester 1 pieces into a repeatable build order.", "topology": "Router, switch, two PCs, server, DHCP, DNS, HTTP, and management access.", "proof": "Produce a checklist that verifies cabling, addressing, gateway, services, SSH, and saved configs." },
       "steps": [
         {
           "id": "predict-build-order",
@@ -773,6 +1414,10 @@
       "prerequisites": ["sem1-m16-17-small-network-checklist"],
       "xp": 150,
       "labFactory": "small-office-capstone",
+      "focusTags": ["capstone", "dual-stack", "services", "SSH", "troubleshooting"],
+      "questionBanks": ["ccna/sem-01/final"],
+      "ccnaBWeight": "light",
+      "labIdea": { "title": "Semester 1 office capstone", "goal": "Build and explain a small dual-stack office with user access, services, and secure management.", "topology": "Router, access switch, two PCs, server, DHCP/DNS/HTTP services, IPv4 and IPv6 addressing.", "proof": "Ping, browse by DNS name, SSH to the switch, save configs, and explain one packet path end to end." },
       "steps": [
         {
           "id": "plan-capstone",

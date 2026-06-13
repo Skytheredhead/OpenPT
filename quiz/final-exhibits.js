@@ -1,4 +1,4 @@
-// Structured exhibit enrichments for the imported CCNA Semester 3 final bank.
+// Structured exhibit enrichments for imported CCNA question banks.
 // Key format: compact source chunk + source index (for example, "Questions 1-50#5").
 (function () {
   const topology = (title, nodes, links) => ({
@@ -81,7 +81,302 @@
     ]),
   });
 
+  const sem1HostServerTopology = () => ({
+    e: 1,
+    exhibit: topology('Host1 to server path', [
+      n('host1', 'pc', 'Host1', 18, 82),
+      n('sw1', 'l2switch', 'Switch1', 18, 58),
+      n('r1', 'router', 'Router1', 18, 34),
+      n('r2', 'router', 'Router2', 56, 34),
+      n('sw2', 'l2switch', 'Switch2', 56, 58),
+      n('srv', 'server', 'Server', 56, 82),
+      n('isp', 'cloud', 'ISP', 84, 20),
+    ], [
+      l('host1', 'sw1', ''),
+      l('sw1', 'r1', ''),
+      l('r1', 'r2', 'WAN', 'serial'),
+      l('r2', 'sw2', ''),
+      l('sw2', 'srv', ''),
+      l('r2', 'isp', '', 'serial'),
+    ]),
+  });
+
+  const sem1GatewayTopology = () => ({
+    e: 1,
+    exhibit: topology('H1 default gateway topology', [
+      n('h1', 'pc', 'H1', 12, 84),
+      n('s1', 'l2switch', 'LAN', 22, 66),
+      n('s2', 'l2switch', 'LAN', 42, 66),
+      n('s3', 'l2switch', 'LAN', 82, 66),
+      n('r1', 'router', 'R1\nG0/0\nG0/1\nS0/0/0', 32, 45),
+      n('r2', 'router', 'R2\nS0/0/0\nS0/0/1\nS0/1/0', 58, 24),
+      n('r3', 'router', 'R3\nS0/0/0\nG0/0', 76, 44),
+      n('isp', 'cloud', 'ISP', 86, 14),
+      n('lan2', 'pc', 'Hosts', 42, 84),
+      n('lan3', 'pc', 'Hosts', 82, 84),
+    ], [
+      l('h1', 's1', ''),
+      l('s1', 'r1', 'G0/0'),
+      l('r1', 's2', 'G0/1'),
+      l('s2', 'lan2', ''),
+      l('r1', 'r2', 'S0/0/0', 'serial'),
+      l('r2', 'isp', 'S0/0/1', 'serial'),
+      l('r2', 'r3', 'S0/1/0', 'serial'),
+      l('r3', 's3', 'G0/0'),
+      l('s3', 'lan3', ''),
+    ]),
+  });
+
+  const sem1TeachersTopology = () => ({
+    e: 1,
+    exhibit: topology('Teachers to Students routed packet', [
+      n('a', 'pc', 'Host A\n172.16.10.100/24\n00-00-0c-94-36-aa', 12, 24),
+      n('b', 'pc', 'Host B\n172.16.10.200/24\n00-00-0c-94-36-bb', 12, 78),
+      n('teach', 'l2switch', 'Subnet Teachers', 33, 51),
+      n('r', 'router', 'Router\nFa0 172.16.10.99/24\n00-00-0c-94-36-ab\nFa1 172.16.20.99/24\n00-00-0c-94-36-cd', 52, 51),
+      n('students', 'l2switch', 'Subnet Students', 72, 51),
+      n('c', 'pc', 'Host C\n172.16.20.100/24\n00-00-0c-94-36-cc', 90, 24),
+      n('d', 'pc', 'Host D\n172.16.20.200/24\n00-00-0c-94-36-dd', 90, 78),
+    ], [
+      l('a', 'teach', ''),
+      l('b', 'teach', ''),
+      l('teach', 'r', 'Fa0'),
+      l('r', 'students', 'Fa1'),
+      l('students', 'c', ''),
+      l('students', 'd', ''),
+    ]),
+  });
+
+  const sem1TwoRouterPath = () => ({
+    e: 1,
+    exhibit: topology('PC1 to PC2 routed path', [
+      n('pc1', 'pc', 'PC1\n192.168.10.8/24', 18, 80),
+      n('sw1', 'l2switch', 'LAN', 18, 60),
+      n('r1', 'router', 'R1\nG0/0\nS0/0/0', 34, 38),
+      n('r2', 'router', 'R2\nS0/0/0\nG0/0', 66, 38),
+      n('sw2', 'l2switch', 'LAN', 82, 60),
+      n('pc2', 'pc', 'PC2\n192.168.11.5/24', 82, 80),
+    ], [
+      l('pc1', 'sw1', ''),
+      l('sw1', 'r1', 'G0/0'),
+      l('r1', 'r2', 'S0/0/0', 'serial'),
+      l('r2', 'sw2', 'G0/0'),
+      l('sw2', 'pc2', ''),
+    ]),
+  });
+
+  const sem1SameLanArp = () => ({
+    e: 1,
+    exhibit: topology('PC1 ARP request topology', [
+      n('pc1', 'pc', 'PC1', 14, 78),
+      n('pc2', 'pc', 'PC2', 34, 78),
+      n('sw1', 'l2switch', 'SW1\nFa0/1 Fa0/2 Fa0/3', 24, 50),
+      n('rt1', 'router', 'RT1\nFa0/0\nFa0/1', 52, 38),
+      n('sw2', 'l2switch', 'SW2\nFa0/1 Fa0/2', 76, 50),
+      n('pc3', 'pc', 'PC3', 76, 78),
+    ], [
+      l('pc1', 'sw1', 'Fa0/1'),
+      l('pc2', 'sw1', 'Fa0/2'),
+      l('sw1', 'rt1', 'Fa0/3 - Fa0/0'),
+      l('rt1', 'sw2', 'Fa0/1 - Fa0/2'),
+      l('sw2', 'pc3', 'Fa0/1'),
+    ]),
+  });
+
+  const sem1DefaultGatewayBroadcast = () => ({
+    e: 1,
+    exhibit: topology('Default gateway ARP broadcast domain', [
+      n('a', 'pc', 'A', 16, 82),
+      n('b', 'pc', 'B', 31, 82),
+      n('c', 'pc', 'C', 46, 82),
+      n('s1', 'l2switch', 'Switch', 31, 60),
+      n('r1', 'router', 'R1', 31, 35),
+      n('r2', 'router', 'R2', 70, 35),
+      n('s2', 'l2switch', 'Switch', 70, 60),
+      n('d', 'pc', 'D', 70, 82),
+    ], [
+      l('a', 's1', ''),
+      l('b', 's1', ''),
+      l('c', 's1', ''),
+      l('s1', 'r1', ''),
+      l('r1', 'r2', '', 'serial'),
+      l('r2', 's2', ''),
+      l('s2', 'd', ''),
+    ]),
+  });
+
+  const sem1HostFramePath = () => ({
+    e: 1,
+    exhibit: topology('Frame destination across routed networks', [
+      n('a', 'pc', 'Host A\n172.168.10.99/26\nMAC AA:AA:AA:AA:AA:AA', 16, 78),
+      n('s1', 'l2switch', 'LAN 1', 30, 60),
+      n('r2', 'router', 'R2\n172.168.10.65/26\nMAC BB:BB:BB:BB:BB:BB', 42, 38),
+      n('r1', 'router', 'R1\n172.168.11.65/26\nMAC CC:CC:CC:CC:CC:CC', 67, 38),
+      n('s2', 'l2switch', 'LAN 2', 70, 60),
+      n('b', 'pc', 'Host B\n172.168.11.88/26\nMAC DD:DD:DD:DD:DD:DD', 84, 78),
+    ], [
+      l('a', 's1', ''),
+      l('s1', 'r2', ''),
+      l('r2', 'r1', '172.168.10.128/30', 'serial'),
+      l('r1', 's2', ''),
+      l('s2', 'b', ''),
+    ]),
+  });
+
+  const sem1TenHostSubnet = () => ({
+    e: 1,
+    exhibit: topology('10.18.10.0/24 address plan', [
+      n('r1', 'router', 'R1', 50, 28),
+      n('assignedA', 'l2switch', 'Assigned\n10.18.10.0/26', 22, 58),
+      n('assignedB', 'l2switch', 'Assigned\n10.18.10.192/29', 50, 58),
+      n('needed', 'l2switch', 'Network needs\n10 hosts', 78, 58),
+      n('pcA', 'pc', 'LAN', 22, 82),
+      n('pcB', 'pc', 'LAN', 50, 82),
+      n('pcC', 'pc', 'LAN', 78, 82),
+    ], [
+      l('r1', 'assignedA', ''),
+      l('r1', 'assignedB', ''),
+      l('r1', 'needed', ''),
+      l('assignedA', 'pcA', ''),
+      l('assignedB', 'pcB', ''),
+      l('needed', 'pcC', ''),
+    ]),
+  });
+
+  const sem1LbmissTopology = () => ({
+    e: 1,
+    exhibit: topology('LBMISS new building LAN', [
+      n('inet', 'internet', 'Internet', 78, 18),
+      n('r', 'router', 'LBMISS router\nLAN uses first usable host', 50, 38),
+      n('sw', 'l2switch', 'New building LAN\n192.168.10.0/24 subnetted /29\nfifth subnet', 50, 62),
+      n('srv', 'server', 'Workgroup server\nuses last usable host', 50, 84),
+    ], [
+      l('inet', 'r', ''),
+      l('r', 'sw', ''),
+      l('sw', 'srv', ''),
+    ]),
+  });
+
+  const sem1FourSubnetTopology = () => ({
+    e: 1,
+    exhibit: topology('Four /26 subnets from 192.168.99.0', [
+      n('ra', 'router', 'Router A', 18, 44),
+      n('rb', 'router', 'Router B', 50, 44),
+      n('rc', 'router', 'Router C', 82, 44),
+      n('netA', 'l2switch', 'Network A\n30 hosts', 18, 78),
+      n('netD', 'l2switch', 'Network D\n14 hosts', 82, 78),
+    ], [
+      l('ra', 'rb', 'Network C', 'serial'),
+      l('rb', 'rc', 'Network B', 'serial'),
+      l('ra', 'netA', ''),
+      l('rc', 'netD', ''),
+    ]),
+  });
+
+  const sem1EqualSubnetTopology = () => ({
+    e: 1,
+    exhibit: topology('128.107.0.0/16 equal-size subnet needs', [
+      n('core', 'router', 'Core', 50, 50),
+      n('n75', 'cloud', '75 hosts', 20, 20),
+      n('n100', 'cloud', '100 hosts', 80, 20),
+      n('n25', 'cloud', '25 hosts', 20, 80),
+      n('n50', 'cloud', '50 hosts', 80, 80),
+    ], [
+      l('core', 'n75', ''),
+      l('core', 'n100', ''),
+      l('core', 'n25', ''),
+      l('core', 'n50', ''),
+    ]),
+  });
+
+  const sem3AccessFailureTopology = () => ({
+    e: 1,
+    exhibit: topology('Access switch failure domain', [
+      n('inet', 'internet', 'Internet', 50, 6),
+      n('edge', 'router', 'Edge Router', 50, 20),
+      n('r1', 'router', 'Router_1', 50, 34),
+      n('s1', 'l2switch', 'S1', 50, 48),
+      n('s2', 'l2switch', 'S2', 20, 62),
+      n('s4', 'l2switch', 'S4', 50, 62),
+      n('s3', 'l2switch', 'S3', 80, 62),
+      n('ap1', 'pc', 'AP_1', 10, 82),
+      n('pc1', 'pc', 'PC_1', 28, 82),
+      n('pc2', 'pc', 'PC_2', 50, 82),
+      n('ap2', 'pc', 'AP_2', 72, 82),
+      n('pc3', 'pc', 'PC_3', 90, 82),
+    ], [
+      l('inet', 'edge', ''),
+      l('edge', 'r1', ''),
+      l('r1', 's1', ''),
+      l('s1', 's2', ''),
+      l('s1', 's4', ''),
+      l('s1', 's3', ''),
+      l('s2', 'ap1', ''),
+      l('s2', 'pc1', ''),
+      l('s4', 'pc2', ''),
+      l('s3', 'ap2', ''),
+      l('s3', 'pc3', ''),
+    ]),
+  });
+
+  const cableTermination = () => ({
+    e: 1,
+    exhibit: { type: 'cable-termination', title: 'RJ-45 cable termination' },
+  });
+
   window.FINAL_STRUCTURED_EXHIBITS = {
+    'Sem 1 Final Review#13': sem1HostServerTopology(),
+    'Sem 1 Final Review#15': sem1GatewayTopology(),
+    'Sem 1 Final Review#18': code([
+      'Interface: 192.168.1.67 --- 0x6',
+      '  Internet Address      Physical Address      Type',
+      '  192.168.1.1           00-18-de-c7-f3-45     dynamic',
+      '  192.168.1.100         00-50-56-c0-00-08     dynamic',
+      '',
+      'Interface: 10.82.253.91 --- 0x10',
+      '  Internet Address      Physical Address      Type',
+      '  10.82.253.1           00-1c-58-c0-08-aa     dynamic',
+    ]),
+    'Sem 1 Final Review#32': sem1TeachersTopology(),
+    'Sem 1 Final Review#34': code([
+      'Switch1> config t',
+      '          ^',
+      "% Invalid input detected at '^' marker.",
+    ]),
+    'Sem 1 Final Review#42': code([
+      'C:\\Windows\\system32> tracert 192.168.100.1',
+      '',
+      'Tracing route to 192.168.100.1 over a maximum of 30 hops',
+      '  1    <1 ms    <1 ms    <1 ms  192.168.1.1',
+      '  2      1 ms      1 ms      1 ms  10.1.1.1',
+      '  3      2 ms      2 ms      2 ms  10.2.2.2',
+      '  4      2 ms      2 ms      2 ms  192.168.100.1',
+      '',
+      'Trace complete.',
+    ]),
+    'Sem 1 Final Review#46': sem1TwoRouterPath(),
+    'Sem 1 Final Review#91': sem1SameLanArp(),
+    'Sem 1 Final Review#97': code([
+      'Switch# show ip interface brief',
+      'Interface              IP-Address      OK? Method Status                Protocol',
+      'FastEthernet0/1        unassigned      YES manual up                    up',
+      'FastEthernet0/2        unassigned      YES manual down                  down',
+      'FastEthernet0/3        unassigned      YES manual down                  down',
+      'FastEthernet0/6        unassigned      YES manual down                  down',
+      '<output omitted>',
+      'FastEthernet0/24       unassigned      YES manual down                  down',
+      'Vlan1                  192.168.1.3     YES manual up                    up',
+    ]),
+    'Sem 1 Final Review#108': cableTermination(),
+    'Sem 1 Final Review#112': sem1TenHostSubnet(),
+    'Sem 1 Final Review#117': sem1LbmissTopology(),
+    'Sem 1 Final Review#118': sem1DefaultGatewayBroadcast(),
+    'Sem 1 Final Review#120': sem1FourSubnetTopology(),
+    'Sem 1 Final Review#126': sem1DefaultGatewayBroadcast(),
+    'Sem 1 Final Review#133': sem1HostFramePath(),
+    'Sem 1 Final Review#149': sem1EqualSubnetTopology(),
+    'Sem 3 Module 9-12 Quiz#42': sem3AccessFailureTopology(),
+
     'Questions 1-50#5': {
       e: 1,
       exhibit: topology('OSPF networks for Router A', [

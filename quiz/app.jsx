@@ -14,8 +14,13 @@ const accentMap = {
 };
 
 const STORAGE_KEY = 'openpt.quiz.state.v2';
-const FORCE_LIBRARY = new URLSearchParams(window.location.search).get('view') === 'library';
+const QUERY_PARAMS = new URLSearchParams(window.location.search);
+const FORCE_LIBRARY = QUERY_PARAMS.get('view') === 'library';
 const FORCE_DIAGRAMS = window.location.pathname.replace(/\/+$/, '').endsWith('/quiz/ccna-b-diagrams');
+const INITIAL_BANK = QUERY_PARAMS.get('bank') || '';
+const INITIAL_MODE = ['practice', 'quiz', 'study'].includes(QUERY_PARAMS.get('mode')) ? QUERY_PARAMS.get('mode') : 'practice';
+const INITIAL_SIZE = Number(QUERY_PARAMS.get('size') || 30);
+const FORCE_BANK = !!INITIAL_BANK;
 
 function loadPersisted() {
   try {
@@ -56,6 +61,7 @@ const App = () => {
   const [user, setUser] = useStateA(null);
   const [studyDashboard, setStudyDashboard] = useStateA(null);
   const [auth, setAuth] = useStateA({ open: false, busy: false, error: '', notice: '' });
+  const [queuedStudyBanks, setQueuedStudyBanks] = useStateA(['ccna/all']);
 
   useEffectA(() => {
     document.documentElement.style.setProperty('--accent', accent.val);
@@ -78,13 +84,20 @@ const App = () => {
 
   // Restore on mount
   useEffectA(() => {
-    if (FORCE_LIBRARY || FORCE_DIAGRAMS) return;
+    if (FORCE_LIBRARY || FORCE_DIAGRAMS || FORCE_BANK) return;
     const saved = loadPersisted();
     if (saved) {
       setState(saved);
       if (saved.endedAt) setRoute('results');
       else setRoute(saved.mode === 'study' ? 'study' : saved.mode === 'quiz' ? 'quiz' : 'practice');
     }
+  }, []);
+
+  useEffectA(() => {
+    if (!FORCE_BANK || FORCE_DIAGRAMS) return;
+    const size = Number.isFinite(INITIAL_SIZE) && INITIAL_SIZE > 0 ? INITIAL_SIZE : 30;
+    if (INITIAL_MODE === 'study') launchStudy([INITIAL_BANK]);
+    else launchQuiz(INITIAL_MODE, size, INITIAL_BANK);
   }, []);
 
   useEffectA(() => { if (state) savePersisted(state); }, [state]);
@@ -104,9 +117,13 @@ const App = () => {
   }
 
   function launchQuiz(mode, size, bankKey = 'ccna/sem-03/final') {
-    const ids = (window.QUESTIONS || [])
-      .filter(q => bankKey === 'ccna/all' || q.bank === bankKey)
-      .map(q => q.id);
+    const ids = window.OpenPTQuizBanks?.questionIdsForBank
+      ? window.OpenPTQuizBanks.questionIdsForBank(window.QUESTIONS || [], bankKey)
+      : (window.QUESTIONS || []).filter(q => {
+        if (bankKey === 'ccna/all') return q.bank?.startsWith('ccna/');
+        if (bankKey === 'ccna-b/all') return q.bank?.startsWith('ccna-b/');
+        return q.bank === bankKey;
+      }).map(q => q.id);
     const fresh = { ...QuizEngine.create({ poolIds: ids, size, mode }), bankKey };
     let seeded;
     if (mode === 'practice') {
@@ -114,14 +131,17 @@ const App = () => {
     } else {
       seeded = fresh; // quiz mode runs linearly via QuizRunner
     }
-    if (FORCE_LIBRARY && window.history?.replaceState) {
+    if ((FORCE_LIBRARY || FORCE_BANK) && window.history?.replaceState) {
       window.history.replaceState(null, '', window.location.pathname);
     }
     setState(seeded);
     navigate(mode === 'quiz' ? 'quiz' : 'practice');
   }
 
-  function ccnaStudyQuestionKeys() {
+  function studyQuestionKeys(bankKeys = ['ccna/all']) {
+    if (window.OpenPTQuizBanks?.questionKeysForBanks) {
+      return window.OpenPTQuizBanks.questionKeysForBanks(window.QUESTIONS || [], bankKeys);
+    }
     return (window.QUESTIONS || [])
       .filter(q => q.bank?.startsWith('ccna/'))
       .map(q => q.questionKey)
@@ -130,13 +150,17 @@ const App = () => {
 
   async function refreshStudyDashboard() {
     if (!client) return null;
-    const total = ccnaStudyQuestionKeys().length;
+    const total = studyQuestionKeys(['ccna/all']).length;
     const data = await client.studySummary(total);
     setStudyDashboard(data.dashboard || null);
     return data.dashboard || null;
   }
 
-  async function launchStudy(knownUser = user) {
+  async function launchStudy(bankKeys = ['ccna/all'], knownUser = user) {
+    const normalizedBankKeys = window.OpenPTQuizBanks?.normalizeBankKeys
+      ? window.OpenPTQuizBanks.normalizeBankKeys(bankKeys)
+      : (Array.isArray(bankKeys) ? bankKeys : [bankKeys || 'ccna/all']);
+    setQueuedStudyBanks(normalizedBankKeys);
     if (!client) {
       setAuth({ open: true, busy: false, error: 'Study Mode needs the OpenPT sync client.', notice: '' });
       return;
@@ -147,11 +171,12 @@ const App = () => {
     }
     setAuth(a => ({ ...a, busy: true, error: '', notice: 'Starting Study Mode...' }));
     try {
-      const keys = ccnaStudyQuestionKeys();
+      const keys = studyQuestionKeys(normalizedBankKeys);
       const data = await client.createStudySession(keys);
       const session = data.session;
       const fresh = {
         mode: 'study',
+        bankKeys: normalizedBankKeys,
         sessionId: session.id,
         questionKeys: session.questionKeys || [],
         cursor: 0,
@@ -163,7 +188,7 @@ const App = () => {
         startedAt: Date.now(),
         dashboard: session.summary || studyDashboard,
       };
-      if (FORCE_LIBRARY && window.history?.replaceState) {
+      if ((FORCE_LIBRARY || FORCE_BANK) && window.history?.replaceState) {
         window.history.replaceState(null, '', window.location.pathname);
       }
       setState(fresh);
@@ -179,7 +204,7 @@ const App = () => {
   function restartFromResults() {
     if (!state) return;
     if (state.mode === 'study') {
-      launchStudy();
+      launchStudy(state.bankKeys || ['ccna/all']);
       return;
     }
     const first = window.QUESTIONS[state.quizIds[0]];
@@ -198,7 +223,7 @@ const App = () => {
           setUser(loggedIn.user);
           await refreshStudyDashboard();
           setAuth({ open: false, busy: false, error: '', notice: '' });
-          launchStudy(loggedIn.user);
+          launchStudy(queuedStudyBanks, loggedIn.user);
           return;
         }
         setAuth({ open: true, busy: false, error: '', notice: 'Check your email to verify the account, then sign in.' });
@@ -208,7 +233,7 @@ const App = () => {
       setUser(loggedIn.user);
       await refreshStudyDashboard();
       setAuth({ open: false, busy: false, error: '', notice: '' });
-      launchStudy(loggedIn.user);
+      launchStudy(queuedStudyBanks, loggedIn.user);
     } catch (err) {
       setAuth(a => ({ ...a, busy: false, error: err.message || 'Sign in failed.', notice: '' }));
     }

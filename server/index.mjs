@@ -320,7 +320,13 @@ app.post("/api/auth/login", async (req, reply) => {
 app.post("/api/auth/verify-email", async (req, reply) => {
   abuse.check("verifyEmailIp", clientIp(req));
   const consumed = store.consumeAccountToken("email_verify", req.body?.token);
-  if (!consumed) return authError(reply, 400, "INVALID_TOKEN", "Verification link is invalid or expired.");
+  if (!consumed) {
+    const tokenStatus = store.accountTokenStatus("email_verify", req.body?.token);
+    if (tokenStatus?.usedAt && tokenStatus.emailVerifiedAt) {
+      return { ok: true, alreadyVerified: true, user: publicUser(store.getUserById(tokenStatus.userId)) };
+    }
+    return authError(reply, 400, "INVALID_TOKEN", "Verification link is invalid or expired.");
+  }
   const user = store.verifyUserEmail(consumed.userId);
   return { ok: true, user: publicUser(user) };
 });

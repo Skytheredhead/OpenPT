@@ -235,6 +235,22 @@ export class OpenPTStore {
     return { userId: row.user_id, email: row.email };
   }
 
+  accountTokenStatus(kind, rawToken) {
+    const row = this.db.prepare(`
+      SELECT account_tokens.*, users.email, users.email_verified_at
+      FROM account_tokens JOIN users ON users.id = account_tokens.user_id
+      WHERE token_hash=? AND kind=?
+    `).get(hashToken(rawToken), kind);
+    if (!row) return null;
+    return {
+      userId: row.user_id,
+      email: row.email,
+      usedAt: row.used_at,
+      expiresAt: row.expires_at,
+      emailVerifiedAt: row.email_verified_at
+    };
+  }
+
   verifyUserEmail(userId) {
     this.db.prepare("UPDATE users SET email_verified_at=COALESCE(email_verified_at, ?) WHERE id=?").run(nowIso(), userId);
     return this.getUserById(userId);
