@@ -1872,7 +1872,7 @@ function App({ initialViewMode = null, initialHomeAction = null } = {}) {
     setSyncStatus({ state: "local", message: "Signed in" });
     setLessonReward({ title: labId ? "Lab loaded" : "Mission loaded", detail: lab.title || lesson.title, xp: 0, nonce: Date.now() });
     pushAppUndo(labId ? "opened guided lab" : "opened guided lesson", before);
-    navigateAppRoute(LEARN_URL);
+    navigateAppRoute("/lab");
   };
 
   const startGuidedLesson = async (lessonId, options = {}) => {

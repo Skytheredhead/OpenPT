@@ -517,10 +517,6 @@
     return new Set((dashboard?.lessons || []).filter((lesson) => lesson.status === "completed").map((lesson) => lesson.id));
   }
 
-  function semesterLabel(catalog, semesterId) {
-    return catalog?.semesters?.find((semester) => semester.id === semesterId)?.title || semesterId || "Semester";
-  }
-
   function quizBankHref(bank, mode = "practice") {
     return `/quiz/?bank=${encodeURIComponent(bank)}&mode=${encodeURIComponent(mode)}`;
   }
@@ -583,12 +579,42 @@
     );
   }
 
-  function LessonPathView({ catalog, dashboard, user, loading, onStartLesson, onStartLab, onSignIn, onBackToLab }) {
+  function LessonPathView({ catalog, dashboard, user, loading, onStartLesson, onSignIn, onBackToLab }) {
     const lessons = catalog?.lessons || [];
-    const modules = catalog?.modules || [];
     const completed = completedLessonIds(dashboard);
     const recommendedId = dashboard?.recommendedLessonId || lessons.find((lesson) => !completed.has(lesson.id))?.id;
     const progressByLesson = Object.fromEntries((dashboard?.lessons || []).map((lesson) => [lesson.id, lesson]));
+    const coursePercent = Math.round(((dashboard?.completedLessons || 0) / Math.max(1, dashboard?.totalLessons || lessons.length || 1)) * 100);
+    const startedLessons = (dashboard?.lessons || [])
+      .filter((lesson) => lesson.progress && lesson.status !== "completed")
+      .sort((a, b) => new Date(b.progress?.updatedAt || b.progress?.startedAt || 0) - new Date(a.progress?.updatedAt || a.progress?.startedAt || 0));
+    const targetLessonId = startedLessons[0]?.id || recommendedId || lessons.find((lesson) => !completed.has(lesson.id))?.id || lessons[0]?.id || null;
+    const targetLesson = lessons.find((lesson) => lesson.id === targetLessonId);
+    const summarizeTags = (predicate, fallbackLessons = []) => {
+      const counts = new Map();
+      for (const lesson of lessons) {
+        const state = progressByLesson[lesson.id];
+        if (!predicate(lesson, state)) continue;
+        for (const tag of lesson.focusTags || []) counts.set(tag, (counts.get(tag) || 0) + 1);
+      }
+      if (!counts.size) {
+        for (const lesson of fallbackLessons) {
+          for (const tag of lesson.focusTags || []) counts.set(tag, (counts.get(tag) || 0) + 1);
+        }
+      }
+      return [...counts.entries()]
+        .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
+        .slice(0, 5)
+        .map(([tag]) => tag);
+    };
+    const goodAt = summarizeTags(
+      (lesson, state) => state?.status === "completed" || (state?.progress?.bestPercent || 0) >= 70,
+      lessons.filter((lesson) => completed.has(lesson.id)).slice(0, 3)
+    );
+    const strugglingWith = summarizeTags(
+      (lesson, state) => state?.status !== "completed" && state?.progress && (state.progress.bestPercent || 0) < 70,
+      [targetLesson].filter(Boolean)
+    );
 
     return (
       <div className="learn-page">
@@ -598,19 +624,6 @@
           <button type="button" className="tb-btn" onClick={onSignIn}>{user ? user.email.split("@")[0] : "Login / Sign up"}</button>
         </div>
         <main className="learn-shell">
-          <section className="learn-hero">
-            <div>
-              <div className="learn-kicker">CCNA Guided Lesson Mode</div>
-              <h1>Build the network, drill the questions, then explain why it works.</h1>
-              <p>A balanced cram path for all three CCNA semesters. Sem 3 leans into CCNA-B with focused quiz-bank drills, lab ideas, and proof checkpoints.</p>
-            </div>
-            <div className="learn-score-strip">
-              <div><span>XP</span><strong>{dashboard?.earnedXp || 0}/{dashboard?.totalXp || 0}</strong></div>
-              <div><span>Streak</span><strong>{dashboard?.currentStreak || 0} day{dashboard?.currentStreak === 1 ? "" : "s"}</strong></div>
-              <div><span>Badges</span><strong>{(dashboard?.badges || []).filter((badge) => badge.earned).length}/{dashboard?.badges?.length || modules.length}</strong></div>
-            </div>
-          </section>
-
           {!user && (
             <section className="learn-login-gate">
               <div>
@@ -623,76 +636,37 @@
 
           {loading && <div className="learn-empty">Loading lesson path...</div>}
 
-          <section className="learn-path">
-            {modules.map((module) => {
-              const moduleLessons = lessons.filter((lesson) => lesson.moduleBank === module.id);
-              const badge = (dashboard?.badges || []).find((item) => item.id === module.id);
-              return (
-                <div className="learn-module" key={module.id}>
-                  <div className="learn-module-head">
-                    <div>
-                      <span>{semesterLabel(catalog, module.semester)} / {moduleLessons.length} mission{moduleLessons.length === 1 ? "" : "s"}</span>
-                      <h2>{module.title}</h2>
-                    </div>
-                    {badge?.earned && <strong className="learn-badge">Badge earned</strong>}
-                  </div>
-                  <div className="learn-mission-grid">
-                    {moduleLessons.map((lesson) => {
-                      const state = progressByLesson[lesson.id];
-                      const missing = state?.softGate?.missingPrerequisites || lesson.prerequisites?.filter((id) => !completed.has(id)) || [];
-                      const status = state?.status || "not_started";
-                      const progress = state?.progress;
-                      const isRecommended = lesson.id === recommendedId;
-                      return (
-                        <article className={`learn-mission ${status} ${isRecommended ? "recommended" : ""}`} key={lesson.id}>
-                          <div className="learn-mission-meta">
-                            <span>{lesson.estimatedMinutes} min</span>
-                            <span>{lesson.xp} XP</span>
-                          </div>
-                          <h3>{lesson.title}</h3>
-                          <FocusTags tags={lesson.focusTags} ccnaBWeight={lesson.ccnaBWeight} />
-                          <p>{missing.length ? `Soft gate: ${missing.length} earlier mission${missing.length === 1 ? "" : "s"} recommended first.` : "Ready when you are."}</p>
-                          {lesson.labIdea && (
-                            <div className="learn-lab-idea">
-                              <strong>{lesson.labIdea.title}</strong>
-                              <span>{lesson.labIdea.goal}</span>
-                            </div>
-                          )}
-                          <QuestionBankLinks banks={lesson.questionBanks} compact />
-                          <LessonLabCards
-                            lesson={lesson}
-                            user={user}
-                            compact
-                            onOpenLab={(labId) => onStartLab?.(lesson.id, labId)}
-                          />
-                          <div className="learn-progress-line">
-                            <span style={{ width: `${progress?.bestPercent || 0}%` }} />
-                          </div>
-                          <button
-                            type="button"
-                            className={`tb-btn ${isRecommended ? "primary" : ""}`}
-                            disabled={!user}
-                            onClick={() => onStartLesson(lesson.id)}
-                          >
-                            {status === "completed" ? "Replay mission" : progress ? "Continue mission" : missing.length ? "Start anyway" : "Start mission"}
-                          </button>
-                        </article>
-                      );
-                    })}
-                  </div>
-                </div>
-              );
-            })}
-          </section>
-
-          <section className="learn-coming-soon">
-            {(catalog?.semesters || []).filter((semester) => semester.status !== "available").map((semester) => (
-              <div key={semester.id}>
-                <span>{semester.status}</span>
-                <strong>{semester.title}</strong>
-                <p>{semester.description}</p>
+          <section className="learn-summary" aria-label="Learning progress">
+            <div className="learn-summary-progress">
+              <div>
+                <span>Progress</span>
+                <strong>{coursePercent}%</strong>
               </div>
-            ))}
+              <div className="learn-progress-line">
+                <span style={{ width: `${coursePercent}%` }} />
+              </div>
+              <p>{dashboard?.completedLessons || 0} of {dashboard?.totalLessons || lessons.length || 0} lessons complete</p>
+            </div>
+
+            <div className="learn-summary-lists">
+              <div>
+                <h2>Things you're good at</h2>
+                {goodAt.length ? <FocusTags tags={goodAt} /> : <p>Start a lesson and this will fill in as you make progress.</p>}
+              </div>
+              <div>
+                <h2>Things you're struggling with</h2>
+                {strugglingWith.length ? <FocusTags tags={strugglingWith} /> : <p>Nothing standing out yet.</p>}
+              </div>
+            </div>
+
+            <button
+              type="button"
+              className="tb-btn primary learn-start-button"
+              disabled={!user || !targetLessonId}
+              onClick={() => targetLessonId && onStartLesson(targetLessonId)}
+            >
+              {targetLesson ? `Start where you left off: ${targetLesson.title}` : "Start where you left off"}
+            </button>
           </section>
         </main>
       </div>

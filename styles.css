@@ -8202,9 +8202,9 @@ body.is-resizing-layout .server-module-resizer::before {
 }
 
 .learn-shell {
-  width: min(1180px, calc(100vw - 28px));
+  width: min(760px, calc(100vw - 28px));
   margin: 0 auto;
-  padding: 22px 0 42px;
+  padding: 64px 0 42px;
   display: flex;
   flex-direction: column;
   gap: 18px;
@@ -8212,6 +8212,7 @@ body.is-resizing-layout .server-module-resizer::before {
 
 .learn-hero,
 .learn-login-gate,
+.learn-summary,
 .learn-module,
 .learn-coming-soon > div {
   border: 1px solid var(--line);
@@ -8289,6 +8290,71 @@ body.is-resizing-layout .server-module-resizer::before {
   justify-content: space-between;
   gap: 16px;
   padding: 18px;
+}
+
+.learn-summary {
+  padding: 22px;
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+}
+
+.learn-summary-progress {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.learn-summary-progress > div:first-child {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.learn-summary-progress span {
+  font-size: 10.5px;
+  color: var(--fg-3);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  font-weight: 700;
+}
+
+.learn-summary-progress strong {
+  font-size: 32px;
+  line-height: 1;
+}
+
+.learn-summary-progress p,
+.learn-summary-lists p {
+  margin: 0;
+  color: var(--fg-2);
+  line-height: 1.45;
+}
+
+.learn-summary-lists {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 22px;
+}
+
+.learn-summary-lists > div {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-width: 0;
+}
+
+.learn-summary-lists h2 {
+  margin: 0;
+  font-size: 18px;
+  letter-spacing: 0;
+}
+
+.learn-start-button {
+  width: 100%;
+  justify-content: center;
+  min-height: 42px;
 }
 
 .learn-login-gate h2,
@@ -8766,6 +8832,7 @@ body.is-resizing-layout .server-module-resizer::before {
 
 @media (max-width: 900px) {
   .learn-hero,
+  .learn-summary-lists,
   .learn-mission-grid,
   .learn-coming-soon {
     grid-template-columns: 1fr;
