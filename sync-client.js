@@ -234,6 +234,15 @@
         body: JSON.stringify({})
       });
     }
+    async lessonWorkspace(lessonId) {
+      return request(`/api/lessons/ccna/${encodeURIComponent(lessonId)}/workspace`);
+    }
+    async saveLessonWorkspace(lessonId, snapshot) {
+      return request(`/api/lessons/ccna/${encodeURIComponent(lessonId)}/workspace`, {
+        method: "PUT",
+        body: JSON.stringify({ snapshot })
+      });
+    }
     async recordLessonEvent(lessonId, event) {
       return request(`/api/lessons/ccna/${encodeURIComponent(lessonId)}/events`, {
         method: "POST",

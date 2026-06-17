@@ -35,8 +35,14 @@ function appRoutePath(pathname = "/") {
   if (/^\/firewall\/?$/.test(pathname)) return FIREWALL_URL;
   if (/^\/bomb\/?$/.test(pathname)) return BOMB_URL;
   if (/^\/learn\/?$/.test(pathname)) return LEARN_URL;
+  const learnMatch = pathname.match(/^\/learn\/([^/?#]+)\/?$/);
+  if (learnMatch) return `${LEARN_URL}/${decodeURIComponent(learnMatch[1])}`;
   if (pathname === "" || pathname === "/") return "/";
   return pathname;
+}
+
+function isInternalAppRoute(pathname) {
+  return INTERNAL_APP_ROUTES.has(pathname) || pathname.startsWith(`${LEARN_URL}/`);
 }
 
 function deviceLabel(device, fallback = "device") {
@@ -1203,7 +1209,7 @@ function App({ initialViewMode = null, initialHomeAction = null } = {}) {
       const url = new URL(anchor.href, location.href);
       if (url.origin !== location.origin) return;
       const nextPath = appRoutePath(url.pathname);
-      if (!INTERNAL_APP_ROUTES.has(nextPath)) return;
+      if (!isInternalAppRoute(nextPath)) return;
       event.preventDefault();
       navigateAppRoute(`${nextPath}${url.search}${url.hash}`);
     };
@@ -1217,7 +1223,8 @@ function App({ initialViewMode = null, initialHomeAction = null } = {}) {
     try { return localStorage.getItem("openpt:bottom-collapsed") === "1"; } catch (e) { return false; }
   });
   const isHomeRoute = routePath === "/";
-  const isLearnRoute = routePath === LEARN_URL;
+  const isLearnRoute = routePath === LEARN_URL || routePath.startsWith(`${LEARN_URL}/`);
+  const learnLessonId = routePath.startsWith(`${LEARN_URL}/`) ? decodeURIComponent(routePath.slice(LEARN_URL.length + 1)) : "";
 
   // Derived: the most-recently-selected device (used for inspector / context menu)
   const selectedId = selectedIds[selectedIds.length - 1] || null;
@@ -1306,11 +1313,33 @@ function App({ initialViewMode = null, initialHomeAction = null } = {}) {
     });
   };
   useEffect(() => {
-    snapshotsRef.current[activeWid] = { devices, links, selectedIds, openConsoles, activeBottom, ptActivity, ptSidebarOpen };
-  }, [devices, links, selectedIds, openConsoles, activeBottom, ptActivity, ptSidebarOpen, activeWid]);
+    snapshotsRef.current[activeWid] = {
+      devices,
+      links,
+      selectedIds,
+      openConsoles,
+      activeBottom,
+      ptActivity,
+      ptSidebarOpen,
+      topologyViewState,
+      terminalScrolls,
+      openAppTabs: openAppTabs.filter((item) => item.wid === activeWid),
+    };
+  }, [devices, links, selectedIds, openConsoles, activeBottom, ptActivity, ptSidebarOpen, topologyViewState, terminalScrolls, openAppTabs, activeWid]);
 
   const captureAppSnapshot = () => {
-    snapshotsRef.current[activeWid] = { devices, links, selectedIds, openConsoles, activeBottom, ptActivity, ptSidebarOpen };
+    snapshotsRef.current[activeWid] = {
+      devices,
+      links,
+      selectedIds,
+      openConsoles,
+      activeBottom,
+      ptActivity,
+      ptSidebarOpen,
+      topologyViewState,
+      terminalScrolls,
+      openAppTabs: openAppTabs.filter((item) => item.wid === activeWid),
+    };
     return cloneState({
       tabs,
       activeWid,
@@ -1387,7 +1416,7 @@ function App({ initialViewMode = null, initialHomeAction = null } = {}) {
   useEffect(() => {
     const root = document.getElementById("root");
     const boot = document.getElementById("boot");
-    if (viewMode === "home") {
+    if (viewMode === "home" || isLearnRoute) {
       if (root) root.classList.add("ready");
       if (boot) boot.remove();
       return;
@@ -1652,6 +1681,10 @@ function App({ initialViewMode = null, initialHomeAction = null } = {}) {
   const [lessonDashboard, setLessonDashboard] = useState(null);
   const [lessonSession, setLessonSession] = useState(null);
   const [lessonReward, setLessonReward] = useState(null);
+  const [lessonMobileTab, setLessonMobileTab] = useState("coach");
+  const lessonWorkspaceSaveTimerRef = useRef(null);
+  const lessonWorkspaceLastJsonRef = useRef("");
+  const lessonWorkspaceHydratingRef = useRef(false);
   const [projectsOpen, setProjectsOpen] = useState(false);
   const [shareOpen, setShareOpen] = useState(false);
   const [feedbackOpen, setFeedbackOpen] = useState(false);
@@ -1669,6 +1702,7 @@ function App({ initialViewMode = null, initialHomeAction = null } = {}) {
   const lessonEventNonceRef = useRef(0);
   const lessonLabProgressKeyRef = useRef("");
   const lessonLabCompleteKeyRef = useRef("");
+  const lessonRouteStartKeyRef = useRef("");
 
   useEffect(() => {
     try { localStorage.setItem("openpt:bottom-height", String(bottomPanelHeight)); } catch (e) {}
@@ -1709,10 +1743,55 @@ function App({ initialViewMode = null, initialHomeAction = null } = {}) {
       activeBottom,
       ptActivity,
       ptSidebarOpen,
+      openAppTabs: openAppTabs.filter((item) => item.wid === activeWid),
       topologyViewState,
       terminalScrolls: terminalScrollPayload(terminalScrolls),
     },
-  }), [currentProjectTitle, devices, links, selectedIds, openConsoles, activeBottom, ptActivity, ptSidebarOpen, topologyViewState, terminalScrolls]);
+  }), [currentProjectTitle, devices, links, selectedIds, openConsoles, activeBottom, ptActivity, ptSidebarOpen, topologyViewState, terminalScrolls, openAppTabs, activeWid]);
+
+  useEffect(() => {
+    if (!syncClient || !cloudUser || !lessonSession?.lessonId) return;
+    const tab = tabs.find((item) => item.id === activeWid);
+    if (!tab || !String(tab.source || "").startsWith("ccna-lesson")) return;
+    if (lessonWorkspaceHydratingRef.current) return;
+    const snapshot = {
+      schemaVersion: 1,
+      appVersion: OPENPT_VERSION,
+      savedAt: new Date().toISOString(),
+      project: currentProjectDoc,
+      lessonSession: {
+        lessonId: lessonSession.lessonId,
+        stepId: lessonSession.stepId,
+        completedStepIds: lessonSession.completedStepIds || [],
+        earnedXp: lessonSession.earnedXp || 0,
+        proofs: lessonSession.proofs || { pings: {}, actions: {} },
+        hintsShown: lessonSession.hintsShown || {},
+        coachOpen: lessonSession.coachOpen !== false,
+        activeLab: lessonSession.activeLab || null,
+        finished: !!lessonSession.finished,
+      },
+      tab: {
+        id: tab.id,
+        name: tab.name,
+        source: tab.source || "ccna-lesson",
+        lessonId: lessonSession.lessonId,
+        labId: tab.labId || lessonSession.activeLab?.labId || null,
+      },
+    };
+    const json = JSON.stringify(snapshot);
+    if (json === lessonWorkspaceLastJsonRef.current) return;
+    clearTimeout(lessonWorkspaceSaveTimerRef.current);
+    lessonWorkspaceSaveTimerRef.current = setTimeout(async () => {
+      lessonWorkspaceLastJsonRef.current = json;
+      try {
+        await syncClient.saveLessonWorkspace(lessonSession.lessonId, snapshot);
+      } catch (err) {
+        lessonWorkspaceLastJsonRef.current = "";
+        setToast({ kind: "err", msg: err.status === 413 ? "Lesson workspace is too large to save." : (err.message || "Could not save lesson workspace") });
+      }
+    }, 900);
+    return () => clearTimeout(lessonWorkspaceSaveTimerRef.current);
+  }, [syncClient, cloudUser?.id, lessonSession, currentProjectDoc, activeWid, tabs]);
 
   const updateLocalProjectRecords = (updater) => {
     setLocalProjects((records) => {
@@ -1832,11 +1911,122 @@ function App({ initialViewMode = null, initialHomeAction = null } = {}) {
     return `lesson:${lessonId}:${stepId || "lesson"}:${type}:${lessonEventNonceRef.current}`;
   };
 
-  const openGuidedLessonTab = (lesson, lab, { labId = null } = {}) => {
+  const lessonTabId = (lessonId, labId = null) => `lesson-${lessonId}${labId ? `-${labId}` : ""}`;
+
+  const lessonTabMatch = (tab, lessonId, labId = null) => {
+    if (!tab) return false;
+    if (tab.lessonId === lessonId && (tab.labId || null) === (labId || null)) return true;
+    return tab.id === lessonTabId(lessonId, labId);
+  };
+
+  const firstIncompleteLessonStep = (lesson, completedSteps = []) =>
+    (lesson?.steps || []).find((step) => !completedSteps.includes(step.id))?.id || lesson?.steps?.[0]?.id || null;
+
+  const normalizedLessonSession = (lesson, progress = {}, saved = {}, labId = null) => {
+    const completedSteps = progress.completedSteps || saved.completedStepIds || [];
+    const firstIncomplete = firstIncompleteLessonStep(lesson, completedSteps);
+    const activeLab = saved.activeLab || (labId ? { labId, stepId: firstIncomplete, completed: false, startedAt: Date.now() } : null);
+    return {
+      lessonId: lesson.id,
+      stepId: progress.currentStepId || saved.stepId || activeLab?.stepId || firstIncomplete,
+      completedStepIds: completedSteps,
+      earnedXp: progress.xp ?? saved.earnedXp ?? 0,
+      proofs: saved.proofs || { pings: {}, actions: {} },
+      hintsShown: saved.hintsShown || {},
+      coachOpen: saved.coachOpen !== false,
+      activeLab,
+      finished: progress.status === "completed" || !!saved.finished,
+      startedAt: saved.startedAt || Date.now(),
+    };
+  };
+
+  const restoreGuidedLessonWorkspace = (lesson, workspace, progress = {}, { routeToLab = true, labId = null, fallbackLab = null } = {}) => {
+    const snapshot = workspace?.snapshot || workspace;
+    const project = snapshot?.project;
+    if (!project?.devices) return false;
+    const norm = OPT_Engine.normalizeTopology(project.devices || {}, project.links || []);
+    const ui = project.uiState || {};
+    const tabInfo = snapshot.tab || {};
+    const targetId = tabs.find((tab) => lessonTabMatch(tab, lesson.id, labId || tabInfo.labId || null))?.id ||
+      tabInfo.id ||
+      lessonTabId(lesson.id, labId || tabInfo.labId || null);
+    const nextTab = {
+      id: targetId,
+      name: tabInfo.name || `${project.title || fallbackLab?.fileName || lesson.title}.opt`,
+      source: tabInfo.source || (labId ? "ccna-lesson-lab" : "ccna-lesson"),
+      lessonId: lesson.id,
+      labId: labId || tabInfo.labId || null,
+    };
+    const nextSnapshot = {
+      devices: norm.devices,
+      links: norm.links,
+      selectedIds: ui.selectedIds || [],
+      openConsoles: ui.openConsoles || [],
+      activeBottom: ui.activeBottom || "events",
+      ptActivity: ui.ptActivity || fallbackLab?.activity || null,
+      ptSidebarOpen: ui.ptSidebarOpen ?? !!labId,
+      topologyViewState: ui.topologyViewState || {},
+      terminalScrolls: ui.terminalScrolls || {},
+      openAppTabs: ui.openAppTabs || [],
+    };
+    lessonWorkspaceHydratingRef.current = true;
+    snapshotsRef.current[activeWid] = {
+      devices,
+      links,
+      selectedIds,
+      openConsoles,
+      activeBottom,
+      ptActivity,
+      ptSidebarOpen,
+      topologyViewState,
+      terminalScrolls,
+      openAppTabs: openAppTabs.filter((item) => item.wid === activeWid),
+    };
+    snapshotsRef.current[targetId] = nextSnapshot;
+    setTabs((items) => {
+      const withoutDuplicateLessonTabs = items.filter((tab) => !lessonTabMatch(tab, lesson.id, nextTab.labId) || tab.id === targetId);
+      return withoutDuplicateLessonTabs.some((tab) => tab.id === targetId)
+        ? withoutDuplicateLessonTabs.map((tab) => tab.id === targetId ? { ...tab, ...nextTab } : tab)
+        : [...withoutDuplicateLessonTabs, nextTab];
+    });
+    setActiveWid(targetId);
+    skipNextSnapshot.current = true;
+    setDevices(norm.devices);
+    setLinks(norm.links);
+    setSelectedIds(nextSnapshot.selectedIds);
+    setSelectedLinkId(null);
+    setOpenConsoles(nextSnapshot.openConsoles);
+    setActiveBottom(nextSnapshot.activeBottom && nextSnapshot.activeBottom !== "pka-report" ? nextSnapshot.activeBottom : "events");
+    setPtActivity(nextSnapshot.ptActivity);
+    setPtSidebarOpen(nextSnapshot.ptSidebarOpen);
+    setTopologyViewState(nextSnapshot.topologyViewState);
+    setTerminalScrolls(nextSnapshot.terminalScrolls);
+    setOpenAppTabs((items) => [
+      ...items.filter((item) => item.wid !== targetId),
+      ...(nextSnapshot.openAppTabs || []).map((item) => ({ ...item, wid: targetId })),
+    ]);
+    setStarterScreenVisible(false);
+    setServerModuleOpen(false);
+    setAppsSidebarOpen(false);
+    setCloudProjectId(null);
+    setCloudVersion(0);
+    setCloudBaseDoc(null);
+    setCloudLease(null);
+    setShareToken(null);
+    setShareMode(null);
+    setSyncStatus({ state: "local", message: "Lesson workspace restored" });
+    setLessonSession(normalizedLessonSession(lesson, progress, snapshot.lessonSession || {}, labId || tabInfo.labId || null));
+    lessonWorkspaceLastJsonRef.current = JSON.stringify(snapshot);
+    setTimeout(() => { lessonWorkspaceHydratingRef.current = false; }, 500);
+    if (routeToLab) navigateAppRoute("/lab");
+    return true;
+  };
+
+  const openGuidedLessonTab = (lesson, lab, { labId = null, routeToLab = true } = {}) => {
     const norm = OPT_Engine.normalizeTopology(lab.devices, lab.links);
     const before = captureAppSnapshot();
-    snapshotsRef.current[activeWid] = { devices, links, selectedIds, openConsoles, activeBottom, ptActivity, ptSidebarOpen };
-    const id = `${labId ? "lesson-lab" : "lesson"}-${Date.now()}`;
+    snapshotsRef.current[activeWid] = { devices, links, selectedIds, openConsoles, activeBottom, ptActivity, ptSidebarOpen, topologyViewState, terminalScrolls, openAppTabs: openAppTabs.filter((item) => item.wid === activeWid) };
+    const id = tabs.find((tab) => lessonTabMatch(tab, lesson.id, labId))?.id || lessonTabId(lesson.id, labId);
     snapshotsRef.current[id] = {
       devices: norm.devices,
       links: norm.links,
@@ -1845,8 +2035,17 @@ function App({ initialViewMode = null, initialHomeAction = null } = {}) {
       activeBottom: "events",
       ptActivity: lab.activity,
       ptSidebarOpen: !!labId,
+      topologyViewState: {},
+      terminalScrolls: {},
+      openAppTabs: [],
     };
-    setTabs((ts) => [...ts, { id, name: `${lab.fileName}`, source: labId ? "ccna-lesson-lab" : "ccna-lesson" }]);
+    const nextTab = { id, name: `${lab.fileName}`, source: labId ? "ccna-lesson-lab" : "ccna-lesson", lessonId: lesson.id, labId };
+    setTabs((ts) => {
+      const withoutDuplicateLessonTabs = ts.filter((tab) => !lessonTabMatch(tab, lesson.id, labId) || tab.id === id);
+      return withoutDuplicateLessonTabs.some((tab) => tab.id === id)
+        ? withoutDuplicateLessonTabs.map((tab) => tab.id === id ? { ...tab, ...nextTab } : tab)
+        : [...withoutDuplicateLessonTabs, nextTab];
+    });
     setActiveWid(id);
     skipNextSnapshot.current = true;
     setDevices(norm.devices);
@@ -1857,6 +2056,9 @@ function App({ initialViewMode = null, initialHomeAction = null } = {}) {
     setActiveBottom("events");
     setPtActivity(lab.activity);
     setPtSidebarOpen(!!labId);
+    setTopologyViewState({});
+    setTerminalScrolls({});
+    setOpenAppTabs((items) => items.filter((item) => item.wid !== id));
     setStarterScreenVisible(false);
     setEvents([]);
     setPackets([]);
@@ -1872,7 +2074,7 @@ function App({ initialViewMode = null, initialHomeAction = null } = {}) {
     setSyncStatus({ state: "local", message: "Signed in" });
     setLessonReward({ title: labId ? "Lab loaded" : "Mission loaded", detail: lab.title || lesson.title, xp: 0, nonce: Date.now() });
     pushAppUndo(labId ? "opened guided lab" : "opened guided lesson", before);
-    navigateAppRoute("/lab");
+    if (routeToLab) navigateAppRoute("/lab");
   };
 
   const startGuidedLesson = async (lessonId, options = {}) => {
@@ -1895,10 +2097,18 @@ function App({ initialViewMode = null, initialHomeAction = null } = {}) {
     const labId = options?.labId || null;
     const lab = OpenPTLearn.buildLessonLab(lesson, { labId });
     const progress = startResult.lesson || {};
+    if (startResult.workspace?.snapshot && restoreGuidedLessonWorkspace(lesson, startResult.workspace, progress, {
+      labId,
+      routeToLab: options?.routeToLab !== false,
+      fallbackLab: lab,
+    })) {
+      setLessonReward({ title: "Start where you left off", detail: lesson.title, xp: 0, nonce: Date.now() });
+      return;
+    }
     const completedSteps = progress.completedSteps || [];
     const firstIncomplete = (lesson.steps || []).find((step) => !completedSteps.includes(step.id))?.id || lesson.steps?.[0]?.id || null;
     const labStepId = labId ? OpenPTLearn.labCompletionStepId?.(lesson, completedSteps) || firstIncomplete : null;
-    openGuidedLessonTab(lesson, lab, { labId });
+    openGuidedLessonTab(lesson, lab, { labId, routeToLab: options?.routeToLab !== false });
     setLessonSession({
       lessonId: lesson.id,
       stepId: labStepId || progress.currentStepId || firstIncomplete,
@@ -1921,7 +2131,7 @@ function App({ initialViewMode = null, initialHomeAction = null } = {}) {
     try {
       const lab = OpenPTLearn.buildLessonLab(lesson, { labId });
       const stepId = OpenPTLearn.labCompletionStepId?.(lesson, lessonSession.completedStepIds || []) || lessonSession.stepId;
-      openGuidedLessonTab(lesson, lab, { labId });
+      openGuidedLessonTab(lesson, lab, { labId, routeToLab: !learnLessonId });
       setLessonSession((current) => current ? {
         ...current,
         stepId,
@@ -1932,6 +2142,20 @@ function App({ initialViewMode = null, initialHomeAction = null } = {}) {
       setToast({ kind: "err", msg: err.message || "Could not open lesson lab" });
     }
   };
+
+  useEffect(() => {
+    if (!learnLessonId || !cloudUser || !syncClient || !lessonCatalog || !lessonDashboard) return;
+    if (lessonSession?.lessonId === learnLessonId) return;
+    const lesson = (lessonCatalog.lessons || []).find((item) => item.id === learnLessonId);
+    const dashboardLesson = (lessonDashboard.lessons || []).find((item) => item.id === learnLessonId);
+    if (!lesson || !dashboardLesson) return;
+    const missing = dashboardLesson.softGate?.missingPrerequisites || [];
+    if (dashboardLesson.status !== "completed" && missing.length > 0) return;
+    const startKey = `${cloudUser.id}:${learnLessonId}`;
+    if (lessonRouteStartKeyRef.current === startKey) return;
+    lessonRouteStartKeyRef.current = startKey;
+    startGuidedLesson(learnLessonId, { routeToLab: false });
+  }, [learnLessonId, cloudUser?.id, syncClient, lessonCatalog, lessonDashboard, lessonSession?.lessonId, startGuidedLesson]);
 
   const recordLessonEvent = async (event) => {
     if (!syncClient || !cloudUser || !lessonSession?.lessonId) return null;
@@ -1990,13 +2214,47 @@ function App({ initialViewMode = null, initialHomeAction = null } = {}) {
   };
 
   const markLessonPing = (srcId, target, plan) => {
-    if (!lessonSession?.lessonId || !plan?.ok) return;
+    if (!lessonSession?.lessonId) return;
     const source = devices[srcId]?.hostname || devices[srcId]?.name || srcId;
     const cleanedTarget = String(target || "").trim();
+    const lesson = (lessonCatalog?.lessons || []).find((item) => item.id === lessonSession.lessonId);
+    const currentStep = (lesson?.steps || []).find((step) => step.id === lessonSession.stepId);
+    const matchesCurrentPing = (currentStep?.checks || []).some((check) =>
+      check.type === "ping" && check.source === source && String(check.target) === cleanedTarget
+    );
+    if (!plan?.ok) {
+      const reason = plan?.error || "The latest ping did not reach the target.";
+      setLessonReward((current) => current?.title === "Checkpoint complete" ? null : current);
+      setLessonSession((current) => {
+        if (!current) return current;
+        return {
+          ...current,
+          proofs: {
+            ...(current.proofs || {}),
+            lastPing: { source, target: cleanedTarget, ok: false, reason, at: Date.now() },
+          },
+        };
+      });
+      recordLessonEvent({
+        eventType: "ping",
+        stepId: lessonSession.stepId,
+        clientEventId: lessonClientEventId(lessonSession.lessonId, lessonSession.stepId, "ping-failed"),
+        payload: { source, target: cleanedTarget, success: false, reason },
+      });
+      if (matchesCurrentPing) setToast({ kind: "err", msg: `Lesson proof failed: ${reason}` });
+      return;
+    }
     setLessonSession((current) => {
       if (!current) return current;
       const pings = { ...(current.proofs?.pings || {}), [OpenPTLearn.pingKey(source, cleanedTarget)]: true };
-      return { ...current, proofs: { ...(current.proofs || {}), pings } };
+      return {
+        ...current,
+        proofs: {
+          ...(current.proofs || {}),
+          pings,
+          lastPing: { source, target: cleanedTarget, ok: true, at: Date.now() },
+        },
+      };
     });
     recordLessonEvent({
       eventType: "ping",
@@ -2038,6 +2296,11 @@ function App({ initialViewMode = null, initialHomeAction = null } = {}) {
       } : current);
       if (data.lesson?.status === "completed") {
         setLessonReward({ title: "Mission complete", detail: "Badge progress saved", xp: 0, nonce: Date.now() });
+        if (learnLessonId) {
+          lessonRouteStartKeyRef.current = "";
+          await refreshLessonDashboard();
+          navigateAppRoute(LEARN_URL);
+        }
       } else {
         setToast({ kind: "warn", msg: "Finish the remaining checkpoints first." });
       }
@@ -4266,6 +4529,68 @@ function App({ initialViewMode = null, initialHomeAction = null } = {}) {
     : meaningfulChanges > 0 && (cloudProjectId || shareToken) && cloudLease
     ? `Autosave in ${Math.ceil(autosaveDueMs / 1000)}s`
     : syncStatus.message;
+  const activeLesson = useMemo(() => (
+    (lessonCatalog?.lessons || []).find((item) => item.id === lessonSession?.lessonId) || null
+  ), [lessonCatalog, lessonSession?.lessonId]);
+  const activeLessonStep = useMemo(() => (
+    (activeLesson?.steps || []).find((step) => step.id === lessonSession?.stepId) || activeLesson?.steps?.[0] || null
+  ), [activeLesson, lessonSession?.stepId]);
+  const deviceIdByLessonName = React.useCallback((name) => {
+    const text = String(name || "").trim();
+    if (!text) return null;
+    const lower = text.toLowerCase();
+    return Object.values(devices).find((device) =>
+      String(device.hostname || device.name || "").toLowerCase() === lower ||
+      Object.values(device.interfaces || {}).some((iface) => String(iface.ip || "") === text)
+    )?.id || null;
+  }, [devices]);
+  const lessonTargets = useMemo(() => {
+    const deviceIds = new Set();
+    const ports = new Set();
+    for (const check of activeLessonStep?.checks || []) {
+      if (check.type === "topology") {
+        const [leftName, rightName] = check.linkBetween || [];
+        const [leftIface, rightIface] = check.interfaces || [];
+        const leftId = deviceIdByLessonName(leftName);
+        const rightId = deviceIdByLessonName(rightName);
+        if (leftId) {
+          deviceIds.add(leftId);
+          if (leftIface) ports.add(`${leftId}:${leftIface}`);
+        }
+        if (rightId) {
+          deviceIds.add(rightId);
+          if (rightIface) ports.add(`${rightId}:${rightIface}`);
+        }
+      }
+      if (check.type === "ping") {
+        const sourceId = deviceIdByLessonName(check.source);
+        const targetId = deviceIdByLessonName(check.target);
+        if (sourceId) deviceIds.add(sourceId);
+        if (targetId) deviceIds.add(targetId);
+      }
+    }
+    return { deviceIds: [...deviceIds], ports: [...ports] };
+  }, [activeLessonStep, deviceIdByLessonName]);
+  const fitLessonTopology = React.useCallback(() => {
+    const ids = lessonTargets.deviceIds.length ? lessonTargets.deviceIds : Object.keys(devices);
+    const targetDevices = ids.map((id) => devices[id]).filter(Boolean);
+    const wrap = document.querySelector(".canvas-wrap");
+    if (!targetDevices.length || !wrap) return;
+    const minX = Math.min(...targetDevices.map((device) => device.x)) - 80;
+    const minY = Math.min(...targetDevices.map((device) => device.y)) - 80;
+    const maxX = Math.max(...targetDevices.map((device) => device.x)) + 80;
+    const maxY = Math.max(...targetDevices.map((device) => device.y)) + 80;
+    const width = wrap.clientWidth || 900;
+    const height = wrap.clientHeight || 600;
+    const k = Math.max(0.4, Math.min(1.4, Math.min(width / Math.max(1, maxX - minX), height / Math.max(1, maxY - minY))));
+    setTopologyViewState({
+      pan: {
+        x: (width - (maxX - minX) * k) / 2 - minX * k,
+        y: (height - (maxY - minY) * k) / 2 - minY * k,
+        k,
+      },
+    });
+  }, [lessonTargets.deviceIds, devices]);
   const enterLabFromHome = React.useCallback((intent = "lab") => {
     navigateAppRoute("/lab");
     if (intent === "starter") {
@@ -4304,8 +4629,382 @@ function App({ initialViewMode = null, initialHomeAction = null } = {}) {
     return () => window.removeEventListener("message", onHomeAction);
   }, [enterLabFromHome, navigateAppRoute]);
   const workspaceTabs = isHomeRoute ? [{ id: "home", name: "home.html" }] : tabs;
+  const lessonMobileSheet = lessonSession && activeLesson ? (
+    <div className="lesson-mobile-sheet" aria-label="Lesson workbench">
+      <div className="lesson-mobile-tabs">
+        {[
+          ["coach", "Coach"],
+          ["tools", "Tools"],
+          ["events", "Events"],
+          ["apps", "Apps"],
+        ].map(([key, label]) => (
+          <button
+            key={key}
+            type="button"
+            className={lessonMobileTab === key ? "active" : ""}
+            aria-pressed={lessonMobileTab === key}
+            onClick={() => setLessonMobileTab(key)}
+          >
+            {label}
+          </button>
+        ))}
+      </div>
+      <div className="lesson-mobile-body">
+        {lessonMobileTab === "coach" && activeLessonStep && (
+          <div className="lesson-mobile-coach">
+            <div className="lesson-mobile-title">
+              <span>{activeLesson.title}</span>
+              <strong>{activeLessonStep.kind}</strong>
+            </div>
+            <p>{activeLessonStep.prompt}</p>
+            <div className="learn-checks">
+              {(activeLessonStep.checks || []).map((check, index) => {
+                const met = OpenPTLearn?.checkMet?.(check, { activity: gradedPtActivity, devices, links, lessonSession, stepId: activeLessonStep.id });
+                return (
+                  <div className={met ? "met" : ""} key={`${activeLessonStep.id}-mobile-${index}`}>
+                    <span>{met ? "met" : "pending"}</span>
+                    <strong>{OpenPTLearn?.checkLabel?.(check) || check.type || "Checkpoint"}</strong>
+                  </div>
+                );
+              })}
+            </div>
+            <div className="lesson-mobile-actions">
+              {(activeLessonStep.hints || []).length > (lessonSession.hintsShown?.[activeLessonStep.id] || 0) && (
+                <button type="button" className="tb-btn" onClick={() => revealLessonHint(activeLessonStep.id)}>Hint</button>
+              )}
+              {(activeLessonStep.checks || []).some((check) => check.type === "manual") && !(lessonSession.completedStepIds || []).includes(activeLessonStep.id) && (
+                <button type="button" className="tb-btn primary" onClick={() => completeLessonStep(activeLessonStep.id, "manual")}>Lock in answer</button>
+              )}
+              <button type="button" className="tb-btn" onClick={() => setLessonSession((current) => current ? { ...current, coachOpen: true } : current)}>Open full coach</button>
+            </div>
+          </div>
+        )}
+        {lessonMobileTab === "tools" && (
+          <div className="lesson-mobile-tools">
+            <button type="button" className={linkMode ? "active" : ""} aria-pressed={!!linkMode} onClick={() => setLinkMode((value) => !value)}>
+              <strong>Cable</strong>
+              <span>{linkMode ? "Active" : "Tap to connect devices"}</span>
+            </button>
+            <button type="button" className={packetMode ? "active" : ""} aria-pressed={!!packetMode} onClick={() => setPacketMode((value) => value ? null : { stage: "src" })}>
+              <strong>Packet</strong>
+              <span>{packetMode ? "Choose endpoints" : "Tap to test reachability"}</span>
+            </button>
+            <button type="button" onClick={fitLessonTopology}>
+              <strong>Fit topology</strong>
+              <span>Center required devices</span>
+            </button>
+            <button type="button" onClick={() => setPtSidebarOpen((value) => !value)}>
+              <strong>Tasks</strong>
+              <span>{ptSidebarOpen ? "Assignment sidebar open" : "Show assignment"}</span>
+            </button>
+          </div>
+        )}
+        {lessonMobileTab === "events" && (
+          <div className="lesson-mobile-events">
+            {(events || []).slice(-8).reverse().map((event, index) => (
+              <div key={`${event.t || index}-${index}`} className={`event ${event.s || ""}`}>
+                <span className={`s ${event.s || ""}`}>{event.s || "log"}</span>
+                <span className="m">{event.m || event.msg || event.note || ""}</span>
+              </div>
+            ))}
+            {!events.length && <div className="learn-workbench-empty">No events yet.</div>}
+          </div>
+        )}
+        {lessonMobileTab === "apps" && (
+          <div className="lesson-mobile-apps">
+            {selected && <strong>{selected.hostname || selected.name}</strong>}
+            {openConsoles.map((id) => devices[id] && (
+              <button type="button" key={id} onClick={() => setActiveBottom(id)}>{devices[id].hostname} console</button>
+            ))}
+            {appTabsForWorkspace.map((item) => devices[item.deviceId] && (
+              <button type="button" key={item.id} onClick={() => setActiveBottom(item.id)}>
+                {appBottomTabTitle(devices[item.deviceId], item.scope === "server" ? serverAppByKey(item.appKey) : endpointAppByKey(item.appKey))}
+              </button>
+            ))}
+            {!openConsoles.length && !appTabsForWorkspace.length && <span>No open apps or consoles.</span>}
+          </div>
+        )}
+      </div>
+    </div>
+  ) : null;
+  const learnLessonWorkbench = learnLessonId && lessonSession?.lessonId === learnLessonId ? (
+    <div
+      className="learn-workbench"
+      style={{
+        "--bottom-panel-height": bottomCollapsed ? "32px" : `${bottomPanelHeight}px`,
+        "--server-module-width": `${serverModuleWidth}px`,
+        "--apps-sidebar-width": `${appsSidebarWidth}px`,
+      }}
+    >
+      <div className="learn-workbench-main">
+        <div className="learn-workbench-canvas">
+          <div className="learn-workbench-toolbar">
+            <div>
+              <strong>{currentProjectTitle}</strong>
+              <span>{plural(Object.keys(devices).length, "device")} / {plural(links.length, "cable")}</span>
+            </div>
+            <div>
+              <button type="button" className={`tb-btn ${linkMode ? "primary" : ""}`} aria-pressed={!!linkMode} title="Cable mode" onClick={() => setLinkMode(!linkMode)}>Cable</button>
+              <button type="button" className={`tb-btn ${packetMode ? "primary" : ""}`} aria-pressed={!!packetMode} title="Packet mode" onClick={() => setPacketMode(packetMode ? null : { stage: "src" })}>Packet</button>
+              <button type="button" className="tb-btn" onClick={fitLessonTopology}>Fit lesson topology</button>
+              {ptActivity && <button type="button" className="tb-btn" onClick={() => setPtSidebarOpen((value) => !value)}>Tasks</button>}
+            </div>
+          </div>
+          <Topology
+            devices={simulatedDevices}
+            links={links}
+            selectedIds={selectedIds}
+            onSelect={(id, additive) => selectDevice(id, additive)}
+            selectedLinkId={selectedLinkId}
+            onSelectLink={(id) => { setSelectedLinkId(id); if (id) setSelectedIds([]); }}
+            onMarqueeSelect={(ids, additive) => {
+              setSelectedLinkId(null);
+              setSelectedIds((current) => additive ? [...new Set([...current, ...ids])] : ids);
+            }}
+            onMoveStart={() => {
+              dragStartSnapRef.current = latestTopologyRef.current;
+              suppressHistoryRef.current = true;
+            }}
+            onMoveEnd={(moved) => {
+              const start = dragStartSnapRef.current;
+              suppressHistoryRef.current = false;
+              dragStartSnapRef.current = null;
+              if (!moved || !start) {
+                prevSnap.current = latestTopologyRef.current;
+                return;
+              }
+              const h = undoRef.current[activeWid] || (undoRef.current[activeWid] = { past: [], future: [] });
+              h.past.push(start);
+              if (h.past.length > 80) h.past.shift();
+              h.future = [];
+              prevSnap.current = latestTopologyRef.current;
+              setHistoryVersion((n) => n + 1);
+            }}
+            onMoveDevices={(idDeltas) => {
+              if (!markProjectChanged("move-devices")) return;
+              setDevices((m) => {
+                const next = { ...m };
+                for (const { id, x, y } of idDeltas) {
+                  if (next[id]) next[id] = { ...next[id], x, y };
+                }
+                return next;
+              });
+            }}
+            onAddDevice={addDevice}
+            onDeleteLink={onDeleteLink}
+            linkMode={linkMode}
+            setLinkMode={setLinkMode}
+            forceLinkType={forceLinkType || "auto"}
+            packetMode={packetMode}
+            setPacketMode={setPacketMode}
+            onLinkRequest={onLinkRequest}
+            onPacketRequest={(srcId, dstId) => {
+              const dst = devices[dstId];
+              const target = Object.values(dst?.interfaces || {}).find(i => i.ip)?.ip;
+              if (!target) {
+                const msg = `${dst?.hostname || "destination"} has no IP address. Configure an interface IP before sending a packet.`;
+                setToast({ kind: "err", msg });
+                return log("err", "packet", msg);
+              }
+              handlePing(srcId, target);
+            }}
+            simRunning={simRunning}
+            packets={packets}
+            activeHopDeviceId={activeHopDeviceId}
+            lessonTargetDeviceIds={lessonTargets.deviceIds}
+            lessonTargetPorts={lessonTargets.ports}
+            viewState={topologyViewState}
+            onViewStateChange={setTopologyViewState}
+            starterScreenVisible={false}
+            onCreateProject={createEmptyProjectFromStarterScreen}
+            onCreateStarter={newStarterTab}
+            onImportPacketTracer={openPacketTracerFilePicker}
+            onOpenGames={() => navigateAppRoute(GAMES_URL)}
+            onOpenJeopardy={() => navigateAppRoute(JEOPARDY_URL)}
+            onOpenLearn={() => navigateAppRoute(LEARN_URL)}
+            onOpenConsole={openDeviceModule}
+            onContextMenu={(e, d) => setCtx({ x: e.clientX, y: e.clientY, devId: d.id })}
+            onLinkContextMenu={(e, l) => setCtx({ x: e.clientX, y: e.clientY, linkId: l.id })}
+          />
+        </div>
+        {ptActivity && ptSidebarOpen && (
+          <div className="pt-sidebar-wrap">
+            {lessonSession && (
+              <button
+                type="button"
+                className="pt-open-coach"
+                onClick={() => setLessonSession((current) => current ? { ...current, coachOpen: true } : current)}
+              >
+                Open lesson coach
+              </button>
+            )}
+            <PacketTracerSidebar
+              activity={gradedPtActivity}
+              onClose={() => setPtSidebarOpen(false)}
+              onReportError={() => reportImportError(gradedPtActivity)}
+              requestedTab={ptSidebarRequestedTab}
+              onRequestedTabHandled={() => setPtSidebarRequestedTab(null)}
+            />
+          </div>
+        )}
+        {appsSidebarOpen && appsSelected && (
+          <AppsSidebar
+            device={selected}
+            activeAppKey={activeAppTab?.deviceId === selected.id ? activeAppTab.appKey : null}
+            onOpenApp={(appKey) => openEndpointApp(selected.id, appKey)}
+            onClose={() => setAppsSidebarOpen(false)}
+          />
+        )}
+        {serverModuleOpen && selected?.kind === "server" && (
+          <ServerModuleSidebar
+            device={selected}
+            activeTab={serverModuleTab}
+            activeConfig={serverConfigSection}
+            activeAppKey={activeAppTab?.deviceId === selected.id && activeAppScope === "server" ? activeAppTab.appKey : null}
+            onTabChange={setServerModuleTab}
+            onConfigChange={setServerConfigSection}
+            onUpdate={(mutator, message) => updateServerDevice(selected.id, mutator, message)}
+            onOpenApp={(appKey) => openServerApp(selected.id, appKey)}
+            onClose={() => setServerModuleOpen(false)}
+          />
+        )}
+        {lessonMobileSheet}
+      </div>
+      <div className="learn-workbench-bottom">
+        <div className="bp-tabs">
+          {openConsoles.map((id) => {
+            const dev = devices[id];
+            if (!dev) return null;
+            const isActive = activeBottom === id;
+            return (
+              <div key={id} className={`bp-tab device-tab ${isActive ? "active" : ""}`} onClick={() => setActiveBottom(id)}>
+                {Icon.terminal()}
+                <span style={{ textTransform: "none", letterSpacing: 0, fontFamily: "var(--font-mono)", fontSize: 12 }}>{dev.hostname}</span>
+                <span className="close-tab" onClick={(e) => { e.stopPropagation(); closeConsole(id); }} title="Close session">×</span>
+              </div>
+            );
+          })}
+          {appTabsForWorkspace.map((item) => {
+            const dev = devices[item.deviceId];
+            const scope = item.scope || (item.id?.startsWith("server-app:") ? "server" : "endpoint");
+            const app = scope === "server" ? serverAppByKey(item.appKey) : endpointAppByKey(item.appKey);
+            if (!dev || !app) return null;
+            return (
+              <div
+                key={item.id}
+                className={`bp-tab app-bottom-tab ${activeBottom === item.id ? "active" : ""}`}
+                onClick={() => { revealAppPanel(); setActiveBottom(item.id); }}
+                title={appBottomTabTitle(dev, app)}
+              >
+                <AppLibraryIcon kind={app.key} className="tab-app-icon" />
+                <span>{appBottomTabTitle(dev, app)}</span>
+                <span
+                  className="close-tab"
+                  onClick={(e) => { e.stopPropagation(); closeEndpointApp(item.id); }}
+                  title="Close app"
+                >×</span>
+              </div>
+            );
+          })}
+          {(openConsoles.length > 0 || appTabsForWorkspace.length > 0) && <div style={{ width: 1, background: "var(--line)" }}/>}
+          {[
+            ["events", "Events", events.length || null],
+            ["packets", "Packets", packetEvents.length || null],
+            ["validation", "Validation", validationIssues.length || null],
+          ].map(([k, lbl, badge]) => (
+            <div key={k} className={`bp-tab ${activeBottom === k ? "active" : ""}`} onClick={() => setActiveBottom(k)}>
+              {lbl}
+              {badge != null && <span className={`badge ${(k === "events" && events.some(e => e.s === "err")) || (k === "validation" && validationErrorCount) ? "alert" : ""}`}>{badge}</span>}
+            </div>
+          ))}
+          <div className="bp-spacer"/>
+          <button className="bp-collapse" title={bottomCollapsed ? "Expand panel" : "Collapse panel"} onClick={() => setBottomCollapsed((v) => !v)}>
+            {bottomCollapsed ? "▴" : "▾"}
+          </button>
+        </div>
+        {!bottomCollapsed && (
+          <div className="learn-workbench-panel">
+            {openConsoles.map((id) => (
+              <div key={id} style={{ position: "absolute", inset: 0, display: activeBottom === id ? "block" : "none" }}>
+                <CLI
+                  device={simulatedDevices[id]}
+                  devices={simulatedDevices}
+                  links={links}
+                  onApply={(cmd) => { markLessonAction(id, cmd); onApplyToDevice(id, cmd); }}
+                  onPing={handlePing}
+                  onTraceEvent={(trace) => recordPacketEvent(trace, simulatedDevices)}
+                  pendingCmd={pendingCmd && pendingCmd.devId === id ? pendingCmd : null}
+                  active={activeBottom === id}
+                  focusNonce={cliFocusNonce}
+                  scrollState={terminalScrolls[id]}
+                  onScrollStateChange={(devId, state) => setTerminalScrolls((m) => ({ ...m, [id]: state }))}
+                  historyState={cliHistory[id] || {}}
+                  onHistoryChange={(history) => setCliHistory((m) => ({ ...(m && !Array.isArray(m) ? m : {}), [id]: history }))}
+                  ghostSuggestions={cliGhostSuggestions}
+                />
+              </div>
+            ))}
+            {activeAppTab && activeAppDevice && activeEndpointApp && (
+              <div style={{ position: "absolute", inset: 0, display: activeBottom === activeAppTab.id ? "block" : "none" }}>
+                <EndpointAppWorkspace
+                  tab={activeAppTab}
+                  app={activeEndpointApp}
+                  device={activeAppDevice}
+                  devices={simulatedDevices}
+                  links={links}
+                  onClose={() => closeEndpointApp(activeAppTab.id)}
+                  onUpdateDevice={(mutator, message) => updateEndpointDevice(activeAppDevice.id, mutator, message)}
+                  onRunSimulation={(mutator, message) => updateSimulationDevices("endpoint-app", mutator, message)}
+                  onApplyCommand={(cmd) => { markLessonAction(activeAppDevice.id, cmd); onApplyToDevice(activeAppDevice.id, cmd); }}
+                  onPing={handlePing}
+                  onTraceEvent={(trace) => recordPacketEvent(trace, simulatedDevices)}
+                  scrollState={terminalScrolls[activeAppTab.id] || terminalScrolls[activeAppDevice.id]}
+                  onScrollStateChange={(devId, state) => setTerminalScrolls((m) => ({ ...m, [activeAppTab.id]: state }))}
+                  historyState={cliHistory[activeAppTab.id] || {}}
+                  onHistoryChange={(history) => setCliHistory((m) => ({ ...(m && !Array.isArray(m) ? m : {}), [activeAppTab.id]: history }))}
+                  ghostSuggestions={cliGhostSuggestions}
+                />
+              </div>
+            )}
+            {activeAppTab && activeAppDevice && activeServerApp && (
+              <div style={{ position: "absolute", inset: 0, display: activeBottom === activeAppTab.id ? "block" : "none" }}>
+                <ServerAppWorkspace
+                  tab={activeAppTab}
+                  app={activeServerApp}
+                  device={activeAppDevice}
+                  devices={devices}
+                  links={links}
+                  onClose={() => closeEndpointApp(activeAppTab.id)}
+                  onUpdateDevice={(mutator, message) => updateServerDevice(activeAppDevice.id, mutator, message)}
+                  onRunSimulation={(mutator, message) => updateSimulationDevices("server-app", mutator, message)}
+                  onPing={handlePing}
+                />
+              </div>
+            )}
+            {openConsoles.length === 0 && !activeAppTab && activeBottom !== "events" && activeBottom !== "packets" && activeBottom !== "validation" && (
+              <div className="learn-workbench-empty">Right-click a device to open a console or app.</div>
+            )}
+            <div style={{ position: "absolute", inset: 0, display: activeBottom === "events" ? "block" : "none" }}>
+              <Events events={eventFilter === "all" ? events : events.filter((e) => e.s === eventFilter)} />
+            </div>
+            <div style={{ position: "absolute", inset: 0, display: activeBottom === "packets" ? "block" : "none" }}>
+              <PacketInspector events={packetEvents} />
+            </div>
+            <div style={{ position: "absolute", inset: 0, display: activeBottom === "validation" ? "block" : "none" }}>
+              <TopologyValidationPanel
+                issues={validationIssues}
+                devices={devices}
+                links={links}
+                onSelectIssue={selectValidationIssue}
+              />
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  ) : null;
 
-  if (isLearnRoute && !lessonSession && OpenPTLearn?.LessonPathView) {
+  if (routePath === LEARN_URL && OpenPTLearn?.LessonPathView) {
     return (
       <>
         <OpenPTLearn.LessonPathView
@@ -4313,8 +5012,10 @@ function App({ initialViewMode = null, initialHomeAction = null } = {}) {
           dashboard={lessonDashboard}
           user={cloudUser}
           loading={lessonCatalogLoading}
-          onStartLesson={startGuidedLesson}
-          onStartLab={(lessonId, labId) => startGuidedLesson(lessonId, { labId })}
+          onOpenLesson={(lessonId) => {
+            lessonRouteStartKeyRef.current = "";
+            navigateAppRoute(`${LEARN_URL}/${encodeURIComponent(lessonId)}`);
+          }}
           onSignIn={openLessonSignIn}
           onBackToLab={() => navigateAppRoute("/lab")}
         />
@@ -4341,6 +5042,148 @@ function App({ initialViewMode = null, initialHomeAction = null } = {}) {
             }}
           />
         )}
+      </>
+    );
+  }
+
+  if (learnLessonId && OpenPTLearn?.LessonPage) {
+    return (
+      <>
+        <OpenPTLearn.LessonPage
+          catalog={lessonCatalog}
+          dashboard={lessonDashboard}
+          user={cloudUser}
+          loading={lessonCatalogLoading}
+          lessonId={learnLessonId}
+          lessonSession={lessonSession?.lessonId === learnLessonId ? lessonSession : null}
+          activity={gradedPtActivity}
+          devices={devices}
+          links={links}
+          labProgress={lessonActiveLabProgress}
+          workbench={learnLessonWorkbench}
+          onBack={() => {
+            refreshLessonDashboard();
+            navigateAppRoute(LEARN_URL);
+          }}
+          onBackToLab={() => navigateAppRoute("/lab")}
+          onSignIn={openLessonSignIn}
+          onStart={(lessonId) => {
+            lessonRouteStartKeyRef.current = "";
+            startGuidedLesson(lessonId, { routeToLab: false });
+          }}
+          onHint={revealLessonHint}
+          onManualComplete={(stepId) => completeLessonStep(stepId, "manual")}
+          onStepSelect={(stepId) => setLessonSession((current) => current ? { ...current, stepId, coachOpen: false } : current)}
+          onFinish={finishGuidedLesson}
+          onOpenLab={openLessonLab}
+        />
+        {accountOpen && (
+          <AccountDialog
+            syncClient={syncClient}
+            user={cloudUser}
+            initial={accountInitial}
+            onClose={() => { setAccountOpen(false); setAccountInitial(null); }}
+            onSignedIn={(user) => {
+              setCloudUser(user);
+              setAccountOpen(false);
+              setAccountInitial(null);
+              setSyncStatus({ state: "local", message: "Signed in" });
+            }}
+            onSignedOut={logoutCloud}
+            onAccountDeleted={(deletion) => {
+              setCloudUser(null);
+              setCloudProjects([]);
+              resetSyncState({ clearProject: true, clearShare: true, clearSaveCounters: true, status: { state: "local", message: "Account deletion scheduled" } });
+              setAccountOpen(false);
+              setAccountInitial(null);
+              setToast({ kind: "warn", msg: `Account scheduled for deletion on ${formatSessionTime(deletion.deletionScheduledAt)}` });
+            }}
+          />
+        )}
+        {toast && (
+          <div className={`toast ${toast.kind || ""}`}>
+            <span className="dot"/>
+            <span>{toast.msg}</span>
+          </div>
+        )}
+        {lessonReward && (
+          <div className="learn-reward-toast" key={lessonReward.nonce}>
+            <span>XP</span>
+            <div>
+              <strong>{lessonReward.title}</strong>
+              <p>{lessonReward.detail}</p>
+            </div>
+          </div>
+        )}
+        {pingDialog && (
+          <PingDialog
+            device={devices[pingDialog.devId]}
+            initialTarget={pingDialog.target}
+            recentTargets={recentPingTargets}
+            onClose={() => setPingDialog(null)}
+            onSubmit={(target) => submitPingTarget(pingDialog.devId, target)}
+          />
+        )}
+        {ctx && (ctx.linkId ? (
+          <LinkContextMenu
+            x={ctx.x}
+            y={ctx.y}
+            link={links.find((l) => l.id === ctx.linkId)}
+            devices={devices}
+            onClose={() => setCtx(null)}
+            onDelete={() => {
+              onDeleteLink(ctx.linkId);
+              setSelectedLinkId(null);
+              setCtx(null);
+            }}
+          />
+        ) : (
+          <ContextMenu
+            x={ctx.x}
+            y={ctx.y}
+            device={devices[ctx.devId]}
+            onClose={() => setCtx(null)}
+            onAction={(action) => {
+              const id = ctx.devId;
+              const d = devices[id];
+              if (!d) return setCtx(null);
+              switch (action) {
+                case "server-module":
+                  openServerModule(id); break;
+                case "apps":
+                  openEndpointApp(id, "ip"); break;
+                case "console":
+                  openConsole(id); break;
+                case "show-int":
+                  runConsoleCmd(id, "show interfaces"); break;
+                case "show-route":
+                  runConsoleCmd(id, "show ip route"); break;
+                case "show-vlan":
+                  runConsoleCmd(id, "show vlan brief"); break;
+                case "show-mac":
+                  runConsoleCmd(id, "show mac address-table"); break;
+                case "show-run":
+                  runConsoleCmd(id, "show running-config"); break;
+                case "power":
+                  togglePower(id); break;
+                case "restart":
+                  reloadDevice(id); break;
+                case "delete":
+                  deleteDevice(id); break;
+                case "ping":
+                  setPingDialog({ devId: id, target: recentPingTargets[0] || "192.168.20.20" }); break;
+                case "duplicate": {
+                  if (!markProjectChanged("duplicate")) break;
+                  const newD = { ...d, id: OPT_Engine.uid("d"), x: d.x + 60, y: d.y + 40, hostname: d.hostname + "-copy" };
+                  setDevices((m) => ({ ...m, [newD.id]: newD }));
+                  log("ok", "topology", `duplicated ${d.hostname}`);
+                  break;
+                }
+              }
+              setCtx(null);
+            }}
+          />
+        ))}
       </>
     );
   }
@@ -4567,13 +5410,24 @@ function App({ initialViewMode = null, initialHomeAction = null } = {}) {
         {/* (Labs/Diagnostics moved to top menus) */}
         {ptActivity && ptSidebarOpen && (
           <>
-            <PacketTracerSidebar
-              activity={gradedPtActivity}
-              onClose={() => setPtSidebarOpen(false)}
-              onReportError={() => reportImportError(gradedPtActivity)}
-              requestedTab={ptSidebarRequestedTab}
-              onRequestedTabHandled={() => setPtSidebarRequestedTab(null)}
-            />
+            <div className="pt-sidebar-wrap">
+              {lessonSession && (
+                <button
+                  type="button"
+                  className="pt-open-coach"
+                  onClick={() => setLessonSession((current) => current ? { ...current, coachOpen: true } : current)}
+                >
+                  Open lesson coach
+                </button>
+              )}
+              <PacketTracerSidebar
+                activity={gradedPtActivity}
+                onClose={() => setPtSidebarOpen(false)}
+                onReportError={() => reportImportError(gradedPtActivity)}
+                requestedTab={ptSidebarRequestedTab}
+                onRequestedTabHandled={() => setPtSidebarRequestedTab(null)}
+              />
+            </div>
             <div
               className="pt-sidebar-resizer"
               role="separator"
@@ -4608,7 +5462,6 @@ function App({ initialViewMode = null, initialHomeAction = null } = {}) {
             onFinish={finishGuidedLesson}
             onOpenLab={openLessonLab}
             onReturnToPath={() => {
-              setLessonSession(null);
               refreshLessonDashboard();
               navigateAppRoute(LEARN_URL);
             }}
@@ -4623,6 +5476,7 @@ function App({ initialViewMode = null, initialHomeAction = null } = {}) {
             <span>Lesson</span>
           </div>
         )}
+        {lessonMobileSheet}
 
         {/* Center */}
         <div className="center-col">
@@ -4647,8 +5501,8 @@ function App({ initialViewMode = null, initialHomeAction = null } = {}) {
             <div className="tab-new" title="New blank tab" onClick={() => isHomeRoute ? enterLabFromHome("lab") : newBlankTab()}>+</div>
             <div className="tab-spacer"/>
             {!isHomeRoute && <div className="tab-tools">
-              <div className={`tab-tool ${linkMode ? "active" : ""}`} title="Cable mode (L)" onClick={() => setLinkMode(!linkMode)}>{Icon.link()}</div>
-              <div className={`tab-tool ${packetMode ? "active" : ""}`} title="Packet mode (P)" onClick={() => setPacketMode(packetMode ? null : { stage: "src" })}>{Icon.packet()}</div>
+              <button type="button" className={`tab-tool ${linkMode ? "active" : ""}`} title="Cable mode (L)" aria-label="Cable mode" aria-pressed={!!linkMode} onClick={() => setLinkMode(!linkMode)}>{Icon.link()}</button>
+              <button type="button" className={`tab-tool ${packetMode ? "active" : ""}`} title="Packet mode (P)" aria-label="Packet mode" aria-pressed={!!packetMode} onClick={() => setPacketMode(packetMode ? null : { stage: "src" })}>{Icon.packet()}</button>
             </div>}
           </div>
 
@@ -4723,6 +5577,8 @@ function App({ initialViewMode = null, initialHomeAction = null } = {}) {
             simRunning={simRunning}
             packets={packets}
             activeHopDeviceId={activeHopDeviceId}
+            lessonTargetDeviceIds={lessonTargets.deviceIds}
+            lessonTargetPorts={lessonTargets.ports}
             viewState={topologyViewState}
             onViewStateChange={setTopologyViewState}
             starterScreenVisible={starterScreenVisible}
@@ -5203,6 +6059,7 @@ function FeedbackWidget({ open, syncClient, onToggle, onClose }) {
   const [attachments, setAttachments] = useState([]);
   const [status, setStatus] = useState(null);
   const [sending, setSending] = useState(false);
+  const canSubmit = form.content.trim().length > 0 && !sending;
   const canAttach = attachments.length < 2 && !sending;
   const update = (key, value) => {
     setForm((current) => ({ ...current, [key]: value }));
@@ -5291,7 +6148,7 @@ function FeedbackWidget({ open, syncClient, onToggle, onClose }) {
           </label>
           <label htmlFor="feedback-content">
             <span>content</span>
-            <textarea id="feedback-content" value={form.content} maxLength={4000} onChange={(e) => update("content", e.target.value)} />
+            <textarea id="feedback-content" value={form.content} maxLength={4000} required onChange={(e) => update("content", e.target.value)} />
           </label>
           <input ref={inputRef} type="file" accept="image/jpeg,image/png,image/webp,image/gif" hidden onChange={onFile} />
           <div className="feedback-attachments">
@@ -5307,7 +6164,7 @@ function FeedbackWidget({ open, syncClient, onToggle, onClose }) {
           </div>
           {status && <div className={`feedback-status ${status.kind}`}>{status.msg}</div>}
           <div className="feedback-actions">
-            <button type="submit" className="feedback-submit" disabled={sending}>{sending ? "Sending..." : "Send"}</button>
+            <button type="submit" className="feedback-submit" disabled={!canSubmit}>{sending ? "Sending..." : "Send"}</button>
           </div>
         </form>
       )}

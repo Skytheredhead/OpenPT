@@ -13,6 +13,7 @@ const migrationsDir = join(__dirname, "migrations");
 export const DEFAULT_LIMITS = {
   userBytes: 5 * 1024 * 1024 * 1024,
   projectBytes: 500 * 1024 * 1024,
+  lessonWorkspaceBytes: 2 * 1024 * 1024,
   minSaveIntervalMs: 10_000,
   leaseTtlMs: 45_000,
   rollbackTargets: {
@@ -36,6 +37,7 @@ export function limitsFromEnv(env = process.env) {
     ...DEFAULT_LIMITS,
     userBytes: envNumber(env, "OPENPT_USER_BYTES_LIMIT", DEFAULT_LIMITS.userBytes),
     projectBytes: envNumber(env, "OPENPT_PROJECT_BYTES_LIMIT", DEFAULT_LIMITS.projectBytes),
+    lessonWorkspaceBytes: envNumber(env, "OPENPT_LESSON_WORKSPACE_BYTES_LIMIT", DEFAULT_LIMITS.lessonWorkspaceBytes),
     minSaveIntervalMs: envNumber(env, "OPENPT_MIN_SAVE_INTERVAL_MS", DEFAULT_LIMITS.minSaveIntervalMs),
     leaseTtlMs: envNumber(env, "OPENPT_LEASE_TTL_MS", DEFAULT_LIMITS.leaseTtlMs),
     rollbackTargets: DEFAULT_LIMITS.rollbackTargets
@@ -670,6 +672,50 @@ export class OpenPTStore {
     };
   }
 
+  lessonWorkspaceResponse(row) {
+    if (!row) return null;
+    return {
+      userId: row.user_id,
+      courseId: row.course_id,
+      lessonId: row.lesson_id,
+      snapshot: parseJson(row.snapshot_json, null),
+      bytes: row.snapshot_bytes || 0,
+      appVersion: row.app_version || null,
+      savedAt: row.saved_at,
+      updatedAt: row.updated_at
+    };
+  }
+
+  getLessonWorkspace(userId, courseId = "ccna", lessonId) {
+    requireLesson(lessonId);
+    const row = this.db.prepare("SELECT * FROM lesson_workspaces WHERE user_id=? AND course_id=? AND lesson_id=?")
+      .get(userId, courseId, lessonId);
+    return this.lessonWorkspaceResponse(row);
+  }
+
+  saveLessonWorkspace(userId, courseId = "ccna", lessonId, snapshot = {}) {
+    const lesson = requireLesson(lessonId);
+    const normalized = snapshot && typeof snapshot === "object" ? snapshot : {};
+    const size = byteLength(normalized);
+    if (size > this.limits.lessonWorkspaceBytes) {
+      const err = new Error("Lesson workspace exceeds the 2MB snapshot limit.");
+      err.statusCode = 413;
+      throw err;
+    }
+    const now = nowIso();
+    const appVersion = String(normalized.appVersion || normalized.app_version || "").slice(0, 80) || null;
+    this.db.prepare(`
+      INSERT INTO lesson_workspaces (user_id, course_id, lesson_id, snapshot_json, snapshot_bytes, app_version, saved_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+      ON CONFLICT(user_id, course_id, lesson_id) DO UPDATE SET
+        snapshot_json=excluded.snapshot_json,
+        snapshot_bytes=excluded.snapshot_bytes,
+        app_version=excluded.app_version,
+        updated_at=excluded.updated_at
+    `).run(userId, courseId, lesson.id, JSON.stringify(normalized), size, appVersion, now, now);
+    return this.getLessonWorkspace(userId, courseId, lesson.id);
+  }
+
   lessonCurrentStreak(userId, courseId = "ccna") {
     const rows = this.db.prepare(`
       SELECT activity_date
@@ -773,6 +819,17 @@ export class OpenPTStore {
 
   startLesson(userId, courseId = "ccna", lessonId) {
     const lesson = requireLesson(lessonId);
+    const missingPrerequisites = (lesson.prerequisites || []).filter((id) => {
+      const row = this.db.prepare("SELECT status FROM lesson_progress WHERE user_id=? AND course_id=? AND lesson_id=?").get(userId, courseId, id);
+      return row?.status !== "completed";
+    });
+    if (missingPrerequisites.length > 0) {
+      const err = new Error("Complete the prerequisite lessons first.");
+      err.statusCode = 403;
+      err.code = "LESSON_LOCKED";
+      err.missingPrerequisites = missingPrerequisites;
+      throw err;
+    }
     const now = nowIso();
     const firstStep = lessonStepIds(lesson)[0] || null;
     const tx = this.db.transaction(() => {
@@ -797,6 +854,7 @@ export class OpenPTStore {
     const row = tx();
     return {
       lesson: this.lessonProgressResponse(row, lesson),
+      workspace: this.getLessonWorkspace(userId, courseId, lesson.id),
       dashboard: this.lessonSummary(userId, courseId)
     };
   }

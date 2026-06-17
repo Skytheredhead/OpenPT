@@ -10,8 +10,11 @@ function Topology(props) {
     starterScreenVisible, onCreateProject, onCreateStarter, onImportPacketTracer,
     onOpenGames, onOpenJeopardy, onOpenLearn,
     selectedLinkId, onSelectLink, onLinkContextMenu, onMarqueeSelect,
+    lessonTargetDeviceIds = [], lessonTargetPorts = [],
   } = props;
   const selSet = React.useMemo(() => new Set(selectedIds || []), [selectedIds]);
+  const lessonTargetDeviceSet = React.useMemo(() => new Set(lessonTargetDeviceIds || []), [lessonTargetDeviceIds]);
+  const lessonTargetPortSet = React.useMemo(() => new Set(lessonTargetPorts || []), [lessonTargetPorts]);
 
   const wrapRef = React.useRef(null);
   const worldRef = React.useRef(null);
@@ -694,7 +697,7 @@ function Topology(props) {
           return (
             <React.Fragment key={`lbl-${l.id}`}>
               <div
-                className="link-label endpoint-a"
+                className={`link-label endpoint-a ${lessonTargetPortSet.has(`${a.id}:${l.ai}`) ? "lesson-target" : ""}`}
                 data-selected={selectedLinkId === l.id ? "1" : "0"}
                 style={{
                   left: geom.a.x,
@@ -710,7 +713,7 @@ function Topology(props) {
                 <span title={l.ai}>{ifaceName(l.ai)}</span>
               </div>
               <div
-                className="link-label endpoint-b"
+                className={`link-label endpoint-b ${lessonTargetPortSet.has(`${b.id}:${l.bi}`) ? "lesson-target" : ""}`}
                 data-selected={selectedLinkId === l.id ? "1" : "0"}
                 style={{
                   left: geom.b.x,
@@ -737,7 +740,7 @@ function Topology(props) {
           return (
             <div
               key={d.id}
-              className={`node ${d.logicalOnly || d.packetTracer?.logicalOnly ? "logical-object" : ""} ${selSet.has(d.id) ? "selected" : ""}`}
+              className={`node ${d.logicalOnly || d.packetTracer?.logicalOnly ? "logical-object" : ""} ${selSet.has(d.id) ? "selected" : ""} ${lessonTargetDeviceSet.has(d.id) ? "lesson-target" : ""}`}
               style={{ left: d.x, top: d.y }}
               onMouseDown={(e) => onNodeMouseDown(e, d)}
               onDoubleClick={() => onSelect && onSelect(d.id)}

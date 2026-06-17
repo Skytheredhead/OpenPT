@@ -703,7 +703,7 @@
           "kind": "build",
           "prompt": "Cable PC1 eth0 to SW1 FastEthernet0/1. Watch the link lights and decide why both ends matter.",
           "checks": [{ "type": "topology", "linkBetween": ["PC1", "SW1"], "interfaces": ["eth0", "FastEthernet0/1"] }],
-          "hints": ["Use cable mode, then click PC1 and SW1.", "Pick the Ethernet port on each side if the simulator asks."],
+          "hints": ["Cable mode -> PC1 -> eth0 -> SW1 -> FastEthernet0/1.", "Pick PC1 eth0 first, then SW1 FastEthernet0/1 so the checkpoint can verify the exact path."],
           "commandCoach": "No IOS command is needed. Physical connectivity is the first layer of the story.",
           "explanation": "Layer 1 must be present before Ethernet, ARP, IP, or application traffic can work. Both interfaces need a usable cable and an up state.",
           "xp": 25
@@ -716,7 +716,7 @@
             { "type": "topology", "linkBetween": ["PC2", "SW1"], "interfaces": ["eth0", "FastEthernet0/2"] },
             { "type": "topology", "linkBetween": ["SRV1", "SW1"], "interfaces": ["eth0", "FastEthernet0/3"] }
           ],
-          "hints": ["Keep PC2 on FastEthernet0/2 and SRV1 on FastEthernet0/3 for the cleanest assessment.", "If you used a different switch port, remove the cable and try the suggested port."],
+          "hints": ["Cable mode -> PC2 -> eth0 -> SW1 -> FastEthernet0/2, then Cable mode -> SRV1 -> eth0 -> SW1 -> FastEthernet0/3.", "If you used a different switch port, remove the cable and try the suggested port."],
           "commandCoach": "Topology edits are the learning action here. Think: what changed at Layer 1 and Layer 2?",
           "explanation": "Every endpoint now has a path to the switch. The switch can learn each endpoint MAC address after traffic begins.",
           "xp": 30
@@ -724,9 +724,9 @@
         {
           "id": "prove-lan",
           "kind": "prove",
-          "prompt": "Send a packet or ping from PC1 to 192.168.10.12. Notice that no router is required inside one IPv4 subnet.",
+          "prompt": "Send a packet or ping from PC1 to PC2. Packet mode: click PC1, then PC2. CLI: right-click PC1 -> Open Console -> ping 192.168.10.12. Notice that no router is required inside one IPv4 subnet.",
           "checks": [{ "type": "ping", "source": "PC1", "target": "192.168.10.12" }],
-          "hints": ["Open PC1 and ping PC2's address.", "Same-subnet traffic goes through the switch, not a default gateway."],
+          "hints": ["Packet mode: click PC1, then PC2.", "CLI: right-click PC1 -> Open Console -> ping 192.168.10.12.", "Same-subnet traffic goes through the switch, not a default gateway."],
           "commandCoach": "From PC1, use ping 192.168.10.12.",
           "explanation": "PC1 and PC2 share 192.168.10.0/24, so PC1 resolves PC2's MAC with ARP and sends the frame directly through SW1.",
           "xp": 30

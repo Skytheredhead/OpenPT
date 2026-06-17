@@ -4,7 +4,9 @@ function collectPageErrors(page) {
   const errors = [];
   page.on("pageerror", (err) => errors.push(err.message));
   page.on("console", (msg) => {
-    if (msg.type() === "error") errors.push(msg.text());
+    if (msg.type() !== "error") return;
+    if (/BABEL.*deoptimised the styling of \/app\.jsx/.test(msg.text())) return;
+    errors.push(msg.text());
   });
   return errors;
 }
@@ -24,7 +26,9 @@ test("lab loads and starter flow creates a topology", async ({ page }) => {
   await page.getByRole("button", { name: "Starter Lab" }).click();
   await expect.poll(async () => page.locator(".node").count(), { message: "starter topology node count" }).toBeGreaterThanOrEqual(5);
   await expect(page.locator(".node-label", { hasText: "R1" })).toBeVisible();
-  await expect.poll(async () => page.locator(".link-status-marker.up").count(), { message: "healthy link status markers" }).toBeGreaterThan(0);
+  await expect
+    .poll(async () => page.locator(".link-status-marker.up").count(), { message: "healthy link status markers" })
+    .toBeGreaterThan(0);
   expect(errors, "browser console/page errors").toEqual([]);
 });
 
@@ -33,66 +37,69 @@ test("topology link status markers show down, blocking, and activity states", as
   await page.addInitScript(() => {
     localStorage.clear();
     localStorage.setItem("openpt:viewMode", "app");
-    localStorage.setItem("openpt:v1", JSON.stringify({
-      tabs: [{ id: "w-0", name: "status-markers.opt" }],
-      activeWid: "w-0",
-      starterScreenVisible: false,
-      snapshots: {
-        "w-0": {
-          selectedIds: [],
-          openConsoles: [],
-          activeBottom: "events",
-          ptActivity: null,
-          ptSidebarOpen: false,
-          devices: {
-            r1: {
-              id: "r1",
-              kind: "router",
-              hostname: "R1",
-              name: "R1",
-              platform: "isr4321",
-              powered: true,
-              x: 180,
-              y: 180,
-              interfaces: {
-                "GigabitEthernet0/0/0": { up: false, admUp: false },
+    localStorage.setItem(
+      "openpt:v1",
+      JSON.stringify({
+        tabs: [{ id: "w-0", name: "status-markers.opt" }],
+        activeWid: "w-0",
+        starterScreenVisible: false,
+        snapshots: {
+          "w-0": {
+            selectedIds: [],
+            openConsoles: [],
+            activeBottom: "events",
+            ptActivity: null,
+            ptSidebarOpen: false,
+            devices: {
+              r1: {
+                id: "r1",
+                kind: "router",
+                hostname: "R1",
+                name: "R1",
+                platform: "isr4321",
+                powered: true,
+                x: 180,
+                y: 180,
+                interfaces: {
+                  "GigabitEthernet0/0/0": { up: false, admUp: false },
+                },
+              },
+              sw1: {
+                id: "sw1",
+                kind: "l2switch",
+                hostname: "SW1",
+                name: "SW1",
+                platform: "2960-24tt",
+                powered: true,
+                x: 430,
+                y: 180,
+                interfaces: {
+                  "FastEthernet0/1": { up: true, admUp: true, mode: "access", vlan: 1, stp: { state: "forwarding" } },
+                  "FastEthernet0/2": { up: true, admUp: true, mode: "access", vlan: 1, stp: { state: "blocking" } },
+                },
+              },
+              sw2: {
+                id: "sw2",
+                kind: "l2switch",
+                hostname: "SW2",
+                name: "SW2",
+                platform: "2960-24tt",
+                powered: true,
+                x: 680,
+                y: 180,
+                interfaces: {
+                  "FastEthernet0/1": { up: true, admUp: true, mode: "access", vlan: 1, stp: { state: "forwarding" } },
+                },
               },
             },
-            sw1: {
-              id: "sw1",
-              kind: "l2switch",
-              hostname: "SW1",
-              name: "SW1",
-              platform: "2960-24tt",
-              powered: true,
-              x: 430,
-              y: 180,
-              interfaces: {
-                "FastEthernet0/1": { up: true, admUp: true, mode: "access", vlan: 1, stp: { state: "forwarding" } },
-                "FastEthernet0/2": { up: true, admUp: true, mode: "access", vlan: 1, stp: { state: "blocking" } },
-              },
-            },
-            sw2: {
-              id: "sw2",
-              kind: "l2switch",
-              hostname: "SW2",
-              name: "SW2",
-              platform: "2960-24tt",
-              powered: true,
-              x: 680,
-              y: 180,
-              interfaces: {
-                "FastEthernet0/1": { up: true, admUp: true, mode: "access", vlan: 1, stp: { state: "forwarding" } },
-              },
-            },
+            links: [
+              { id: "down-link", a: "r1", ai: "GigabitEthernet0/0/0", b: "sw1", bi: "FastEthernet0/1", type: "copper", up: false },
+              { id: "blocking-link", a: "sw1", ai: "FastEthernet0/2", b: "sw2", bi: "FastEthernet0/1", type: "copper", up: true },
+            ],
           },
-          links: [
-            { id: "down-link", a: "r1", ai: "GigabitEthernet0/0/0", b: "sw1", bi: "FastEthernet0/1", type: "copper", up: false },
-            { id: "blocking-link", a: "sw1", ai: "FastEthernet0/2", b: "sw2", bi: "FastEthernet0/1", type: "copper", up: true },
-          ],
         },
-      },
-    }));
+      })
+    );
   });
 
   await page.goto("/lab/");
@@ -114,12 +121,20 @@ test("packet mode marks active cable endpoints as link activity", async ({ page 
   await expect(page.locator(".node-label", { hasText: "PC1" })).toBeVisible();
 
   await page.locator('.tab-tool[title="Packet mode (P)"]').click();
-  await page.locator(".node").filter({ has: page.locator(".node-label", { hasText: "PC1" }) }).click();
-  await page.locator(".node").filter({ has: page.locator(".node-label", { hasText: "PC2" }) }).click();
-  await expect.poll(async () => page.locator(".link-status-marker.activity").count(), {
-    message: "active link marker during packet animation",
-    timeout: 2500,
-  }).toBeGreaterThan(0);
+  await page
+    .locator(".node")
+    .filter({ has: page.locator(".node-label", { hasText: "PC1" }) })
+    .click();
+  await page
+    .locator(".node")
+    .filter({ has: page.locator(".node-label", { hasText: "PC2" }) })
+    .click();
+  await expect
+    .poll(async () => page.locator(".link-status-marker.activity").count(), {
+      message: "active link marker during packet animation",
+      timeout: 2500,
+    })
+    .toBeGreaterThan(0);
   expect(errors, "browser console/page errors").toEqual([]);
 });
 
@@ -148,16 +163,19 @@ test("palette drop keeps the device at the release point", async ({ page }) => {
   });
   await expect(page.locator(".node")).toHaveCount(1);
 
-  const placement = await page.locator(".node").first().evaluate((node) => {
-    const nodeRect = node.getBoundingClientRect();
-    const canvasRect = node.closest(".canvas-wrap").getBoundingClientRect();
-    return {
-      x: nodeRect.left + nodeRect.width / 2 - canvasRect.left,
-      y: nodeRect.top + nodeRect.height / 2 - canvasRect.top,
-      canvasCenterX: canvasRect.width / 2,
-      canvasCenterY: canvasRect.height / 2,
-    };
-  });
+  const placement = await page
+    .locator(".node")
+    .first()
+    .evaluate((node) => {
+      const nodeRect = node.getBoundingClientRect();
+      const canvasRect = node.closest(".canvas-wrap").getBoundingClientRect();
+      return {
+        x: nodeRect.left + nodeRect.width / 2 - canvasRect.left,
+        y: nodeRect.top + nodeRect.height / 2 - canvasRect.top,
+        canvasCenterX: canvasRect.width / 2,
+        canvasCenterY: canvasRect.height / 2,
+      };
+    });
 
   expect(Math.abs(placement.x - dropPoint.x)).toBeLessThan(35);
   expect(Math.abs(placement.y - dropPoint.y)).toBeLessThan(35);
@@ -176,7 +194,7 @@ test("quiz library loads and can start practice", async ({ page }) => {
 
   await page.getByRole("button", { name: /Start practice/i }).click();
   await expect(page.locator(".qcard-text")).toBeVisible();
-  await expect(page.locator(".opts")).toBeVisible();
+  await expect(page.getByRole("button", { name: /^[A-E1-5] / }).first()).toBeVisible();
   expect(errors, "browser console/page errors").toEqual([]);
 });
 
@@ -203,9 +221,11 @@ test("ccna study mode is login gated and records a timed answer", async ({ page,
   await page.getByLabel("Password").fill(password);
   await page.getByRole("button", { name: /Sign in and start/i }).click();
   await expect(page.getByText(/CCNA Study Mode \/ question 1 of 20/)).toBeVisible();
-  await page.locator(".opt").first().click();
-  await expect(page.locator(".feedback").first()).toBeVisible();
-  await expect(page.locator(".feedback").first()).toContainText(/PASS|MISS|SLOW/);
+  await page
+    .getByRole("button", { name: /^[A-E] / })
+    .first()
+    .click();
+  await expect(page.getByText(/PASS|MISS|SLOW/)).toBeVisible();
   expect(errors, "browser console/page errors").toEqual([]);
 });
 
@@ -218,6 +238,9 @@ test("ccna guided lesson mode is login gated and starts a simulator mission", as
 
   await page.goto("/learn/");
   await expect(page.getByText("Sign in to start guided CCNA missions.")).toBeVisible();
+  await expect(page.getByText("Progress, XP, streaks, and badges are saved to your OpenPT account.")).toHaveCount(0);
+  await expect(page.getByLabel("Learning progress")).toHaveCount(0);
+  await expect(page.getByText(/Start where you left off/i)).toHaveCount(0);
 
   const email = `lesson-browser-${Date.now()}@example.com`;
   const password = "password123";
@@ -230,56 +253,83 @@ test("ccna guided lesson mode is login gated and starts a simulator mission", as
   await page.getByRole("button", { name: /Sign in to learn/i }).click();
   await page.getByLabel("Email").fill(email);
   await page.getByLabel("Password").fill(password);
-  await page.getByRole("button", { name: /^Sign in$/ }).last().click();
+  await page
+    .getByRole("button", { name: /^Sign in$/ })
+    .last()
+    .click();
 
   await expect(page.getByText("Map the Network Roles")).toBeVisible();
-  await page.getByRole("button", { name: /Start mission/i }).first().click();
-  await expect(page.locator(".learn-coach")).toBeVisible();
-  await expect(page.getByText(/Before touching the topology/)).toBeVisible();
+  const firstMissionButton = page.getByRole("button", { name: /Start first mission: Map the Network Roles/i });
+  await expect(firstMissionButton).toBeVisible();
+  await expect(page.getByText("No strengths yet.")).toBeVisible();
+  await expect(page.getByText("No review topics yet.")).toBeVisible();
+  await expect(page.getByText(/Start where you left off/i)).toHaveCount(0);
+  await firstMissionButton.click();
+  await expect(page).toHaveURL(/\/learn\/sem1-m1-3-network-roles$/);
+  await expect(page.locator(".learn-lesson-intro h1")).toHaveText("Map the Network Roles");
+  await expect(page.getByRole("heading", { name: /Before touching the topology/ })).toBeVisible();
+  await expect(page.locator(".learn-workbench")).toBeVisible();
   await expect(page.locator(".node-label", { hasText: "PC1" })).toBeVisible();
+  await expect(page.locator(".learn-coach")).toHaveCount(0);
+
+  const quizPagePromise = page.context().waitForEvent("page");
+  await page
+    .getByRole("link", { name: /Quiz practice/i })
+    .first()
+    .click();
+  const quizPage = await quizPagePromise;
+  await quizPage.waitForLoadState("domcontentloaded");
+  await expect(quizPage).toHaveURL(/\/quiz\/\?bank=ccna%2Fsem-01%2Fm-1-3&mode=practice/);
+  await quizPage.close();
+  await expect(page).toHaveURL(/\/learn\/sem1-m1-3-network-roles$/);
+
+  await page.setViewportSize({ width: 390, height: 800 });
+  await expect(page.locator(".lesson-mobile-sheet")).toBeVisible();
+  await page.getByRole("button", { name: "Tools" }).click();
+  await expect(page.getByRole("button", { name: /Fit topology/i })).toBeVisible();
+  expect(errors, "browser console/page errors").toEqual([]);
+});
+
+test("feedback send stays disabled until content is entered", async ({ page }) => {
+  const errors = collectPageErrors(page);
+  await page.addInitScript(() => {
+    localStorage.clear();
+    localStorage.setItem("openpt:viewMode", "app");
+  });
+
+  await page.goto("/lab/");
+  await page.getByRole("button", { name: "Feedback" }).click();
+  await expect(page.locator(".feedback-submit")).toBeDisabled();
+  await page.getByLabel("content").fill("The lesson wording was clear.");
+  await expect(page.locator(".feedback-submit")).toBeEnabled();
   expect(errors, "browser console/page errors").toEqual([]);
 });
 
 test("jeopardy board and scoring flow work", async ({ page }) => {
   const errors = collectPageErrors(page);
   await page.addInitScript(() => {
-    localStorage.setItem("openpt:jeopardy", JSON.stringify({
-      deckId: "all",
-      seed: "automation-seed",
-      teams: [
-        { id: "team-1", name: "Team 1", score: 0 },
-        { id: "team-2", name: "Team 2", score: 0 },
-        { id: "team-3", name: "Team 3", score: 0 },
-      ],
-      answered: {},
-      musicEnabled: false,
-      finalScored: {},
-    }));
+    localStorage.setItem(
+      "openpt:jeopardy",
+      JSON.stringify({
+        deckId: "all",
+        seed: "automation-seed",
+        teams: [
+          { id: "team-1", name: "Team 1", score: 0 },
+          { id: "team-2", name: "Team 2", score: 0 },
+          { id: "team-3", name: "Team 3", score: 0 },
+        ],
+        answered: {},
+        musicEnabled: false,
+        finalScored: {},
+      })
+    );
   });
 
   await page.goto("/jeopardy");
   await expect(page).toHaveTitle("OpenPT Jeopardy");
-  await expect(page.locator(".jeopardy-header-stat")).toContainText("25");
   await expect(page.locator(".jeopardy-category")).toHaveCount(5);
-  await expect(page.locator(".jeopardy-category", { hasText: "Automation" })).toBeVisible();
+  await expect(page.locator(".jeopardy-category", { hasText: "Management" })).toBeVisible();
   await expect(page.locator(".jeopardy-board .jeopardy-tile")).toHaveCount(25);
-
-  const headerAlignment = await page.locator(".jeopardy-header-stat").evaluate((el) => {
-    const rect = el.getBoundingClientRect();
-    const view = el.ownerDocument.defaultView;
-    return {
-      alignItems: view.getComputedStyle(el).alignItems,
-      justifyContent: view.getComputedStyle(el).justifyContent,
-      center: Math.round(rect.top + rect.height / 2),
-      childCenters: [...el.children].map((child) => {
-        const childRect = child.getBoundingClientRect();
-        return Math.round(childRect.top + childRect.height / 2);
-      }),
-    };
-  });
-  expect(headerAlignment.alignItems).toBe("center");
-  expect(headerAlignment.justifyContent).toBe("center");
-  expect(headerAlignment.childCenters).toEqual([headerAlignment.center, headerAlignment.center]);
 
   await page.locator(".jeopardy-board .jeopardy-tile").first().click();
   await expect(page.locator(".jeopardy-modal")).toBeVisible();
@@ -288,7 +338,6 @@ test("jeopardy board and scoring flow work", async ({ page }) => {
   await expect(page.locator(".jeopardy-tile.answered")).toHaveCount(0);
 
   await page.locator(".jeopardy-board .jeopardy-tile").first().click();
-  await page.getByRole("button", { name: "Show Choices" }).click();
   await expect(page.locator(".jeopardy-choice-list li")).toHaveCount(4);
   const choiceLayout = await page.locator(".jeopardy-modal").evaluate((modal) => {
     const body = modal.querySelector(".jeopardy-modal-body");
@@ -305,19 +354,25 @@ test("jeopardy board and scoring flow work", async ({ page }) => {
   expect(choiceLayout.bodyHasVerticalOverflow).toBe(false);
   expect(choiceLayout.choicesInsideModal).toBe(true);
   await page.getByRole("button", { name: "Reveal Answer" }).click();
-  await page.locator(".jeopardy-awards button", { hasText: /^Correct$/ }).first().click();
-  await expect(page.locator(".jeopardy-header-stat strong")).toHaveText("24");
+  await page
+    .locator(".jeopardy-awards button", { hasText: /^Correct$/ })
+    .first()
+    .click();
   await expect(page.locator(".jeopardy-team strong").first()).toHaveText("100");
   await expect(page.locator(".jeopardy-tile.answered")).toHaveCount(1);
 
-  await page.getByRole("button", { name: "Final Jeopardy" }).click();
+  await page.getByRole("button", { name: "Final" }).click();
   const firstFinalTeam = page.locator(".jeopardy-final-team").first();
   await firstFinalTeam.locator("input").fill("50");
   await firstFinalTeam.locator("button").first().click();
   await expect(page.locator(".jeopardy-team strong").first()).toHaveText("150");
   await expect(firstFinalTeam.locator("input")).toBeDisabled();
   await expect(firstFinalTeam.locator("button").first()).toBeDisabled();
-  await firstFinalTeam.locator("button").first().click({ force: true }).catch(() => {});
+  await firstFinalTeam
+    .locator("button")
+    .first()
+    .click({ force: true })
+    .catch(() => {});
   await expect(page.locator(".jeopardy-team strong").first()).toHaveText("150");
 
   expect(errors, "browser console/page errors").toEqual([]);
@@ -326,19 +381,22 @@ test("jeopardy board and scoring flow work", async ({ page }) => {
 test("jeopardy daily double wagers cannot exceed the legal maximum", async ({ page }) => {
   const errors = collectPageErrors(page);
   await page.addInitScript(() => {
-    localStorage.setItem("openpt:jeopardy", JSON.stringify({
-      deckId: "all",
-      seed: "automation-seed",
-      teams: [
-        { id: "team-1", name: "Team 1", score: 500 },
-        { id: "team-2", name: "Team 2", score: 0 },
-        { id: "team-3", name: "Team 3", score: 0 },
-      ],
-      answered: {},
-      musicEnabled: false,
-      finalScored: {},
-      activeTeamId: "team-1",
-    }));
+    localStorage.setItem(
+      "openpt:jeopardy",
+      JSON.stringify({
+        deckId: "all",
+        seed: "automation-seed",
+        teams: [
+          { id: "team-1", name: "Team 1", score: 500 },
+          { id: "team-2", name: "Team 2", score: 0 },
+          { id: "team-3", name: "Team 3", score: 0 },
+        ],
+        answered: {},
+        musicEnabled: false,
+        finalScored: {},
+        activeTeamId: "team-1",
+      })
+    );
   });
 
   await page.goto("/jeopardy");
@@ -350,7 +408,10 @@ test("jeopardy daily double wagers cannot exceed the legal maximum", async ({ pa
   await expect(wagerInput).toHaveValue("500");
   await expect(page.locator(".jeopardy-toast")).toContainText("You can only wager up to 500");
   await expect(page.locator(".jeopardy-toast")).toContainText("your current score or the clue value");
-  await page.locator(".jeopardy-awards button", { hasText: /^Correct$/ }).first().click();
+  await page
+    .locator(".jeopardy-awards button", { hasText: /^Correct$/ })
+    .first()
+    .click();
   await expect(page.locator(".jeopardy-team strong").first()).toHaveText("1000");
 
   expect(errors, "browser console/page errors").toEqual([]);

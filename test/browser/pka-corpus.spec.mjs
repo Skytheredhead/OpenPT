@@ -2,6 +2,8 @@ import { test, expect } from "@playwright/test";
 import { readdir, readFile, stat } from "node:fs/promises";
 import { basename, join, relative } from "node:path";
 
+/* global window */
+
 async function collectPacketTracerFiles(root) {
   const entries = await readdir(root, { withFileTypes: true });
   const files = [];

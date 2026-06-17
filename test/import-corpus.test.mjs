@@ -93,17 +93,28 @@ test("Packet Tracer link import resolves endpoint refs when device names contain
   const activity = {
     devices: [
       { name: "ISP:ISP", rawName: "ISP:ISP", saveRefId: "save-ref-id:isp", memAddr: "100", kind: "Router", model: "1941", x: 10, y: 20 },
-      { name: "Switch2", rawName: "Switch2", saveRefId: "save-ref-id:switch", memAddr: "200", kind: "Switch", model: "2960-24TT", x: 30, y: 40 },
+      {
+        name: "Switch2",
+        rawName: "Switch2",
+        saveRefId: "save-ref-id:switch",
+        memAddr: "200",
+        kind: "Switch",
+        model: "2960-24TT",
+        x: 30,
+        y: 40,
+      },
     ],
-    links: [{
-      from: "Switch2:GigabitEthernet0/2",
-      to: "ISP:ISP:GigabitEthernet0/1",
-      fromRef: "save-ref-id:switch",
-      toRef: "save-ref-id:isp",
-      type: "eStraightThrough",
-      medium: "eCopper",
-      ports: ["GigabitEthernet0/2", "GigabitEthernet0/1"],
-    }],
+    links: [
+      {
+        from: "Switch2:GigabitEthernet0/2",
+        to: "ISP:ISP:GigabitEthernet0/1",
+        fromRef: "save-ref-id:switch",
+        toRef: "save-ref-id:isp",
+        type: "eStraightThrough",
+        medium: "eCopper",
+        ports: ["GigabitEthernet0/2", "GigabitEthernet0/1"],
+      },
+    ],
   };
 
   const topology = OpenPTFormat.buildTopologyFromPacketTracer(activity);

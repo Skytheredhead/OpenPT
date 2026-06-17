@@ -419,6 +419,18 @@ app.post("/api/lessons/ccna/:lessonId/start", async (req) => {
   return store.startLesson(user.id, "ccna", req.params.lessonId);
 });
 
+app.get("/api/lessons/ccna/:lessonId/workspace", async (req) => {
+  const user = requireUser(req);
+  return { workspace: store.getLessonWorkspace(user.id, "ccna", req.params.lessonId) };
+});
+
+app.put("/api/lessons/ccna/:lessonId/workspace", async (req) => {
+  const user = requireUser(req);
+  requireCsrf(req);
+  abuse.check("lessonWorkspaceUser", user.id, { limit: 600, windowMs: 60 * 60_000 });
+  return { workspace: store.saveLessonWorkspace(user.id, "ccna", req.params.lessonId, req.body?.snapshot || req.body || {}) };
+});
+
 app.post("/api/lessons/ccna/:lessonId/events", async (req) => {
   const user = requireUser(req);
   requireCsrf(req);
@@ -721,6 +733,10 @@ if (!backendOnly) {
   });
 
   app.get("/learn/", async (req, reply) => {
+    return reply.sendFile("index.html");
+  });
+
+  app.get("/learn/:lessonId", async (req, reply) => {
     return reply.sendFile("index.html");
   });
 

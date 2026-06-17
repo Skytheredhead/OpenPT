@@ -87,7 +87,7 @@ function page({ status = "", error = "" } = {}) {
 }
 
 async function readSudoPassword() {
-  let raw = "";
+  let raw;
   if (SUDO_PASSWORD_FILE.endsWith(".rtf")) {
     raw = await new Promise((resolve, reject) => {
       const textutil = spawn("textutil", ["-convert", "txt", "-stdout", SUDO_PASSWORD_FILE], { stdio: ["ignore", "pipe", "pipe"] });

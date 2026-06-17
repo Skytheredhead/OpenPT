@@ -360,6 +360,14 @@ test("ccna lesson endpoints require auth, csrf, and server-calculated XP", { tim
 
     const anonSummary = await fetch(`${baseUrl}/api/lessons/ccna/summary`);
     assert.equal(anonSummary.status, 401);
+    const anonWorkspace = await fetch(`${baseUrl}/api/lessons/ccna/${lesson.id}/workspace`);
+    assert.equal(anonWorkspace.status, 401);
+    const anonWorkspaceSave = await fetch(`${baseUrl}/api/lessons/ccna/${lesson.id}/workspace`, {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ snapshot: {} }),
+    });
+    assert.equal(anonWorkspaceSave.status, 401);
 
     const session = await registerSession(baseUrl, "lessons@example.com");
 
@@ -381,6 +389,20 @@ test("ccna lesson endpoints require auth, csrf, and server-calculated XP", { tim
     assert.equal(summaryBody.dashboard.totalLessons, 50);
     assert.equal(summaryBody.dashboard.completedLessons, 0);
 
+    const lockedLesson = findLesson("sem1-m1-3-ios-modes-hostname");
+    const lockedStart = await fetch(`${baseUrl}/api/lessons/ccna/${lockedLesson.id}/start`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        cookie: session.cookie,
+        "x-openpt-csrf": session.csrf,
+      },
+      body: JSON.stringify({}),
+    });
+    assert.equal(lockedStart.status, 403);
+    const lockedBody = await lockedStart.json();
+    assert.equal(lockedBody.code, "LESSON_LOCKED");
+
     const start = await fetch(`${baseUrl}/api/lessons/ccna/${lesson.id}/start`, {
       method: "POST",
       headers: {
@@ -394,6 +416,86 @@ test("ccna lesson endpoints require auth, csrf, and server-calculated XP", { tim
     const started = await start.json();
     assert.equal(started.lesson.lessonId, lesson.id);
     assert.equal(started.lesson.currentStepId, stepIds[0]);
+    assert.equal(started.workspace, null);
+
+    const workspaceSnapshot = {
+      project: {
+        title: "Map the Network Roles.opt",
+        devices: { pc1: { id: "pc1", hostname: "PC1", interfaces: {} } },
+        links: [],
+        uiState: { selectedIds: ["pc1"], activeBottom: "events" },
+      },
+      lessonSession: {
+        lessonId: lesson.id,
+        stepId: stepIds[1],
+        completedStepIds: [stepIds[0]],
+        earnedXp: lesson.steps[0].xp,
+        proofs: { pings: {}, actions: {} },
+        hintsShown: { [stepIds[1]]: 1 },
+        coachOpen: false,
+        activeLab: null,
+        finished: false,
+      },
+      tab: { name: "sem1-m1-3-network-roles.opt", source: "ccna-lesson", lessonId: lesson.id },
+    };
+    const savedWorkspace = await fetch(`${baseUrl}/api/lessons/ccna/${lesson.id}/workspace`, {
+      method: "PUT",
+      headers: {
+        "content-type": "application/json",
+        cookie: session.cookie,
+        "x-openpt-csrf": session.csrf,
+      },
+      body: JSON.stringify({ snapshot: workspaceSnapshot }),
+    });
+    assert.equal(savedWorkspace.status, 200);
+    const savedWorkspaceBody = await savedWorkspace.json();
+    assert.equal(savedWorkspaceBody.workspace.lessonId, lesson.id);
+    assert.equal(savedWorkspaceBody.workspace.snapshot.lessonSession.stepId, stepIds[1]);
+    assert.equal(savedWorkspaceBody.workspace.snapshot.project.devices.pc1.hostname, "PC1");
+
+    const workspaceRoundTrip = await fetch(`${baseUrl}/api/lessons/ccna/${lesson.id}/workspace`, {
+      headers: { cookie: session.cookie },
+    });
+    assert.equal(workspaceRoundTrip.status, 200);
+    const workspaceRoundTripBody = await workspaceRoundTrip.json();
+    assert.deepEqual(workspaceRoundTripBody.workspace.snapshot.lessonSession.completedStepIds, [stepIds[0]]);
+
+    const newerWorkspace = await fetch(`${baseUrl}/api/lessons/ccna/${lesson.id}/workspace`, {
+      method: "PUT",
+      headers: {
+        "content-type": "application/json",
+        cookie: session.cookie,
+        "x-openpt-csrf": session.csrf,
+      },
+      body: JSON.stringify({ snapshot: { ...workspaceSnapshot, lessonSession: { ...workspaceSnapshot.lessonSession, stepId: stepIds[2] } } }),
+    });
+    assert.equal(newerWorkspace.status, 200);
+    assert.equal((await newerWorkspace.json()).workspace.snapshot.lessonSession.stepId, stepIds[2]);
+
+    const oversizedWorkspace = await fetch(`${baseUrl}/api/lessons/ccna/${lesson.id}/workspace`, {
+      method: "PUT",
+      headers: {
+        "content-type": "application/json",
+        cookie: session.cookie,
+        "x-openpt-csrf": session.csrf,
+      },
+      body: JSON.stringify({ snapshot: { project: { title: "huge", blob: "x".repeat(2 * 1024 * 1024) } } }),
+    });
+    assert.equal(oversizedWorkspace.status, 413);
+
+    const restart = await fetch(`${baseUrl}/api/lessons/ccna/${lesson.id}/start`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        cookie: session.cookie,
+        "x-openpt-csrf": session.csrf,
+      },
+      body: JSON.stringify({}),
+    });
+    assert.equal(restart.status, 200);
+    const restarted = await restart.json();
+    assert.equal(restarted.workspace.snapshot.lessonSession.stepId, stepIds[2]);
+    assert.equal(restarted.lesson.currentStepId, stepIds[0]);
 
     const firstEventId = "lesson-test-first-event";
     const firstEvent = await fetch(`${baseUrl}/api/lessons/ccna/${lesson.id}/events`, {
@@ -481,6 +583,17 @@ test("ccna lesson endpoints require auth, csrf, and server-calculated XP", { tim
     assert.equal(finished.dashboard.completedLessons, 1);
     assert.equal(finished.dashboard.earnedXp, Math.min(lesson.xp, stepXp));
     assert.equal(finished.dashboard.currentStreak, 1);
+
+    const unlockedStart = await fetch(`${baseUrl}/api/lessons/ccna/${lockedLesson.id}/start`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        cookie: session.cookie,
+        "x-openpt-csrf": session.csrf,
+      },
+      body: JSON.stringify({}),
+    });
+    assert.equal(unlockedStart.status, 200);
   });
 });
 
@@ -545,6 +658,11 @@ test("frontend serves lab and quiz path entrypoints", { timeout: 15_000 }, async
     assert.equal(learn.status, 200);
     const learnHtml = await learn.text();
     assert.match(learnHtml, /learn\.jsx/);
+
+    const learnLesson = await fetch(`${baseUrl}/learn/sem2-m5-6-stp-root-election`);
+    assert.equal(learnLesson.status, 200);
+    const learnLessonHtml = await learnLesson.text();
+    assert.match(learnLessonHtml, /learn\.jsx/);
 
     const quizRedirect = await fetch(`${baseUrl}/quiz`, { redirect: "manual" });
     assert.equal(quizRedirect.status, 308);

@@ -507,10 +507,34 @@
   function checkLabel(check) {
     if (check.type === "manual") return "Thinking checkpoint";
     if (check.type === "assessment") return [check.device, check.iface, check.name || check.value].filter(Boolean).join(" / ");
-    if (check.type === "topology") return `Cable ${check.linkBetween?.join(" to ")}`;
-    if (check.type === "ping") return `Ping ${check.source} to ${check.target}`;
+    if (check.type === "topology") {
+      const [left, right] = check.linkBetween || [];
+      const [leftIface, rightIface] = check.interfaces || [];
+      return `Required cable: ${left || "device"} ${leftIface || "port"} -> ${right || "device"} ${rightIface || "port"}`;
+    }
+    if (check.type === "ping") return `Required proof: ping ${check.source} -> ${check.target}`;
     if (check.type === "action") return `${check.device} ${check.commandKind}`;
     return check.type || "Checkpoint";
+  }
+
+  function checkStateLabel(check, met, context = {}) {
+    if (met) return "met";
+    if (check.type === "manual") return "action required";
+    if (check.type === "topology") return "pending cable";
+    if (check.type === "ping") {
+      const latest = context.lessonSession?.proofs?.lastPing;
+      if (latest && latest.source === check.source && String(latest.target) === String(check.target) && latest.ok === false) return "failed";
+      return "pending proof";
+    }
+    return "pending";
+  }
+
+  function latestCheckDetail(check, context = {}) {
+    if (check.type !== "ping") return "";
+    const latest = context.lessonSession?.proofs?.lastPing;
+    if (!latest || latest.source !== check.source || String(latest.target) !== String(check.target)) return "";
+    if (latest.ok) return "latest attempt succeeded";
+    return latest.reason ? `latest failed: ${latest.reason}` : "latest attempt failed";
   }
 
   function completedLessonIds(dashboard) {
@@ -527,7 +551,9 @@
     return (
       <div className={compact ? "learn-bank-links compact" : "learn-bank-links"}>
         {visibleBanks.map((bank) => (
-          <a key={bank} href={quizBankHref(bank)} target="_blank" rel="noreferrer">{cleanBankLabel(bank)}</a>
+          <a key={bank} href={quizBankHref(bank)} target="_blank" rel="noreferrer" title="Open quiz practice in a new tab">
+            Quiz practice: {cleanBankLabel(bank)}
+          </a>
         ))}
       </div>
     );
@@ -579,28 +605,57 @@
     );
   }
 
-  function LessonPathView({ catalog, dashboard, user, loading, onStartLesson, onSignIn, onBackToLab }) {
+  function lessonState(lesson, dashboard, user) {
+    const dashboardLesson = (dashboard?.lessons || []).find((item) => item.id === lesson.id);
+    const missingPrerequisites = dashboardLesson?.softGate?.missingPrerequisites || lesson.prerequisites || [];
+    const status = dashboardLesson?.status || "not_started";
+    const progress = dashboardLesson?.progress || null;
+    const unlocked = !!user && (status === "completed" || missingPrerequisites.length === 0);
+    return { dashboardLesson, missingPrerequisites, status, progress, unlocked };
+  }
+
+  function lessonPercent(lesson, state) {
+    if (state?.status === "completed") return 100;
+    if (state?.progress?.bestPercent != null) return Math.round(Number(state.progress.bestPercent) || 0);
+    const completed = state?.progress?.completedSteps || [];
+    return Math.round((completed.length / Math.max(1, lesson?.steps?.length || 1)) * 100);
+  }
+
+  function lessonNumber(index) {
+    return String(index + 1).padStart(2, "0");
+  }
+
+  function semesterLabel(catalog, semesterId) {
+    return (catalog?.semesters || []).find((semester) => semester.id === semesterId)?.title || semesterId || "Course";
+  }
+
+  function moduleLabel(catalog, moduleId) {
+    const title = (catalog?.modules || []).find((module) => module.id === moduleId)?.title || cleanBankLabel(moduleId);
+    return title.replace(/^Modules?\s*/i, "Mod ");
+  }
+
+  function LessonPathView({ catalog, dashboard, user, loading, onOpenLesson, onSignIn, onBackToLab }) {
     const lessons = catalog?.lessons || [];
     const completed = completedLessonIds(dashboard);
-    const recommendedId = dashboard?.recommendedLessonId || lessons.find((lesson) => !completed.has(lesson.id))?.id;
+    const firstUnlocked = lessons.find((lesson) => lessonState(lesson, dashboard, user).unlocked && !completed.has(lesson.id));
+    const recommendedId = dashboard?.recommendedLessonId || firstUnlocked?.id || lessons.find((lesson) => !completed.has(lesson.id))?.id;
     const progressByLesson = Object.fromEntries((dashboard?.lessons || []).map((lesson) => [lesson.id, lesson]));
     const coursePercent = Math.round(((dashboard?.completedLessons || 0) / Math.max(1, dashboard?.totalLessons || lessons.length || 1)) * 100);
     const startedLessons = (dashboard?.lessons || [])
       .filter((lesson) => lesson.progress && lesson.status !== "completed")
       .sort((a, b) => new Date(b.progress?.updatedAt || b.progress?.startedAt || 0) - new Date(a.progress?.updatedAt || a.progress?.startedAt || 0));
+    const hasStartedLessons = startedLessons.length > 0;
     const targetLessonId = startedLessons[0]?.id || recommendedId || lessons.find((lesson) => !completed.has(lesson.id))?.id || lessons[0]?.id || null;
     const targetLesson = lessons.find((lesson) => lesson.id === targetLessonId);
-    const summarizeTags = (predicate, fallbackLessons = []) => {
+    const startButtonLabel = targetLesson
+      ? `${hasStartedLessons ? "Continue mission" : "Start first mission"}: ${targetLesson.title}`
+      : "Start first mission";
+    const summarizeTags = (predicate) => {
       const counts = new Map();
       for (const lesson of lessons) {
         const state = progressByLesson[lesson.id];
         if (!predicate(lesson, state)) continue;
         for (const tag of lesson.focusTags || []) counts.set(tag, (counts.get(tag) || 0) + 1);
-      }
-      if (!counts.size) {
-        for (const lesson of fallbackLessons) {
-          for (const tag of lesson.focusTags || []) counts.set(tag, (counts.get(tag) || 0) + 1);
-        }
       }
       return [...counts.entries()]
         .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
@@ -608,12 +663,10 @@
         .map(([tag]) => tag);
     };
     const goodAt = summarizeTags(
-      (lesson, state) => state?.status === "completed" || (state?.progress?.bestPercent || 0) >= 70,
-      lessons.filter((lesson) => completed.has(lesson.id)).slice(0, 3)
+      (lesson, state) => state?.status === "completed" || (state?.progress?.bestPercent || 0) >= 70
     );
     const strugglingWith = summarizeTags(
-      (lesson, state) => state?.status !== "completed" && state?.progress && (state.progress.bestPercent || 0) < 70,
-      [targetLesson].filter(Boolean)
+      (lesson, state) => state?.status !== "completed" && state?.progress && (state.progress.bestPercent || 0) < 70
     );
 
     return (
@@ -628,7 +681,6 @@
             <section className="learn-login-gate">
               <div>
                 <h2>Sign in to start guided CCNA missions.</h2>
-                <p>Progress, XP, streaks, and badges are saved to your OpenPT account.</p>
               </div>
               <button type="button" className="tb-btn primary" onClick={onSignIn}>Sign in to learn</button>
             </section>
@@ -636,38 +688,281 @@
 
           {loading && <div className="learn-empty">Loading lesson path...</div>}
 
-          <section className="learn-summary" aria-label="Learning progress">
-            <div className="learn-summary-progress">
-              <div>
-                <span>Progress</span>
-                <strong>{coursePercent}%</strong>
+          {user && (
+            <section className="learn-summary" aria-label="Learning progress">
+              <div className="learn-summary-progress">
+                <div>
+                  <span>Progress</span>
+                  <strong>{coursePercent}%</strong>
+                </div>
+                <div className="learn-progress-line">
+                  <span style={{ width: `${coursePercent}%` }} />
+                </div>
+                <p>{dashboard?.completedLessons || 0} of {dashboard?.totalLessons || lessons.length || 0} lessons complete</p>
               </div>
-              <div className="learn-progress-line">
-                <span style={{ width: `${coursePercent}%` }} />
-              </div>
-              <p>{dashboard?.completedLessons || 0} of {dashboard?.totalLessons || lessons.length || 0} lessons complete</p>
-            </div>
 
-            <div className="learn-summary-lists">
-              <div>
-                <h2>Things you're good at</h2>
-                {goodAt.length ? <FocusTags tags={goodAt} /> : <p>Start a lesson and this will fill in as you make progress.</p>}
+              <div className="learn-summary-lists">
+                <div>
+                  <h2>Things you're good at</h2>
+                  {goodAt.length ? <FocusTags tags={goodAt} /> : <p>No strengths yet.</p>}
+                </div>
+                <div>
+                  <h2>Topics to review</h2>
+                  {strugglingWith.length ? <FocusTags tags={strugglingWith} /> : <p>No review topics yet.</p>}
+                </div>
               </div>
+
+              <button
+                type="button"
+                className="tb-btn primary learn-start-button"
+                disabled={!targetLessonId}
+                onClick={() => targetLessonId && onOpenLesson(targetLessonId)}
+              >
+                {startButtonLabel}
+              </button>
+            </section>
+          )}
+
+          <section className="learn-roadmap" aria-label="Course roadmap">
+            <div className="learn-roadmap-decor decor-a">ping 192.168.10.1</div>
+            <div className="learn-roadmap-decor decor-b">Fa0/1 up/up</div>
+            <div className="learn-roadmap-head">
               <div>
-                <h2>Things you're struggling with</h2>
-                {strugglingWith.length ? <FocusTags tags={strugglingWith} /> : <p>Nothing standing out yet.</p>}
+                <span>Roadmap</span>
+                <h1>Follow the path. Build the network.</h1>
+              </div>
+              <div className="learn-roadmap-key">
+                <span><i className="done" />Done</span>
+                <span><i className="next" />Next</span>
+                <span><i />Locked</span>
               </div>
             </div>
-
-            <button
-              type="button"
-              className="tb-btn primary learn-start-button"
-              disabled={!user || !targetLessonId}
-              onClick={() => targetLessonId && onStartLesson(targetLessonId)}
-            >
-              {targetLesson ? `Start where you left off: ${targetLesson.title}` : "Start where you left off"}
-            </button>
+            {["sem-01", "sem-02", "sem-03"].map((semesterId) => {
+              const semesterLessons = lessons
+                .map((lesson, index) => ({ lesson, index }))
+                .filter(({ lesson }) => lesson.semester === semesterId);
+              if (!semesterLessons.length) return null;
+              return (
+                <div className="learn-roadmap-semester" key={semesterId}>
+                  <div className="learn-roadmap-semester-title">
+                    <span>{semesterLabel(catalog, semesterId)}</span>
+                    <strong>{semesterLessons.filter(({ lesson }) => completed.has(lesson.id)).length}/{semesterLessons.length}</strong>
+                  </div>
+                  <div className="learn-roadmap-track">
+                    {semesterLessons.map(({ lesson, index }) => {
+                      const state = lessonState(lesson, dashboard, user);
+                      const isCompleted = state.status === "completed";
+                      const isNext = lesson.id === recommendedId && !isCompleted;
+                      const isLocked = user && !state.unlocked;
+                      const pct = lessonPercent(lesson, state);
+                      return (
+                        <button
+                          type="button"
+                          key={lesson.id}
+                          className={[
+                            "learn-roadmap-node",
+                            isCompleted ? "completed" : "",
+                            isNext ? "next" : "",
+                            isLocked ? "locked" : "",
+                            !user ? "preview" : "",
+                          ].filter(Boolean).join(" ")}
+                          disabled={!!user && isLocked}
+                          onClick={() => user ? onOpenLesson?.(lesson.id) : onSignIn?.()}
+                        >
+                          <span className="learn-node-number">{isCompleted ? "ok" : isLocked ? "lock" : lessonNumber(index)}</span>
+                          <span className="learn-node-copy">
+                            <strong>{lesson.title}</strong>
+                            <em>{moduleLabel(catalog, lesson.moduleBank)}</em>
+                          </span>
+                          <span className="learn-node-meter"><i style={{ width: `${pct}%` }} /></span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              );
+            })}
           </section>
+        </main>
+      </div>
+    );
+  }
+
+  function LessonPage({
+    catalog,
+    dashboard,
+    user,
+    loading,
+    lessonId,
+    lessonSession,
+    activity,
+    devices,
+    links,
+    labProgress,
+    workbench,
+    onBack,
+    onBackToLab,
+    onSignIn,
+    onStart,
+    onHint,
+    onManualComplete,
+    onStepSelect,
+    onFinish,
+    onOpenLab,
+  }) {
+    const lesson = (catalog?.lessons || []).find((item) => item.id === lessonId);
+    const state = lesson ? lessonState(lesson, dashboard, user) : null;
+    const completed = new Set(lessonSession?.lessonId === lessonId ? lessonSession.completedStepIds || [] : state?.progress?.completedSteps || []);
+    const currentStepId = lessonSession?.lessonId === lessonId ? lessonSession.stepId : state?.progress?.currentStepId;
+    const activeStep = (lesson?.steps || []).find((step) => step.id === currentStepId) || lesson?.steps?.find((step) => !completed.has(step.id)) || lesson?.steps?.[0];
+    const allComplete = !!lesson?.steps?.length && lesson.steps.every((step) => completed.has(step.id));
+    const pct = lesson ? lessonPercent(lesson, state) : 0;
+
+    return (
+      <div className="learn-page lesson-page">
+        <div className="learn-topbar">
+          <button type="button" className="tb-btn" onClick={onBack}>Back to roadmap</button>
+          <div className="learn-brand">OpenPT Learn</div>
+          <button type="button" className="tb-btn" onClick={user ? onBackToLab : onSignIn}>{user ? user.email.split("@")[0] : "Login / Sign up"}</button>
+        </div>
+        <main className="learn-lesson-shell">
+          {loading && <div className="learn-empty">Loading lesson...</div>}
+          {!loading && !lesson && <div className="learn-empty">Lesson not found.</div>}
+          {lesson && (
+            <>
+              <section className="learn-lesson-intro">
+                <div>
+                  <span>{moduleLabel(catalog, lesson.moduleBank)}</span>
+                  <h1>{lesson.title}</h1>
+                  <p>{lesson.labIdea?.goal || "Work through the concept, then prove it in the OpenPT lab."}</p>
+                </div>
+                <div className="learn-lesson-status">
+                  <strong>{state?.status === "completed" ? "Complete" : state?.unlocked ? "Unlocked" : "Locked"}</strong>
+                  <div className="learn-progress-line"><span style={{ width: `${pct}%` }} /></div>
+                  <p>{completed.size}/{lesson.steps.length} checkpoints</p>
+                </div>
+              </section>
+
+              {!user && (
+                <section className="learn-login-gate">
+                  <div>
+                    <h2>Sign in to save progress and unlock the lab path.</h2>
+                    <p>The roadmap uses your completed lessons to light up the next mission.</p>
+                  </div>
+                  <button type="button" className="tb-btn primary" onClick={onSignIn}>Sign in to learn</button>
+                </section>
+              )}
+
+              {user && !state?.unlocked && (
+                <section className="learn-locked-panel">
+                  <strong>This lesson is locked.</strong>
+                  <p>Complete {state.missingPrerequisites.map((id) => (catalog.lessons || []).find((item) => item.id === id)?.title || id).join(", ")} first.</p>
+                </section>
+              )}
+
+              {user && state?.unlocked && !lessonSession && (
+                <section className="learn-login-gate">
+                  <div>
+                    <h2>Ready when you are.</h2>
+                    <p>Start this lesson to load its topology lab below.</p>
+                  </div>
+                  <button type="button" className="tb-btn primary" onClick={() => onStart?.(lesson.id)}>Start lesson</button>
+                </section>
+              )}
+
+              <section className="learn-lesson-body">
+                {lesson.labIdea && (
+                  <div className="learn-teach-block">
+                    <span>Mission brief</span>
+                    <h2>{lesson.labIdea.title}</h2>
+                    <p>{lesson.labIdea.topology}</p>
+                    <p>{lesson.labIdea.proof}</p>
+                  </div>
+                )}
+                <div className="learn-teach-grid">
+                  {(lesson.steps || []).map((step, index) => {
+                    const isActive = activeStep?.id === step.id;
+                    const isDone = completed.has(step.id);
+                    const hintsShown = lessonSession?.hintsShown?.[step.id] || 0;
+                    const checks = step.checks || [];
+                    return (
+                      <article className={`learn-teach-step ${isActive ? "active" : ""} ${isDone ? "done" : ""}`} key={step.id}>
+                        <div className="learn-step-meta">
+                          <span>{index + 1}. {step.kind}</span>
+                          <span>{step.xp} XP</span>
+                        </div>
+                        <h2>{step.prompt}</h2>
+                        <div className="learn-checks">
+                          {checks.map((check, checkIndex) => {
+                            const met = checkMet(check, { activity, devices, links, lessonSession, stepId: step.id });
+                            const state = checkStateLabel(check, met || isDone, { lessonSession });
+                            const detail = latestCheckDetail(check, { lessonSession });
+                            return (
+                              <div className={met || isDone ? "met" : ""} key={`${step.id}-${checkIndex}`}>
+                                <span>{state}</span>
+                                <strong>{checkLabel(check)}</strong>
+                                {detail && <em>{detail}</em>}
+                              </div>
+                            );
+                          })}
+                        </div>
+                        <div className="learn-command-coach">
+                          <span>Coach</span>
+                          <pre>{step.commandCoach}</pre>
+                        </div>
+                        {hintsShown > 0 && (
+                          <div className="learn-hints">
+                            {step.hints.slice(0, hintsShown).map((hint, hintIndex) => <p key={hintIndex}>{hint}</p>)}
+                          </div>
+                        )}
+                        <div className="learn-step-actions">
+                          <button type="button" className="tb-btn" onClick={() => onStepSelect?.(step.id)}>Use checkpoint</button>
+                          {lessonSession && hintsShown < step.hints.length && <button type="button" className="tb-btn" onClick={() => onHint?.(step.id)}>Hint {hintsShown + 1}</button>}
+                          {lessonSession && checks.some((check) => check.type === "manual") && !isDone && (
+                            <button type="button" className="tb-btn primary" onClick={() => onManualComplete?.(step.id)}>Lock in answer</button>
+                          )}
+                        </div>
+                        {isDone && (
+                          <div className="learn-explanation">
+                            <span>What just happened</span>
+                            <p>{step.explanation}</p>
+                          </div>
+                        )}
+                      </article>
+                    );
+                  })}
+                </div>
+                <QuestionBankLinks banks={lesson.questionBanks} />
+              </section>
+
+              <section className="learn-lab-section" aria-label="Topology lab">
+                <div className="learn-lab-section-head">
+                  <div>
+                    <span>Topology Lab</span>
+                    <h2>Build and prove it in OpenPT</h2>
+                  </div>
+                  {labProgress && <strong>{labProgress.score || `${labProgress.percent}%`}</strong>}
+                </div>
+                <LessonLabCards
+                  lesson={lesson}
+                  user={user}
+                  activeLab={lessonSession?.activeLab}
+                  labProgress={labProgress}
+                  onOpenLab={onOpenLab}
+                />
+                <div className="learn-lab-embed">
+                  {workbench || <div className="learn-empty">Start the lesson to load the embedded lab.</div>}
+                </div>
+                {allComplete && (
+                  <div className="learn-finish-box">
+                    <strong>Lesson ready to complete</strong>
+                    <p>All checkpoints are complete. Claim mastery and return to the roadmap.</p>
+                    <button type="button" className="tb-btn primary" onClick={onFinish}>Complete lesson</button>
+                  </div>
+                )}
+              </section>
+            </>
+          )}
         </main>
       </div>
     );
@@ -735,10 +1030,13 @@
           <div className="learn-checks">
             {checks.map((check, index) => {
               const met = checkMet(check, { activity, devices, links, lessonSession, stepId: step.id });
+              const state = checkStateLabel(check, met, { lessonSession });
+              const detail = latestCheckDetail(check, { lessonSession });
               return (
                 <div className={met ? "met" : ""} key={`${step.id}-${index}`}>
-                  <span>{met ? "ok" : ""}</span>
-                  {checkLabel(check)}
+                  <span>{state}</span>
+                  <strong>{checkLabel(check)}</strong>
+                  {detail && <em>{detail}</em>}
                 </div>
               );
             })}
@@ -773,7 +1071,7 @@
             <button type="button" className="tb-btn primary" onClick={onFinish}>Claim mastery XP</button>
           </div>
         ) : (
-          <button type="button" className="tb-btn learn-path-return" onClick={onReturnToPath}>View path</button>
+          <button type="button" className="tb-btn learn-path-return" onClick={onReturnToPath}>Back to roadmap</button>
         )}
       </aside>
     );
@@ -786,9 +1084,11 @@
     labCompletionStepId,
     stepChecksMet,
     checkMet,
+    checkLabel,
     pingKey,
     actionKey,
     LessonPathView,
+    LessonPage,
     LessonCoachSidebar,
   };
 })();
