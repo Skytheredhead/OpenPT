@@ -467,7 +467,9 @@ test("ccna lesson endpoints require auth, csrf, and server-calculated XP", { tim
         cookie: session.cookie,
         "x-openpt-csrf": session.csrf,
       },
-      body: JSON.stringify({ snapshot: { ...workspaceSnapshot, lessonSession: { ...workspaceSnapshot.lessonSession, stepId: stepIds[2] } } }),
+      body: JSON.stringify({
+        snapshot: { ...workspaceSnapshot, lessonSession: { ...workspaceSnapshot.lessonSession, stepId: stepIds[2] } },
+      }),
     });
     assert.equal(newerWorkspace.status, 200);
     assert.equal((await newerWorkspace.json()).workspace.snapshot.lessonSession.stepId, stepIds[2]);
@@ -594,6 +596,40 @@ test("ccna lesson endpoints require auth, csrf, and server-calculated XP", { tim
       body: JSON.stringify({}),
     });
     assert.equal(unlockedStart.status, 200);
+
+    const resetFirstLesson = await fetch(`${baseUrl}/api/lessons/ccna/${lesson.id}/progress`, {
+      method: "DELETE",
+      headers: {
+        cookie: session.cookie,
+        "x-openpt-csrf": session.csrf,
+      },
+    });
+    assert.equal(resetFirstLesson.status, 200);
+    const resetFirstLessonBody = await resetFirstLesson.json();
+    assert.equal(resetFirstLessonBody.dashboard.completedLessons, 0);
+    assert.equal(resetFirstLessonBody.dashboard.earnedXp, 0);
+    const resetWorkspace = await fetch(`${baseUrl}/api/lessons/ccna/${lesson.id}/workspace`, {
+      headers: { cookie: session.cookie },
+    });
+    assert.equal(resetWorkspace.status, 200);
+    assert.equal((await resetWorkspace.json()).workspace, null);
+
+    const resetAll = await fetch(`${baseUrl}/api/lessons/ccna/progress`, {
+      method: "DELETE",
+      headers: {
+        cookie: session.cookie,
+        "x-openpt-csrf": session.csrf,
+      },
+    });
+    assert.equal(resetAll.status, 200);
+    const resetAllBody = await resetAll.json();
+    assert.equal(resetAllBody.dashboard.completedLessons, 0);
+    assert.equal(resetAllBody.dashboard.earnedXp, 0);
+    assert.equal(resetAllBody.dashboard.currentStreak, 0);
+    assert.equal(
+      resetAllBody.dashboard.lessons.some((item) => item.progress),
+      false
+    );
   });
 });
 
@@ -838,7 +874,13 @@ test("project browser cloud actions rename duplicate and delete", { timeout: 15_
     const list = await fetch(`${baseUrl}/api/projects`, { headers: { cookie: session.cookie } });
     assert.equal(list.status, 200);
     const listed = await list.json();
-    assert.equal(listed.projects.some((project) => project.id === created.project.id), false);
-    assert.equal(listed.projects.some((project) => project.id === copied.project.id), true);
+    assert.equal(
+      listed.projects.some((project) => project.id === created.project.id),
+      false
+    );
+    assert.equal(
+      listed.projects.some((project) => project.id === copied.project.id),
+      true
+    );
   });
 });

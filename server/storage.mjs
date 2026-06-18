@@ -21,8 +21,8 @@ export const DEFAULT_LIMITS = {
     "5m": 5 * 60_000,
     "10m": 10 * 60_000,
     "30m": 30 * 60_000,
-    "1h": 60 * 60_000
-  }
+    "1h": 60 * 60_000,
+  },
 };
 
 export const LIMITS = DEFAULT_LIMITS;
@@ -40,7 +40,7 @@ export function limitsFromEnv(env = process.env) {
     lessonWorkspaceBytes: envNumber(env, "OPENPT_LESSON_WORKSPACE_BYTES_LIMIT", DEFAULT_LIMITS.lessonWorkspaceBytes),
     minSaveIntervalMs: envNumber(env, "OPENPT_MIN_SAVE_INTERVAL_MS", DEFAULT_LIMITS.minSaveIntervalMs),
     leaseTtlMs: envNumber(env, "OPENPT_LEASE_TTL_MS", DEFAULT_LIMITS.leaseTtlMs),
-    rollbackTargets: DEFAULT_LIMITS.rollbackTargets
+    rollbackTargets: DEFAULT_LIMITS.rollbackTargets,
   };
 }
 
@@ -53,7 +53,9 @@ function nowIso() {
 }
 
 function hashToken(value) {
-  return createHash("sha256").update(String(value || "")).digest("hex");
+  return createHash("sha256")
+    .update(String(value || ""))
+    .digest("hex");
 }
 
 function addDays(days) {
@@ -61,7 +63,11 @@ function addDays(days) {
 }
 
 function publicSessionLabel(meta = {}) {
-  return String(meta.clientLabel || meta.client_label || "").trim().slice(0, 120) || "Browser";
+  return (
+    String(meta.clientLabel || meta.client_label || "")
+      .trim()
+      .slice(0, 120) || "Browser"
+  );
 }
 
 function parseJson(value, fallback) {
@@ -129,7 +135,12 @@ export class OpenPTStore {
         applied_at TEXT NOT NULL
       );
     `);
-    const applied = new Set(this.db.prepare("SELECT id FROM schema_migrations").all().map((row) => row.id));
+    const applied = new Set(
+      this.db
+        .prepare("SELECT id FROM schema_migrations")
+        .all()
+        .map((row) => row.id)
+    );
     const files = readdirSync(migrationsDir)
       .filter((file) => /^\d+_.+\.sql$/.test(file))
       .sort();
@@ -142,14 +153,17 @@ export class OpenPTStore {
       runMigration(file, readFileSync(join(migrationsDir, file), "utf8"));
     }
     const staleSessions = this.db.prepare("SELECT id, created_at FROM sessions WHERE public_id IS NULL").all();
-    const updateSession = this.db.prepare("UPDATE sessions SET public_id=?, client_label=COALESCE(client_label, 'Browser'), last_seen_at=COALESCE(last_seen_at, ?) WHERE id=?");
+    const updateSession = this.db.prepare(
+      "UPDATE sessions SET public_id=?, client_label=COALESCE(client_label, 'Browser'), last_seen_at=COALESCE(last_seen_at, ?) WHERE id=?"
+    );
     for (const row of staleSessions) updateSession.run(token(12), row.created_at || nowIso(), row.id);
   }
 
   createUser(email, passwordHash, { verified = false } = {}) {
     const id = randomUUID();
     const created = nowIso();
-    this.db.prepare("INSERT INTO users (id,email,password_hash,created_at,email_verified_at) VALUES (?,?,?,?,?)")
+    this.db
+      .prepare("INSERT INTO users (id,email,password_hash,created_at,email_verified_at) VALUES (?,?,?,?,?)")
       .run(id, email.toLowerCase(), passwordHash, created, verified ? created : null);
     return this.getUserById(id);
   }
@@ -159,7 +173,9 @@ export class OpenPTStore {
   }
 
   getUserById(id) {
-    return this.db.prepare("SELECT id,email,created_at,email_verified_at,deletion_requested_at,deletion_scheduled_at FROM users WHERE id=?").get(id);
+    return this.db
+      .prepare("SELECT id,email,created_at,email_verified_at,deletion_requested_at,deletion_scheduled_at FROM users WHERE id=?")
+      .get(id);
   }
 
   createSession(userId, meta = {}) {
@@ -174,12 +190,16 @@ export class OpenPTStore {
       ip: String(meta.ip || "").slice(0, 120) || null,
       created_at: created,
       last_seen_at: created,
-      expires_at: new Date(Date.now() + 30 * 24 * 60 * 60_000).toISOString()
+      expires_at: new Date(Date.now() + 30 * 24 * 60 * 60_000).toISOString(),
     };
-    this.db.prepare(`
+    this.db
+      .prepare(
+        `
       INSERT INTO sessions (id,public_id,user_id,csrf,client_label,user_agent,ip,created_at,last_seen_at,expires_at)
       VALUES (@id,@public_id,@user_id,@csrf,@client_label,@user_agent,@ip,@created_at,@last_seen_at,@expires_at)
-    `).run(session);
+    `
+      )
+      .run(session);
     return session;
   }
 
@@ -189,11 +209,15 @@ export class OpenPTStore {
 
   sessionUser(sessionId) {
     if (!sessionId) return null;
-    const row = this.db.prepare(`
+    const row = this.db
+      .prepare(
+        `
       SELECT sessions.*, users.email, users.email_verified_at, users.deletion_scheduled_at
       FROM sessions JOIN users ON users.id = sessions.user_id
       WHERE sessions.id=? AND sessions.expires_at > ? AND users.deletion_scheduled_at IS NULL
-    `).get(sessionId, nowIso());
+    `
+      )
+      .get(sessionId, nowIso());
     if (!row) return null;
     this.db.prepare("UPDATE sessions SET last_seen_at=? WHERE id=?").run(nowIso(), sessionId);
     return {
@@ -203,7 +227,7 @@ export class OpenPTStore {
       sessionId: row.id,
       sessionPublicId: row.public_id,
       emailVerifiedAt: row.email_verified_at,
-      deletionScheduledAt: row.deletion_scheduled_at
+      deletionScheduledAt: row.deletion_scheduled_at,
     };
   }
 
@@ -216,40 +240,52 @@ export class OpenPTStore {
       kind,
       token_hash: hashToken(raw),
       created_at: created,
-      expires_at: new Date(Date.now() + ttlMs).toISOString()
+      expires_at: new Date(Date.now() + ttlMs).toISOString(),
     };
     this.db.prepare("UPDATE account_tokens SET used_at=? WHERE user_id=? AND kind=? AND used_at IS NULL").run(created, userId, kind);
-    this.db.prepare(`
+    this.db
+      .prepare(
+        `
       INSERT INTO account_tokens (id,user_id,kind,token_hash,created_at,expires_at)
       VALUES (@id,@user_id,@kind,@token_hash,@created_at,@expires_at)
-    `).run(row);
+    `
+      )
+      .run(row);
     return { token: raw, expiresAt: row.expires_at };
   }
 
   consumeAccountToken(kind, rawToken) {
-    const row = this.db.prepare(`
+    const row = this.db
+      .prepare(
+        `
       SELECT account_tokens.*, users.email
       FROM account_tokens JOIN users ON users.id = account_tokens.user_id
       WHERE token_hash=? AND kind=? AND used_at IS NULL AND expires_at > ?
-    `).get(hashToken(rawToken), kind, nowIso());
+    `
+      )
+      .get(hashToken(rawToken), kind, nowIso());
     if (!row) return null;
     this.db.prepare("UPDATE account_tokens SET used_at=? WHERE id=?").run(nowIso(), row.id);
     return { userId: row.user_id, email: row.email };
   }
 
   accountTokenStatus(kind, rawToken) {
-    const row = this.db.prepare(`
+    const row = this.db
+      .prepare(
+        `
       SELECT account_tokens.*, users.email, users.email_verified_at
       FROM account_tokens JOIN users ON users.id = account_tokens.user_id
       WHERE token_hash=? AND kind=?
-    `).get(hashToken(rawToken), kind);
+    `
+      )
+      .get(hashToken(rawToken), kind);
     if (!row) return null;
     return {
       userId: row.user_id,
       email: row.email,
       usedAt: row.used_at,
       expiresAt: row.expires_at,
-      emailVerifiedAt: row.email_verified_at
+      emailVerifiedAt: row.email_verified_at,
     };
   }
 
@@ -263,22 +299,27 @@ export class OpenPTStore {
   }
 
   listSessions(userId, currentSessionId = "") {
-    return this.db.prepare(`
+    return this.db
+      .prepare(
+        `
       SELECT public_id, client_label, user_agent, ip, created_at, last_seen_at, expires_at,
              CASE WHEN id=? THEN 1 ELSE 0 END AS current
       FROM sessions
       WHERE user_id=? AND expires_at > ?
       ORDER BY current DESC, last_seen_at DESC
-    `).all(currentSessionId, userId, nowIso()).map((row) => ({
-      id: row.public_id,
-      clientLabel: row.client_label || "Browser",
-      userAgent: row.user_agent || "",
-      ip: row.ip || "",
-      createdAt: row.created_at,
-      lastSeenAt: row.last_seen_at,
-      expiresAt: row.expires_at,
-      current: !!row.current
-    }));
+    `
+      )
+      .all(currentSessionId, userId, nowIso())
+      .map((row) => ({
+        id: row.public_id,
+        clientLabel: row.client_label || "Browser",
+        userAgent: row.user_agent || "",
+        ip: row.ip || "",
+        createdAt: row.created_at,
+        lastSeenAt: row.last_seen_at,
+        expiresAt: row.expires_at,
+        current: !!row.current,
+      }));
   }
 
   deleteSessionByPublicId(userId, publicId) {
@@ -317,11 +358,15 @@ export class OpenPTStore {
     for (const row of this.db.prepare(`SELECT head_object_key AS key FROM projects WHERE user_id IN (${placeholders})`).all(...userIds)) {
       if (row.key) keys.add(row.key);
     }
-    for (const row of this.db.prepare(`
+    for (const row of this.db
+      .prepare(
+        `
       SELECT project_versions.object_key, project_versions.patch_key
       FROM project_versions JOIN projects ON projects.id = project_versions.project_id
       WHERE projects.user_id IN (${placeholders})
-    `).all(...userIds)) {
+    `
+      )
+      .all(...userIds)) {
       if (row.object_key) keys.add(row.object_key);
       if (row.patch_key) keys.add(row.patch_key);
     }
@@ -337,7 +382,9 @@ export class OpenPTStore {
   }
 
   async purgeScheduledAccounts(referenceDate = new Date()) {
-    const due = this.db.prepare("SELECT id FROM users WHERE deletion_scheduled_at IS NOT NULL AND deletion_scheduled_at <= ?").all(referenceDate.toISOString());
+    const due = this.db
+      .prepare("SELECT id FROM users WHERE deletion_scheduled_at IS NOT NULL AND deletion_scheduled_at <= ?")
+      .all(referenceDate.toISOString());
     const userIds = due.map((row) => row.id);
     if (!userIds.length) return { purged: 0, objectsDeleted: 0 };
     const candidateKeys = this.collectObjectKeysForUsers(userIds);
@@ -353,13 +400,15 @@ export class OpenPTStore {
     })(userIds);
     let objectsDeleted = 0;
     for (const key of candidateKeys) {
-      if (!this.objectKeyStillReferenced(key) && await this.objects.deleteJson?.(key)) objectsDeleted += 1;
+      if (!this.objectKeyStillReferenced(key) && (await this.objects.deleteJson?.(key))) objectsDeleted += 1;
     }
     return { purged: userIds.length, objectsDeleted };
   }
 
   userUsage(userId) {
-    const row = this.db.prepare("SELECT COALESCE(SUM(head_bytes),0) AS bytes FROM projects WHERE user_id=? AND deleted_at IS NULL").get(userId);
+    const row = this.db
+      .prepare("SELECT COALESCE(SUM(head_bytes),0) AS bytes FROM projects WHERE user_id=? AND deleted_at IS NULL")
+      .get(userId);
     return row.bytes || 0;
   }
 
@@ -369,50 +418,66 @@ export class OpenPTStore {
 
   studySummary(userId, bankId = "ccna", totalQuestionCount = 0) {
     const progress = this.studyProgressRows(userId, bankId);
-    const aggregate = progress.reduce((acc, row) => {
-      acc.seen += row.seen_count > 0 ? 1 : 0;
-      acc.activeWeak += (row.miss_count > 0 || row.slow_count > 0 || row.interrupted_count > 0) && !row.mastered_at ? 1 : 0;
-      acc.mastered += row.mastered_at ? 1 : 0;
-      acc.misses += row.miss_count || 0;
-      acc.slow += row.slow_count || 0;
-      acc.interrupted += row.interrupted_count || 0;
-      if (row.avg_answer_ms) {
-        acc.timingTotal += row.avg_answer_ms;
-        acc.timingRows += 1;
-      }
-      return acc;
-    }, { seen: 0, activeWeak: 0, mastered: 0, misses: 0, slow: 0, interrupted: 0, timingTotal: 0, timingRows: 0 });
-    const sessions = this.db.prepare(`
+    const aggregate = progress.reduce(
+      (acc, row) => {
+        acc.seen += row.seen_count > 0 ? 1 : 0;
+        acc.activeWeak += (row.miss_count > 0 || row.slow_count > 0 || row.interrupted_count > 0) && !row.mastered_at ? 1 : 0;
+        acc.mastered += row.mastered_at ? 1 : 0;
+        acc.misses += row.miss_count || 0;
+        acc.slow += row.slow_count || 0;
+        acc.interrupted += row.interrupted_count || 0;
+        if (row.avg_answer_ms) {
+          acc.timingTotal += row.avg_answer_ms;
+          acc.timingRows += 1;
+        }
+        return acc;
+      },
+      { seen: 0, activeWeak: 0, mastered: 0, misses: 0, slow: 0, interrupted: 0, timingTotal: 0, timingRows: 0 }
+    );
+    const sessions = this.db
+      .prepare(
+        `
       SELECT id, question_count, scored_count, correct_count, miss_count, slow_count, interrupted_count, avg_answer_ms, mastered_count, started_at, ended_at, summary_json
       FROM study_sessions
       WHERE user_id=? AND bank_id=? AND ended_at IS NOT NULL
       ORDER BY ended_at DESC
       LIMIT 20
-    `).all(userId, bankId);
+    `
+      )
+      .all(userId, bankId);
     const scored = sessions.filter((session) => session.scored_count > 0);
     const averageScore = scored.length
-      ? Math.round(scored.reduce((sum, session) => sum + ((session.correct_count / session.scored_count) * 100), 0) / scored.length)
+      ? Math.round(scored.reduce((sum, session) => sum + (session.correct_count / session.scored_count) * 100, 0) / scored.length)
       : null;
     const recentScore = scored[0] ? Math.round((scored[0].correct_count / scored[0].scored_count) * 100) : null;
     const avgAnswerMs = aggregate.timingRows
       ? Math.round(aggregate.timingTotal / aggregate.timingRows)
-      : (scored.length ? Math.round(scored.reduce((sum, session) => sum + (session.avg_answer_ms || 0), 0) / scored.length) : 0);
-    const confidenceScore = Math.max(0, Math.min(100, Math.round(
-      (recentScore ?? averageScore ?? 0) * 0.54 +
-      (totalQuestionCount ? (aggregate.seen / totalQuestionCount) * 100 : 0) * 0.18 +
-      (aggregate.mastered / Math.max(1, aggregate.activeWeak + aggregate.mastered)) * 100 * 0.18 -
-      Math.min(20, aggregate.activeWeak * 1.5) -
-      Math.min(12, aggregate.slow * 0.7)
-    )));
+      : scored.length
+        ? Math.round(scored.reduce((sum, session) => sum + (session.avg_answer_ms || 0), 0) / scored.length)
+        : 0;
+    const confidenceScore = Math.max(
+      0,
+      Math.min(
+        100,
+        Math.round(
+          (recentScore ?? averageScore ?? 0) * 0.54 +
+            (totalQuestionCount ? (aggregate.seen / totalQuestionCount) * 100 : 0) * 0.18 +
+            (aggregate.mastered / Math.max(1, aggregate.activeWeak + aggregate.mastered)) * 100 * 0.18 -
+            Math.min(20, aggregate.activeWeak * 1.5) -
+            Math.min(12, aggregate.slow * 0.7)
+        )
+      )
+    );
     const weakest = progress
       .filter((row) => (row.miss_count > 0 || row.slow_count > 0 || row.interrupted_count > 0) && !row.mastered_at)
-      .sort((a, b) => (
-        b.miss_count - a.miss_count ||
-        b.slow_count - a.slow_count ||
-        b.interrupted_count - a.interrupted_count ||
-        a.review_streak - b.review_streak ||
-        String(a.last_seen_at || "").localeCompare(String(b.last_seen_at || ""))
-      ))
+      .sort(
+        (a, b) =>
+          b.miss_count - a.miss_count ||
+          b.slow_count - a.slow_count ||
+          b.interrupted_count - a.interrupted_count ||
+          a.review_streak - b.review_streak ||
+          String(a.last_seen_at || "").localeCompare(String(b.last_seen_at || ""))
+      )
       .slice(0, 10)
       .map((row) => ({
         questionKey: row.question_key,
@@ -421,7 +486,7 @@ export class OpenPTStore {
         interruptedCount: row.interrupted_count,
         reviewStreak: row.review_streak,
         avgAnswerMs: row.avg_answer_ms,
-        lastSeenAt: row.last_seen_at
+        lastSeenAt: row.last_seen_at,
       }));
     return {
       totalQuestionCount,
@@ -448,9 +513,9 @@ export class OpenPTStore {
         avgAnswerMs: session.avg_answer_ms,
         startedAt: session.started_at,
         endedAt: session.ended_at,
-        summary: parseJson(session.summary_json, null)
+        summary: parseJson(session.summary_json, null),
       })),
-      weakest
+      weakest,
     };
   }
 
@@ -463,7 +528,7 @@ export class OpenPTStore {
     }
     const selected = scheduleStudySession({
       questionKeys: pool,
-      progressRows: this.studyProgressRows(userId, bankId)
+      progressRows: this.studyProgressRows(userId, bankId),
     });
     const now = nowIso();
     const row = {
@@ -472,18 +537,22 @@ export class OpenPTStore {
       bank_id: bankId,
       question_keys_json: JSON.stringify(selected),
       question_count: selected.length,
-      started_at: now
+      started_at: now,
     };
-    this.db.prepare(`
+    this.db
+      .prepare(
+        `
       INSERT INTO study_sessions (id,user_id,bank_id,question_keys_json,question_count,started_at)
       VALUES (@id,@user_id,@bank_id,@question_keys_json,@question_count,@started_at)
-    `).run(row);
+    `
+      )
+      .run(row);
     return {
       id: row.id,
       bankId,
       questionKeys: selected,
       startedAt: now,
-      summary: this.studySummary(userId, bankId, pool.length)
+      summary: this.studySummary(userId, bankId, pool.length),
     };
   }
 
@@ -499,7 +568,9 @@ export class OpenPTStore {
       err.statusCode = 409;
       throw err;
     }
-    const questionKey = String(body.questionKey || body.question_key || "").trim().slice(0, 220);
+    const questionKey = String(body.questionKey || body.question_key || "")
+      .trim()
+      .slice(0, 220);
     const sessionKeys = new Set(parseJson(session.question_keys_json, []));
     if (!sessionKeys.has(questionKey)) {
       const err = new Error("Question is not part of this study session.");
@@ -511,7 +582,9 @@ export class OpenPTStore {
     const selectedAnswers = Array.isArray(body.selectedAnswers) ? body.selectedAnswers : [];
     const correct = !!body.correct;
     const durationMs = Number.isFinite(Number(body.answerDurationMs)) ? Math.max(0, Math.round(Number(body.answerDurationMs))) : null;
-    const current = this.db.prepare("SELECT * FROM study_question_progress WHERE user_id=? AND bank_id=? AND question_key=?").get(userId, bankId, questionKey);
+    const current = this.db
+      .prepare("SELECT * FROM study_question_progress WHERE user_id=? AND bank_id=? AND question_key=?")
+      .get(userId, bankId, questionKey);
     const next = nextProgressForAttempt(current, { correct, durationMs });
     const now = nowIso();
     const attempt = {
@@ -529,10 +602,12 @@ export class OpenPTStore {
       was_review: next.attempt.wasReview ? 1 : 0,
       review_streak_after: next.attempt.reviewStreakAfter,
       mastered_after: next.attempt.masteredAfter ? 1 : 0,
-      created_at: now
+      created_at: now,
     };
     this.db.transaction(() => {
-      this.db.prepare(`
+      this.db
+        .prepare(
+          `
         INSERT INTO study_question_progress (
           user_id, bank_id, question_key, seen_count, correct_count, miss_count, slow_count, interrupted_count,
           review_streak, mastered_at, next_due_at, avg_answer_ms, last_answer_ms, timed_seen_count, last_seen_at
@@ -551,22 +626,28 @@ export class OpenPTStore {
           last_answer_ms=excluded.last_answer_ms,
           timed_seen_count=excluded.timed_seen_count,
           last_seen_at=excluded.last_seen_at
-      `).run(
-        userId, bankId, questionKey,
-        next.progress.seen_count,
-        next.progress.correct_count,
-        next.progress.miss_count,
-        next.progress.slow_count,
-        next.progress.interrupted_count,
-        next.progress.review_streak,
-        next.progress.mastered_at,
-        next.progress.next_due_at,
-        next.progress.avg_answer_ms,
-        next.progress.last_answer_ms,
-        next.progress.timed_seen_count,
-        next.progress.last_seen_at
-      );
-      this.db.prepare(`
+      `
+        )
+        .run(
+          userId,
+          bankId,
+          questionKey,
+          next.progress.seen_count,
+          next.progress.correct_count,
+          next.progress.miss_count,
+          next.progress.slow_count,
+          next.progress.interrupted_count,
+          next.progress.review_streak,
+          next.progress.mastered_at,
+          next.progress.next_due_at,
+          next.progress.avg_answer_ms,
+          next.progress.last_answer_ms,
+          next.progress.timed_seen_count,
+          next.progress.last_seen_at
+        );
+      this.db
+        .prepare(
+          `
         INSERT INTO study_attempts (
           id, session_id, user_id, bank_id, question_key, selected_answers_json, correct,
           answer_duration_ms, slow, interrupted, is_new, was_review, review_streak_after, mastered_after, created_at
@@ -575,7 +656,9 @@ export class OpenPTStore {
           @id, @session_id, @user_id, @bank_id, @question_key, @selected_answers_json, @correct,
           @answer_duration_ms, @slow, @interrupted, @is_new, @was_review, @review_streak_after, @mastered_after, @created_at
         )
-      `).run(attempt);
+      `
+        )
+        .run(attempt);
     })();
     return this.studyAttemptResponse(attempt);
   }
@@ -594,8 +677,8 @@ export class OpenPTStore {
         wasReview: !!row.was_review,
         reviewStreakAfter: row.review_streak_after,
         masteredAfter: !!row.mastered_after,
-        createdAt: row.created_at
-      }
+        createdAt: row.created_at,
+      },
     };
   }
 
@@ -633,20 +716,36 @@ export class OpenPTStore {
       masteredCount,
       avgAnswerMs,
       startedAt: session.started_at,
-      endedAt: ended
+      endedAt: ended,
     };
-    this.db.prepare(`
+    this.db
+      .prepare(
+        `
       UPDATE study_sessions
       SET correct_count=?, miss_count=?, new_count=?, review_count=?, slow_count=?, interrupted_count=?, mastered_count=?, scored_count=?,
           avg_answer_ms=?, summary_json=?, ended_at=?
       WHERE id=? AND user_id=? AND bank_id=?
-    `).run(
-      correctCount, missCount, newCount, reviewCount, slowCount, interruptedCount, masteredCount, scoredCount,
-      avgAnswerMs, JSON.stringify(summary), ended, sessionId, userId, bankId
-    );
+    `
+      )
+      .run(
+        correctCount,
+        missCount,
+        newCount,
+        reviewCount,
+        slowCount,
+        interruptedCount,
+        masteredCount,
+        scoredCount,
+        avgAnswerMs,
+        JSON.stringify(summary),
+        ended,
+        sessionId,
+        userId,
+        bankId
+      );
     return {
       session: { id: sessionId, ...summary },
-      dashboard: this.studySummary(userId, bankId, totalQuestionCount)
+      dashboard: this.studySummary(userId, bankId, totalQuestionCount),
     };
   }
 
@@ -668,7 +767,7 @@ export class OpenPTStore {
       attemptCount: row.attempt_count || 0,
       startedAt: row.started_at,
       completedAt: row.completed_at,
-      updatedAt: row.updated_at
+      updatedAt: row.updated_at,
     };
   }
 
@@ -682,13 +781,14 @@ export class OpenPTStore {
       bytes: row.snapshot_bytes || 0,
       appVersion: row.app_version || null,
       savedAt: row.saved_at,
-      updatedAt: row.updated_at
+      updatedAt: row.updated_at,
     };
   }
 
   getLessonWorkspace(userId, courseId = "ccna", lessonId) {
     requireLesson(lessonId);
-    const row = this.db.prepare("SELECT * FROM lesson_workspaces WHERE user_id=? AND course_id=? AND lesson_id=?")
+    const row = this.db
+      .prepare("SELECT * FROM lesson_workspaces WHERE user_id=? AND course_id=? AND lesson_id=?")
       .get(userId, courseId, lessonId);
     return this.lessonWorkspaceResponse(row);
   }
@@ -704,7 +804,9 @@ export class OpenPTStore {
     }
     const now = nowIso();
     const appVersion = String(normalized.appVersion || normalized.app_version || "").slice(0, 80) || null;
-    this.db.prepare(`
+    this.db
+      .prepare(
+        `
       INSERT INTO lesson_workspaces (user_id, course_id, lesson_id, snapshot_json, snapshot_bytes, app_version, saved_at, updated_at)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?)
       ON CONFLICT(user_id, course_id, lesson_id) DO UPDATE SET
@@ -712,18 +814,46 @@ export class OpenPTStore {
         snapshot_bytes=excluded.snapshot_bytes,
         app_version=excluded.app_version,
         updated_at=excluded.updated_at
-    `).run(userId, courseId, lesson.id, JSON.stringify(normalized), size, appVersion, now, now);
+    `
+      )
+      .run(userId, courseId, lesson.id, JSON.stringify(normalized), size, appVersion, now, now);
     return this.getLessonWorkspace(userId, courseId, lesson.id);
   }
 
+  resetLessonProgress(userId, courseId = "ccna", lessonId) {
+    const lesson = requireLesson(lessonId);
+    const tx = this.db.transaction(() => {
+      this.db.prepare("DELETE FROM lesson_workspaces WHERE user_id=? AND course_id=? AND lesson_id=?").run(userId, courseId, lesson.id);
+      this.db.prepare("DELETE FROM lesson_events WHERE user_id=? AND course_id=? AND lesson_id=?").run(userId, courseId, lesson.id);
+      this.db.prepare("DELETE FROM lesson_progress WHERE user_id=? AND course_id=? AND lesson_id=?").run(userId, courseId, lesson.id);
+    });
+    tx();
+    return { ok: true, lessonId: lesson.id, dashboard: this.lessonSummary(userId, courseId) };
+  }
+
+  resetAllLessonProgress(userId, courseId = "ccna") {
+    const tx = this.db.transaction(() => {
+      this.db.prepare("DELETE FROM lesson_workspaces WHERE user_id=? AND course_id=?").run(userId, courseId);
+      this.db.prepare("DELETE FROM lesson_events WHERE user_id=? AND course_id=?").run(userId, courseId);
+      this.db.prepare("DELETE FROM lesson_progress WHERE user_id=? AND course_id=?").run(userId, courseId);
+      this.db.prepare("DELETE FROM lesson_daily_activity WHERE user_id=? AND course_id=?").run(userId, courseId);
+    });
+    tx();
+    return { ok: true, dashboard: this.lessonSummary(userId, courseId) };
+  }
+
   lessonCurrentStreak(userId, courseId = "ccna") {
-    const rows = this.db.prepare(`
+    const rows = this.db
+      .prepare(
+        `
       SELECT activity_date
       FROM lesson_daily_activity
       WHERE user_id=? AND course_id=? AND (event_count > 0 OR xp > 0 OR completed_count > 0)
       ORDER BY activity_date DESC
       LIMIT 90
-    `).all(userId, courseId);
+    `
+      )
+      .all(userId, courseId);
     if (!rows.length) return { currentStreak: 0, lastActiveDate: null };
     const activeDates = new Set(rows.map((row) => row.activity_date));
     const today = todayKey();
@@ -749,12 +879,13 @@ export class OpenPTStore {
         status: row?.status || "not_started",
         softGate: {
           recommended: missingPrerequisites.length === 0,
-          missingPrerequisites
+          missingPrerequisites,
         },
-        progress: row ? this.lessonProgressResponse(row, requireLesson(lesson.id)) : null
+        progress: row ? this.lessonProgressResponse(row, requireLesson(lesson.id)) : null,
       };
     });
-    const recommended = lessons.find((lesson) => lesson.status !== "completed" && lesson.softGate.recommended) ||
+    const recommended =
+      lessons.find((lesson) => lesson.status !== "completed" && lesson.softGate.recommended) ||
       lessons.find((lesson) => lesson.status !== "completed") ||
       null;
     const earnedXp = rows.reduce((sum, row) => sum + (row.xp || 0), 0);
@@ -767,7 +898,7 @@ export class OpenPTStore {
         semester: module.semester,
         earned,
         completedLessons: moduleLessons.filter((lesson) => lesson.status === "completed").length,
-        totalLessons: moduleLessons.length
+        totalLessons: moduleLessons.length,
       };
     });
     const streak = this.lessonCurrentStreak(userId, courseId);
@@ -785,28 +916,38 @@ export class OpenPTStore {
       semesters: stats.semesters,
       modules: stats.modules,
       badges,
-      lessons
+      lessons,
     };
   }
 
   ensureLessonProgress(userId, courseId, lesson) {
     const now = nowIso();
-    const existing = this.db.prepare("SELECT * FROM lesson_progress WHERE user_id=? AND course_id=? AND lesson_id=?").get(userId, courseId, lesson.id);
+    const existing = this.db
+      .prepare("SELECT * FROM lesson_progress WHERE user_id=? AND course_id=? AND lesson_id=?")
+      .get(userId, courseId, lesson.id);
     if (existing) return existing;
     const firstStep = lessonStepIds(lesson)[0] || null;
-    this.db.prepare(`
+    this.db
+      .prepare(
+        `
       INSERT INTO lesson_progress (
         user_id, course_id, lesson_id, status, completed_steps_json, current_step_id, xp, best_percent, attempt_count, started_at, updated_at
       )
       VALUES (?, ?, ?, 'started', '[]', ?, 0, 0, 0, ?, ?)
-    `).run(userId, courseId, lesson.id, firstStep, now, now);
-    return this.db.prepare("SELECT * FROM lesson_progress WHERE user_id=? AND course_id=? AND lesson_id=?").get(userId, courseId, lesson.id);
+    `
+      )
+      .run(userId, courseId, lesson.id, firstStep, now, now);
+    return this.db
+      .prepare("SELECT * FROM lesson_progress WHERE user_id=? AND course_id=? AND lesson_id=?")
+      .get(userId, courseId, lesson.id);
   }
 
   touchLessonDaily(userId, courseId, { xp = 0, eventCount = 0, completedCount = 0 } = {}) {
     const date = todayKey();
     const now = nowIso();
-    this.db.prepare(`
+    this.db
+      .prepare(
+        `
       INSERT INTO lesson_daily_activity (user_id, course_id, activity_date, xp, completed_count, event_count, updated_at)
       VALUES (?, ?, ?, ?, ?, ?, ?)
       ON CONFLICT(user_id, course_id, activity_date) DO UPDATE SET
@@ -814,13 +955,25 @@ export class OpenPTStore {
         completed_count=lesson_daily_activity.completed_count + excluded.completed_count,
         event_count=lesson_daily_activity.event_count + excluded.event_count,
         updated_at=excluded.updated_at
-    `).run(userId, courseId, date, Math.max(0, Math.round(xp || 0)), Math.max(0, Math.round(completedCount || 0)), Math.max(0, Math.round(eventCount || 0)), now);
+    `
+      )
+      .run(
+        userId,
+        courseId,
+        date,
+        Math.max(0, Math.round(xp || 0)),
+        Math.max(0, Math.round(completedCount || 0)),
+        Math.max(0, Math.round(eventCount || 0)),
+        now
+      );
   }
 
   startLesson(userId, courseId = "ccna", lessonId) {
     const lesson = requireLesson(lessonId);
     const missingPrerequisites = (lesson.prerequisites || []).filter((id) => {
-      const row = this.db.prepare("SELECT status FROM lesson_progress WHERE user_id=? AND course_id=? AND lesson_id=?").get(userId, courseId, id);
+      const row = this.db
+        .prepare("SELECT status FROM lesson_progress WHERE user_id=? AND course_id=? AND lesson_id=?")
+        .get(userId, courseId, id);
       return row?.status !== "completed";
     });
     if (missingPrerequisites.length > 0) {
@@ -836,26 +989,36 @@ export class OpenPTStore {
       const existing = this.ensureLessonProgress(userId, courseId, lesson);
       const completedSteps = parseJson(existing.completed_steps_json, []);
       const currentStep = completedSteps.length ? lessonStepIds(lesson).find((id) => !completedSteps.includes(id)) || firstStep : firstStep;
-      this.db.prepare(`
+      this.db
+        .prepare(
+          `
         UPDATE lesson_progress
         SET attempt_count=attempt_count + 1,
             current_step_id=COALESCE(?, current_step_id),
             status=CASE WHEN status='completed' THEN 'completed' ELSE 'started' END,
             updated_at=?
         WHERE user_id=? AND course_id=? AND lesson_id=?
-      `).run(currentStep, now, userId, courseId, lesson.id);
-      this.db.prepare(`
+      `
+        )
+        .run(currentStep, now, userId, courseId, lesson.id);
+      this.db
+        .prepare(
+          `
         INSERT INTO lesson_events (id, user_id, course_id, lesson_id, step_id, event_type, payload_json, earned_xp, created_at)
         VALUES (?, ?, ?, ?, ?, 'start', '{}', 0, ?)
-      `).run(randomUUID(), userId, courseId, lesson.id, currentStep, now);
+      `
+        )
+        .run(randomUUID(), userId, courseId, lesson.id, currentStep, now);
       this.touchLessonDaily(userId, courseId, { eventCount: 1 });
-      return this.db.prepare("SELECT * FROM lesson_progress WHERE user_id=? AND course_id=? AND lesson_id=?").get(userId, courseId, lesson.id);
+      return this.db
+        .prepare("SELECT * FROM lesson_progress WHERE user_id=? AND course_id=? AND lesson_id=?")
+        .get(userId, courseId, lesson.id);
     });
     const row = tx();
     return {
       lesson: this.lessonProgressResponse(row, lesson),
       workspace: this.getLessonWorkspace(userId, courseId, lesson.id),
-      dashboard: this.lessonSummary(userId, courseId)
+      dashboard: this.lessonSummary(userId, courseId),
     };
   }
 
@@ -866,13 +1029,15 @@ export class OpenPTStore {
       stepId: row.step_id,
       eventType: row.event_type,
       earnedXp: row.earned_xp || 0,
-      createdAt: row.created_at
+      createdAt: row.created_at,
     };
   }
 
   recordLessonEvent(userId, courseId = "ccna", lessonId, body = {}) {
     const lesson = requireLesson(lessonId);
-    const eventType = String(body.eventType || body.type || "checkpoint").trim().slice(0, 40);
+    const eventType = String(body.eventType || body.type || "checkpoint")
+      .trim()
+      .slice(0, 40);
     const allowed = new Set(["checkpoint", "hint", "action", "ping", "topology", "reflection", "lab-progress"]);
     if (!allowed.has(eventType)) {
       const err = new Error("Unsupported lesson event type.");
@@ -889,12 +1054,13 @@ export class OpenPTStore {
     const eventId = sanitizeLessonEventId(body.clientEventId || body.id) || randomUUID();
     const existingEvent = this.db.prepare("SELECT * FROM lesson_events WHERE id=?").get(eventId);
     if (existingEvent) {
-      const row = this.db.prepare("SELECT * FROM lesson_progress WHERE user_id=? AND course_id=? AND lesson_id=?").get(userId, courseId, lesson.id) ||
+      const row =
+        this.db.prepare("SELECT * FROM lesson_progress WHERE user_id=? AND course_id=? AND lesson_id=?").get(userId, courseId, lesson.id) ||
         this.ensureLessonProgress(userId, courseId, lesson);
       return {
         event: this.lessonEventResponse(existingEvent),
         lesson: this.lessonProgressResponse(row, lesson),
-        dashboard: this.lessonSummary(userId, courseId)
+        dashboard: this.lessonSummary(userId, courseId),
       };
     }
 
@@ -911,27 +1077,46 @@ export class OpenPTStore {
       const nextPercent = Math.max(current.best_percent || 0, lessonPercent(nextCompleted, lesson));
       const nextCurrentStep = stepIds.find((id) => !nextCompleted.includes(id)) || stepIds[stepIds.length - 1] || null;
       const now = nowIso();
-      this.db.prepare(`
+      this.db
+        .prepare(
+          `
         UPDATE lesson_progress
         SET completed_steps_json=?, current_step_id=?, xp=?, best_percent=?, updated_at=?
         WHERE user_id=? AND course_id=? AND lesson_id=?
-      `).run(JSON.stringify(nextCompleted), nextCurrentStep, Math.min(lessonTotalXp(lesson), (current.xp || 0) + earnedXp), nextPercent, now, userId, courseId, lesson.id);
+      `
+        )
+        .run(
+          JSON.stringify(nextCompleted),
+          nextCurrentStep,
+          Math.min(lessonTotalXp(lesson), (current.xp || 0) + earnedXp),
+          nextPercent,
+          now,
+          userId,
+          courseId,
+          lesson.id
+        );
       const payload = sanitizeLessonPayload(body.payload || body);
-      this.db.prepare(`
+      this.db
+        .prepare(
+          `
         INSERT INTO lesson_events (id, user_id, course_id, lesson_id, step_id, event_type, payload_json, earned_xp, created_at)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-      `).run(eventId, userId, courseId, lesson.id, stepId || null, eventType, JSON.stringify(payload || {}), earnedXp, now);
+      `
+        )
+        .run(eventId, userId, courseId, lesson.id, stepId || null, eventType, JSON.stringify(payload || {}), earnedXp, now);
       this.touchLessonDaily(userId, courseId, { xp: earnedXp, eventCount: 1 });
       return {
         event: this.db.prepare("SELECT * FROM lesson_events WHERE id=?").get(eventId),
-        progress: this.db.prepare("SELECT * FROM lesson_progress WHERE user_id=? AND course_id=? AND lesson_id=?").get(userId, courseId, lesson.id)
+        progress: this.db
+          .prepare("SELECT * FROM lesson_progress WHERE user_id=? AND course_id=? AND lesson_id=?")
+          .get(userId, courseId, lesson.id),
       };
     });
     const result = tx();
     return {
       event: this.lessonEventResponse(result.event),
       lesson: this.lessonProgressResponse(result.progress, lesson),
-      dashboard: this.lessonSummary(userId, courseId)
+      dashboard: this.lessonSummary(userId, courseId),
     };
   }
 
@@ -940,12 +1125,13 @@ export class OpenPTStore {
     const eventId = sanitizeLessonEventId(body.clientEventId || body.id) || randomUUID();
     const existingEvent = this.db.prepare("SELECT * FROM lesson_events WHERE id=?").get(eventId);
     if (existingEvent) {
-      const row = this.db.prepare("SELECT * FROM lesson_progress WHERE user_id=? AND course_id=? AND lesson_id=?").get(userId, courseId, lesson.id) ||
+      const row =
+        this.db.prepare("SELECT * FROM lesson_progress WHERE user_id=? AND course_id=? AND lesson_id=?").get(userId, courseId, lesson.id) ||
         this.ensureLessonProgress(userId, courseId, lesson);
       return {
         event: this.lessonEventResponse(existingEvent),
         lesson: this.lessonProgressResponse(row, lesson),
-        dashboard: this.lessonSummary(userId, courseId)
+        dashboard: this.lessonSummary(userId, courseId),
       };
     }
 
@@ -956,37 +1142,60 @@ export class OpenPTStore {
       const complete = stepIds.length > 0 && stepIds.every((stepId) => completedSteps.includes(stepId));
       const now = nowIso();
       const firstCompletion = complete && current.status !== "completed";
-      this.db.prepare(`
+      this.db
+        .prepare(
+          `
         UPDATE lesson_progress
         SET status=?, completed_at=CASE WHEN ? THEN COALESCE(completed_at, ?) ELSE completed_at END,
             best_percent=?, updated_at=?
         WHERE user_id=? AND course_id=? AND lesson_id=?
-      `).run(complete ? "completed" : "started", firstCompletion ? 1 : 0, now, complete ? 100 : lessonPercent(completedSteps, lesson), now, userId, courseId, lesson.id);
-      this.db.prepare(`
+      `
+        )
+        .run(
+          complete ? "completed" : "started",
+          firstCompletion ? 1 : 0,
+          now,
+          complete ? 100 : lessonPercent(completedSteps, lesson),
+          now,
+          userId,
+          courseId,
+          lesson.id
+        );
+      this.db
+        .prepare(
+          `
         INSERT INTO lesson_events (id, user_id, course_id, lesson_id, step_id, event_type, payload_json, earned_xp, created_at)
         VALUES (?, ?, ?, ?, NULL, 'finish', ?, 0, ?)
-      `).run(eventId, userId, courseId, lesson.id, JSON.stringify(sanitizeLessonPayload(body.payload || body) || {}), now);
+      `
+        )
+        .run(eventId, userId, courseId, lesson.id, JSON.stringify(sanitizeLessonPayload(body.payload || body) || {}), now);
       this.touchLessonDaily(userId, courseId, { eventCount: 1, completedCount: firstCompletion ? 1 : 0 });
       return {
         event: this.db.prepare("SELECT * FROM lesson_events WHERE id=?").get(eventId),
-        progress: this.db.prepare("SELECT * FROM lesson_progress WHERE user_id=? AND course_id=? AND lesson_id=?").get(userId, courseId, lesson.id)
+        progress: this.db
+          .prepare("SELECT * FROM lesson_progress WHERE user_id=? AND course_id=? AND lesson_id=?")
+          .get(userId, courseId, lesson.id),
       };
     });
     const result = tx();
     return {
       event: this.lessonEventResponse(result.event),
       lesson: this.lessonProgressResponse(result.progress, lesson),
-      dashboard: this.lessonSummary(userId, courseId)
+      dashboard: this.lessonSummary(userId, courseId),
     };
   }
 
   listProjects(userId) {
-    return this.db.prepare(`
+    return this.db
+      .prepare(
+        `
       SELECT id,title,head_version AS version,head_bytes AS bytes,created_at,updated_at
       FROM projects
       WHERE user_id=? AND deleted_at IS NULL
       ORDER BY updated_at DESC
-    `).all(userId);
+    `
+      )
+      .all(userId);
   }
 
   getProject(projectId, userId) {
@@ -994,11 +1203,15 @@ export class OpenPTStore {
   }
 
   getProjectByShare(tokenValue) {
-    const row = this.db.prepare(`
+    const row = this.db
+      .prepare(
+        `
       SELECT share_links.token, share_links.mode, projects.*
       FROM share_links JOIN projects ON projects.id = share_links.project_id
       WHERE share_links.token=? AND share_links.revoked_at IS NULL AND projects.deleted_at IS NULL
-    `).get(tokenValue);
+    `
+      )
+      .get(tokenValue);
     return row || null;
   }
 
@@ -1010,16 +1223,28 @@ export class OpenPTStore {
   async createProject(userId, title, document) {
     const id = randomUUID();
     const created = nowIso();
-    const normalized = document || { schemaVersion: 1, title: title || "Untitled OpenPT project", devices: {}, links: [], uiState: {}, metadata: {} };
+    const normalized = document || {
+      schemaVersion: 1,
+      title: title || "Untitled OpenPT project",
+      devices: {},
+      links: [],
+      uiState: {},
+      metadata: {},
+    };
     normalized.title = title || normalized.title || "Untitled OpenPT project";
     const size = byteLength(normalized);
     this.assertQuota(userId, null, size);
     const object = await this.objects.putJson("snapshots", normalized);
-    this.db.prepare(`
+    this.db
+      .prepare(
+        `
       INSERT INTO projects (id,user_id,title,head_version,head_object_key,head_bytes,created_at,updated_at,last_save_at)
       VALUES (?,?,?,?,?,?,?,?,?)
-    `).run(id, userId, normalized.title, 1, object.key, size, created, created, created);
-    this.db.prepare("INSERT INTO project_versions (id,project_id,version,object_key,bytes,created_at) VALUES (?,?,?,?,?,?)")
+    `
+      )
+      .run(id, userId, normalized.title, 1, object.key, size, created, created, created);
+    this.db
+      .prepare("INSERT INTO project_versions (id,project_id,version,object_key,bytes,created_at) VALUES (?,?,?,?,?,?)")
       .run(randomUUID(), id, 1, object.key, size, created);
     return this.getProject(id, userId);
   }
@@ -1027,18 +1252,19 @@ export class OpenPTStore {
   renameProject(project, title) {
     const cleanTitle = String(title || "").trim() || "Untitled OpenPT project";
     const updated = nowIso();
-    this.db.prepare("UPDATE projects SET title=?, updated_at=? WHERE id=? AND user_id=?")
+    this.db
+      .prepare("UPDATE projects SET title=?, updated_at=? WHERE id=? AND user_id=?")
       .run(cleanTitle, updated, project.id, project.user_id);
     return this.getProject(project.id, project.user_id);
   }
 
   deleteProject(project) {
     const deleted = nowIso();
-    this.db.prepare("UPDATE projects SET deleted_at=?, updated_at=? WHERE id=? AND user_id=?")
+    this.db
+      .prepare("UPDATE projects SET deleted_at=?, updated_at=? WHERE id=? AND user_id=?")
       .run(deleted, deleted, project.id, project.user_id);
     this.db.prepare("DELETE FROM leases WHERE project_id=?").run(project.id);
-    this.db.prepare("UPDATE share_links SET revoked_at=? WHERE project_id=? AND revoked_at IS NULL")
-      .run(deleted, project.id);
+    this.db.prepare("UPDATE share_links SET revoked_at=? WHERE project_id=? AND revoked_at IS NULL").run(deleted, project.id);
     return { ok: true, deletedAt: deleted };
   }
 
@@ -1056,7 +1282,9 @@ export class OpenPTStore {
       throw err;
     }
     const usage = this.userUsage(userId);
-    const current = projectId ? this.db.prepare("SELECT head_bytes FROM projects WHERE id=? AND user_id=?").get(projectId, userId)?.head_bytes || 0 : 0;
+    const current = projectId
+      ? this.db.prepare("SELECT head_bytes FROM projects WHERE id=? AND user_id=?").get(projectId, userId)?.head_bytes || 0
+      : 0;
     if (usage - current + nextProjectBytes > this.limits.userBytes) {
       const err = new Error("Account exceeds the 5GB storage limit.");
       err.statusCode = 413;
@@ -1090,9 +1318,11 @@ export class OpenPTStore {
       user_id: userId,
       share_token: shareToken,
       expires_at: new Date(Date.now() + this.limits.leaseTtlMs).toISOString(),
-      updated_at: nowIso()
+      updated_at: nowIso(),
     };
-    this.db.prepare(`
+    this.db
+      .prepare(
+        `
       INSERT INTO leases (project_id,lease_id,client_id,client_label,user_id,share_token,expires_at,updated_at)
       VALUES (@project_id,@lease_id,@client_id,@client_label,@user_id,@share_token,@expires_at,@updated_at)
       ON CONFLICT(project_id) DO UPDATE SET
@@ -1103,7 +1333,9 @@ export class OpenPTStore {
         share_token=excluded.share_token,
         expires_at=excluded.expires_at,
         updated_at=excluded.updated_at
-    `).run(lease);
+    `
+      )
+      .run(lease);
     return lease;
   }
 
@@ -1148,12 +1380,21 @@ export class OpenPTStore {
     const size = byteLength(next);
     this.assertQuota(project.user_id, project.id, size);
     const snapshot = await this.objects.putJson("snapshots", next);
-    const patchObject = await this.objects.putJson("patches", { baseVersion, patches: patches || [], uiStatePatch: uiStatePatch || [], clientId, shareToken, createdAt: nowIso() });
+    const patchObject = await this.objects.putJson("patches", {
+      baseVersion,
+      patches: patches || [],
+      uiStatePatch: uiStatePatch || [],
+      clientId,
+      shareToken,
+      createdAt: nowIso(),
+    });
     const version = project.head_version + 1;
     const saved = nowIso();
-    this.db.prepare("UPDATE projects SET title=?, head_version=?, head_object_key=?, head_bytes=?, updated_at=?, last_save_at=? WHERE id=?")
+    this.db
+      .prepare("UPDATE projects SET title=?, head_version=?, head_object_key=?, head_bytes=?, updated_at=?, last_save_at=? WHERE id=?")
       .run(next.title || project.title, version, snapshot.key, size, saved, saved, project.id);
-    this.db.prepare("INSERT INTO project_versions (id,project_id,version,object_key,patch_key,bytes,created_at) VALUES (?,?,?,?,?,?,?)")
+    this.db
+      .prepare("INSERT INTO project_versions (id,project_id,version,object_key,patch_key,bytes,created_at) VALUES (?,?,?,?,?,?,?)")
       .run(randomUUID(), project.id, version, snapshot.key, patchObject.key, size, saved);
     return { project: this.db.prepare("SELECT * FROM projects WHERE id=?").get(project.id), document: next };
   }
@@ -1172,12 +1413,16 @@ export class OpenPTStore {
       throw err;
     }
     const cutoff = new Date(Date.now() - age).toISOString();
-    return this.db.prepare(`
+    return this.db
+      .prepare(
+        `
       SELECT * FROM project_versions
       WHERE project_id=? AND created_at <= ?
       ORDER BY created_at DESC
       LIMIT 1
-    `).get(projectId, cutoff);
+    `
+      )
+      .get(projectId, cutoff);
   }
 
   async rollback(project, target) {
@@ -1193,9 +1438,11 @@ export class OpenPTStore {
     const object = await this.objects.putJson("snapshots", document);
     const nextVersion = project.head_version + 1;
     const saved = nowIso();
-    this.db.prepare("UPDATE projects SET title=?, head_version=?, head_object_key=?, head_bytes=?, updated_at=?, last_save_at=? WHERE id=?")
+    this.db
+      .prepare("UPDATE projects SET title=?, head_version=?, head_object_key=?, head_bytes=?, updated_at=?, last_save_at=? WHERE id=?")
       .run(document.title || project.title, nextVersion, object.key, size, saved, saved, project.id);
-    this.db.prepare("INSERT INTO project_versions (id,project_id,version,object_key,bytes,created_at) VALUES (?,?,?,?,?,?)")
+    this.db
+      .prepare("INSERT INTO project_versions (id,project_id,version,object_key,bytes,created_at) VALUES (?,?,?,?,?,?)")
       .run(randomUUID(), project.id, nextVersion, object.key, size, saved);
     return { version: nextVersion, document };
   }

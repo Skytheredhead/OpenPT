@@ -489,7 +489,7 @@ function Topology(props) {
       <div className="canvas-hud">
         <div className="hud-btn" title="Zoom in" onClick={() => updatePan({ ...panRef.current, k: Math.min(2.5, panRef.current.k * 1.15) }, { render: true })}>{window.Icon.zoomIn()}</div>
         <div className="hud-btn" title="Zoom out" onClick={() => updatePan({ ...panRef.current, k: Math.max(0.4, panRef.current.k / 1.15) }, { render: true })}>{window.Icon.zoomOut()}</div>
-        <div className="hud-btn" title="Fit to screen" onClick={fit}>{window.Icon.fit()}</div>
+        <div className="hud-btn" title="Center topology" onClick={fit}>{window.Icon.fit()}</div>
       </div>
 
       {linkMode && (

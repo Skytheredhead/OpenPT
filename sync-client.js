@@ -57,7 +57,10 @@
   function stableStringify(value) {
     if (value === null || typeof value !== "object") return JSON.stringify(value);
     if (Array.isArray(value)) return `[${value.map(stableStringify).join(",")}]`;
-    return `{${Object.keys(value).sort().map((k) => `${JSON.stringify(k)}:${stableStringify(value[k])}`).join(",")}}`;
+    return `{${Object.keys(value)
+      .sort()
+      .map((k) => `${JSON.stringify(k)}:${stableStringify(value[k])}`)
+      .join(",")}}`;
   }
 
   function clone(value) {
@@ -84,16 +87,20 @@
 
   function buildProjectPatches(base = {}, next = {}) {
     const patches = [];
-    if ((base.title || "") !== (next.title || "")) patches.push({ op: "replace", path: "/title", value: next.title || "Untitled OpenPT project" });
+    if ((base.title || "") !== (next.title || ""))
+      patches.push({ op: "replace", path: "/title", value: next.title || "Untitled OpenPT project" });
     patches.push(...diffObjectMap(base.devices || {}, next.devices || {}, "/devices"));
-    if (stableStringify(base.links || []) !== stableStringify(next.links || [])) patches.push({ op: "replace", path: "/links", value: clone(next.links || []) });
-    if (stableStringify(base.metadata || {}) !== stableStringify(next.metadata || {})) patches.push({ op: "replace", path: "/metadata", value: clone(next.metadata || {}) });
+    if (stableStringify(base.links || []) !== stableStringify(next.links || []))
+      patches.push({ op: "replace", path: "/links", value: clone(next.links || []) });
+    if (stableStringify(base.metadata || {}) !== stableStringify(next.metadata || {}))
+      patches.push({ op: "replace", path: "/metadata", value: clone(next.metadata || {}) });
     return patches;
   }
 
   function buildUiPatches(base = {}, next = {}) {
     const patches = [];
-    if (stableStringify(base.uiState || {}) !== stableStringify(next.uiState || {})) patches.push({ op: "replace", path: "/uiState", value: clone(next.uiState || {}) });
+    if (stableStringify(base.uiState || {}) !== stableStringify(next.uiState || {}))
+      patches.push({ op: "replace", path: "/uiState", value: clone(next.uiState || {}) });
     return patches;
   }
 
@@ -151,11 +158,16 @@
   }
 
   async function queued() {
-    return withStore("queue", "readonly", (store) => new Promise((resolve, reject) => {
-      const req = store.getAll();
-      req.onsuccess = () => resolve(req.result || []);
-      req.onerror = () => reject(req.error);
-    }));
+    return withStore(
+      "queue",
+      "readonly",
+      (store) =>
+        new Promise((resolve, reject) => {
+          const req = store.getAll();
+          req.onsuccess = () => resolve(req.result || []);
+          req.onerror = () => reject(req.error);
+        })
+    );
   }
 
   async function dequeue(id) {
@@ -202,7 +214,9 @@
       return this.clientLabel;
     }
 
-    async me() { return request("/api/me"); }
+    async me() {
+      return request("/api/me");
+    }
     async studySummary(totalQuestionCount = 0) {
       const total = Number.isFinite(Number(totalQuestionCount)) ? Number(totalQuestionCount) : 0;
       return request(`/api/study/ccna/summary?total=${encodeURIComponent(total)}`);
@@ -210,19 +224,19 @@
     async createStudySession(questionKeys) {
       return request("/api/study/ccna/sessions", {
         method: "POST",
-        body: JSON.stringify({ questionKeys })
+        body: JSON.stringify({ questionKeys }),
       });
     }
     async recordStudyAttempt(sessionId, attempt) {
       return request(`/api/study/ccna/sessions/${encodeURIComponent(sessionId)}/attempts`, {
         method: "POST",
-        body: JSON.stringify(attempt)
+        body: JSON.stringify(attempt),
       });
     }
     async finishStudySession(sessionId, totalQuestionCount = 0) {
       return request(`/api/study/ccna/sessions/${encodeURIComponent(sessionId)}/finish`, {
         method: "POST",
-        body: JSON.stringify({ totalQuestionCount })
+        body: JSON.stringify({ totalQuestionCount }),
       });
     }
     async lessonSummary() {
@@ -231,7 +245,7 @@
     async startLesson(lessonId) {
       return request(`/api/lessons/ccna/${encodeURIComponent(lessonId)}/start`, {
         method: "POST",
-        body: JSON.stringify({})
+        body: JSON.stringify({}),
       });
     }
     async lessonWorkspace(lessonId) {
@@ -240,23 +254,36 @@
     async saveLessonWorkspace(lessonId, snapshot) {
       return request(`/api/lessons/ccna/${encodeURIComponent(lessonId)}/workspace`, {
         method: "PUT",
-        body: JSON.stringify({ snapshot })
+        body: JSON.stringify({ snapshot }),
+      });
+    }
+    async resetLessonProgress(lessonId) {
+      return request(`/api/lessons/ccna/${encodeURIComponent(lessonId)}/progress`, {
+        method: "DELETE",
+      });
+    }
+    async resetAllLessonProgress() {
+      return request("/api/lessons/ccna/progress", {
+        method: "DELETE",
       });
     }
     async recordLessonEvent(lessonId, event) {
       return request(`/api/lessons/ccna/${encodeURIComponent(lessonId)}/events`, {
         method: "POST",
-        body: JSON.stringify(event || {})
+        body: JSON.stringify(event || {}),
       });
     }
     async finishLesson(lessonId, result = {}) {
       return request(`/api/lessons/ccna/${encodeURIComponent(lessonId)}/finish`, {
         method: "POST",
-        body: JSON.stringify(result || {})
+        body: JSON.stringify(result || {}),
       });
     }
     async register(email, password, proof = {}) {
-      return request("/api/auth/register", { method: "POST", body: JSON.stringify({ email, password, clientLabel: this.clientLabel, ...proof }) });
+      return request("/api/auth/register", {
+        method: "POST",
+        body: JSON.stringify({ email, password, clientLabel: this.clientLabel, ...proof }),
+      });
     }
     async login(email, password) {
       return request("/api/auth/login", { method: "POST", body: JSON.stringify({ email, password, clientLabel: this.clientLabel }) });
@@ -280,13 +307,17 @@
         safeStorageRemove(storageArea("sessionStorage"), "openpt:csrf");
       }
     }
-    async listSessions() { return request("/api/sessions"); }
+    async listSessions() {
+      return request("/api/sessions");
+    }
     async revokeSession(id) {
       const result = await request(`/api/sessions/${encodeURIComponent(id)}`, { method: "DELETE" });
       if (result.currentRevoked) safeStorageRemove(storageArea("sessionStorage"), "openpt:csrf");
       return result;
     }
-    async revokeOtherSessions() { return request("/api/sessions", { method: "DELETE" }); }
+    async revokeOtherSessions() {
+      return request("/api/sessions", { method: "DELETE" });
+    }
     async deleteAccount(password) {
       try {
         return await request("/api/account", { method: "DELETE", body: JSON.stringify({ password }) });
@@ -295,21 +326,30 @@
       }
     }
     async cancelAccountDeletion(email, password) {
-      return request("/api/account/deletion/cancel", { method: "POST", body: JSON.stringify({ email, password, clientLabel: this.clientLabel }) });
+      return request("/api/account/deletion/cancel", {
+        method: "POST",
+        body: JSON.stringify({ email, password, clientLabel: this.clientLabel }),
+      });
     }
-    async listProjects() { return request("/api/projects"); }
-    async createProject(title, document) { return request("/api/projects", { method: "POST", body: JSON.stringify({ title, document }) }); }
-    async loadProject(id) { return request(`/api/projects/${encodeURIComponent(id)}`); }
+    async listProjects() {
+      return request("/api/projects");
+    }
+    async createProject(title, document) {
+      return request("/api/projects", { method: "POST", body: JSON.stringify({ title, document }) });
+    }
+    async loadProject(id) {
+      return request(`/api/projects/${encodeURIComponent(id)}`);
+    }
     async renameProject(id, title) {
       return request(`/api/projects/${encodeURIComponent(id)}`, {
         method: "POST",
-        body: JSON.stringify({ title })
+        body: JSON.stringify({ title }),
       });
     }
     async duplicateProject(id, title) {
       return request(`/api/projects/${encodeURIComponent(id)}/duplicate`, {
         method: "POST",
-        body: JSON.stringify({ title })
+        body: JSON.stringify({ title }),
       });
     }
     async deleteProject(id) {
@@ -318,62 +358,64 @@
     async acquireLease(id, takeover = false) {
       return request(`/api/projects/${encodeURIComponent(id)}/lease`, {
         method: "POST",
-        body: JSON.stringify({ clientId: this.clientId, clientLabel: this.clientLabel, takeover })
+        body: JSON.stringify({ clientId: this.clientId, clientLabel: this.clientLabel, takeover }),
       });
     }
     async renewLease(id, leaseId) {
       return request(`/api/projects/${encodeURIComponent(id)}/lease/renew`, {
         method: "POST",
-        body: JSON.stringify({ clientId: this.clientId, leaseId })
+        body: JSON.stringify({ clientId: this.clientId, leaseId }),
       });
     }
     async releaseLease(id, leaseId) {
       return request(`/api/projects/${encodeURIComponent(id)}/lease`, {
         method: "DELETE",
-        body: JSON.stringify({ clientId: this.clientId, leaseId })
+        body: JSON.stringify({ clientId: this.clientId, leaseId }),
       });
     }
     async savePatch(id, batch) {
       return request(`/api/projects/${encodeURIComponent(id)}`, {
         method: "PATCH",
-        body: JSON.stringify({ ...batch, clientId: this.clientId })
+        body: JSON.stringify({ ...batch, clientId: this.clientId }),
       });
     }
     async shareProject(id, mode) {
       return request(`/api/projects/${encodeURIComponent(id)}/share`, {
         method: "POST",
-        body: JSON.stringify({ mode })
+        body: JSON.stringify({ mode }),
       });
     }
     async rollback(id, target) {
       return request(`/api/projects/${encodeURIComponent(id)}/rollback`, {
         method: "POST",
-        body: JSON.stringify({ target })
+        body: JSON.stringify({ target }),
       });
     }
-    async loadShare(token) { return request(`/api/share/${encodeURIComponent(token)}`); }
+    async loadShare(token) {
+      return request(`/api/share/${encodeURIComponent(token)}`);
+    }
     async acquireShareLease(token, takeover = false) {
       return request(`/api/share/${encodeURIComponent(token)}/lease`, {
         method: "POST",
-        body: JSON.stringify({ clientId: this.clientId, clientLabel: this.clientLabel, takeover })
+        body: JSON.stringify({ clientId: this.clientId, clientLabel: this.clientLabel, takeover }),
       });
     }
     async saveSharePatch(token, batch) {
       return request(`/api/share/${encodeURIComponent(token)}`, {
         method: "PATCH",
-        body: JSON.stringify({ ...batch, clientId: this.clientId })
+        body: JSON.stringify({ ...batch, clientId: this.clientId }),
       });
     }
     async reportError(payload) {
       return request("/api/error-reports", {
         method: "POST",
-        body: JSON.stringify(payload || {})
+        body: JSON.stringify(payload || {}),
       });
     }
     async sendFeedback(payload) {
       return request("/api/feedback", {
         method: "POST",
-        body: JSON.stringify(payload || {})
+        body: JSON.stringify(payload || {}),
       });
     }
   }
@@ -387,6 +429,6 @@
     queued,
     dequeue,
     stableStringify,
-    clone
+    clone,
   };
 })();

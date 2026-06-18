@@ -29,6 +29,9 @@ test("lab loads and starter flow creates a topology", async ({ page }) => {
   await expect
     .poll(async () => page.locator(".link-status-marker.up").count(), { message: "healthy link status markers" })
     .toBeGreaterThan(0);
+  await page.getByTitle("Open CCNA guided lessons").click();
+  await expect(page).toHaveURL(/\/learn$/);
+  await expect(page.getByText("OpenPT Learn")).toBeVisible();
   expect(errors, "browser console/page errors").toEqual([]);
 });
 
@@ -225,7 +228,28 @@ test("ccna study mode is login gated and records a timed answer", async ({ page,
     .getByRole("button", { name: /^[A-E] / })
     .first()
     .click();
-  await expect(page.getByText(/PASS|MISS|SLOW/)).toBeVisible();
+  const answerButtons = page.getByRole("button", { name: /^[A-E] / });
+  if (
+    await page
+      .getByText(/\(Choose two\.\)/i)
+      .isVisible({ timeout: 500 })
+      .catch(() => false)
+  ) {
+    await answerButtons.nth(1).click();
+  } else if (
+    await page
+      .getByText(/\(Choose three\.\)/i)
+      .isVisible({ timeout: 500 })
+      .catch(() => false)
+  ) {
+    await answerButtons.nth(1).click();
+    await answerButtons.nth(2).click();
+  }
+  const submitAnswer = page.getByRole("button", { name: "Submit answer" });
+  if (await submitAnswer.isVisible({ timeout: 1000 }).catch(() => false)) {
+    await submitAnswer.click();
+  }
+  await expect(page.getByRole("button", { name: "Next question" })).toBeVisible();
   expect(errors, "browser console/page errors").toEqual([]);
 });
 
@@ -264,6 +288,13 @@ test("ccna guided lesson mode is login gated and starts a simulator mission", as
   await expect(page.getByText("No strengths yet.")).toBeVisible();
   await expect(page.getByText("No review topics yet.")).toBeVisible();
   await expect(page.getByText(/Start where you left off/i)).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Reset all progress" })).toBeVisible();
+  await page.getByRole("button", { name: "Reset all progress" }).click();
+  await expect(page.getByText(/Are you sure\? This will clear every completed checkpoint/)).toBeVisible();
+  await page.getByRole("button", { name: "Cancel" }).click();
+  await page.getByRole("button", { name: /01 Map the Network Roles/ }).click({ button: "right" });
+  await expect(page.getByRole("button", { name: "Reset lesson progress" })).toBeVisible();
+  await page.mouse.click(4, 4);
   await firstMissionButton.click();
   await expect(page).toHaveURL(/\/learn\/sem1-m1-3-network-roles$/);
   await expect(page.locator(".learn-lesson-intro h1")).toHaveText("Map the Network Roles");
@@ -286,7 +317,9 @@ test("ccna guided lesson mode is login gated and starts a simulator mission", as
   await page.setViewportSize({ width: 390, height: 800 });
   await expect(page.locator(".lesson-mobile-sheet")).toBeVisible();
   await page.getByRole("button", { name: "Tools" }).click();
-  await expect(page.getByRole("button", { name: /Fit topology/i })).toBeVisible();
+  await expect(page.locator(".lesson-mobile-tools").getByRole("button", { name: /Cable/i })).toBeVisible();
+  await expect(page.locator(".lesson-mobile-tools").getByRole("button", { name: /Packet/i })).toBeVisible();
+  await expect(page.getByRole("button", { name: /Fit topology/i })).toHaveCount(0);
   expect(errors, "browser console/page errors").toEqual([]);
 });
 

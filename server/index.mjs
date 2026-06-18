@@ -29,7 +29,7 @@ const defaultAllowedOrigins = [
   "https://openpt.dev",
   "https://openpt.skylarenns.com",
   "https://openpt.vercel.app",
-  "https://open-pt.vercel.app"
+  "https://open-pt.vercel.app",
 ];
 const allowedOrigins = (process.env.OPENPT_ALLOWED_ORIGINS || defaultAllowedOrigins.join(","))
   .split(",")
@@ -41,11 +41,14 @@ const adminToken = process.env.OPENPT_ADMIN_TOKEN || "";
 const app = Fastify({ logger: true, bodyLimit: 520 * 1024 * 1024 });
 const pendingRestore = await applyPendingRestore({ dataDir });
 if (pendingRestore) {
-  app.log.info({ backupId: pendingRestore.backupId, preRestoreBackupId: pendingRestore.preRestoreBackupId }, "applied pending storage restore");
+  app.log.info(
+    { backupId: pendingRestore.backupId, preRestoreBackupId: pendingRestore.preRestoreBackupId },
+    "applied pending storage restore"
+  );
 }
 const store = new OpenPTStore({
   dbPath: join(dataDir, "openpt.sqlite"),
-  objectStore: new ObjectStore(join(dataDir, "objects"))
+  objectStore: new ObjectStore(join(dataDir, "objects")),
 });
 await store.purgeScheduledAccounts().catch((err) => app.log?.warn?.({ err }, "scheduled account purge failed"));
 const abuse = new AbuseGuard();
@@ -55,7 +58,7 @@ setInterval(() => {
 }, 60 * 60_000).unref();
 
 await app.register(cookie, {
-  secret: process.env.OPENPT_COOKIE_SECRET || "openpt-dev-cookie-secret-change-me"
+  secret: process.env.OPENPT_COOKIE_SECRET || "openpt-dev-cookie-secret-change-me",
 });
 
 await app.register(cors, {
@@ -66,7 +69,7 @@ await app.register(cors, {
   },
   methods: ["GET", "POST", "PATCH", "DELETE", "OPTIONS"],
   allowedHeaders: ["content-type", "x-openpt-csrf"],
-  exposedHeaders: ["x-openpt-csrf"]
+  exposedHeaders: ["x-openpt-csrf"],
 });
 
 app.decorateRequest("user", null);
@@ -82,7 +85,7 @@ function publicUser(user) {
     id: user.id,
     email: user.email,
     emailVerifiedAt: user.email_verified_at || user.emailVerifiedAt || null,
-    deletionScheduledAt: user.deletion_scheduled_at || user.deletionScheduledAt || null
+    deletionScheduledAt: user.deletion_scheduled_at || user.deletionScheduledAt || null,
   };
 }
 
@@ -127,7 +130,7 @@ function setSessionCookie(reply, session) {
       sameSite: secureCookies ? "none" : "lax",
       secure: secureCookies,
       expires: new Date(session.expires_at),
-      signed: false
+      signed: false,
     })
     .header("x-openpt-csrf", session.csrf);
 }
@@ -140,7 +143,7 @@ function sessionMeta(req) {
   return {
     clientLabel: req.body?.clientLabel,
     userAgent: req.headers["user-agent"],
-    ip: clientIp(req)
+    ip: clientIp(req),
   };
 }
 
@@ -171,7 +174,7 @@ function projectSummary(row, extra = {}) {
     bytes: row.head_bytes ?? row.bytes,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
-    ...extra
+    ...extra,
   };
 }
 
@@ -193,12 +196,14 @@ app.setErrorHandler((err, req, reply) => {
     error: err.message || "Server error",
     code: err.code,
     statusCode: status,
-    lease: err.lease ? {
-      clientId: err.lease.client_id,
-      clientLabel: err.lease.client_label,
-      expiresAt: err.lease.expires_at
-    } : undefined,
-    serverVersion: err.serverVersion
+    lease: err.lease
+      ? {
+          clientId: err.lease.client_id,
+          clientLabel: err.lease.client_label,
+          expiresAt: err.lease.expires_at,
+        }
+      : undefined,
+    serverVersion: err.serverVersion,
   });
 });
 
@@ -207,7 +212,14 @@ app.get("/api/health", async () => ({ ok: true, limits: store.limits }));
 app.post("/api/admin/backups", async (req) => {
   requireAdmin(req);
   const result = await createBackup({ dataDir, store, reason: "http-admin" });
-  return { backup: { id: result.id, createdAt: result.manifest.createdAt, path: result.path, referencedObjectCount: result.manifest.referencedObjectCount } };
+  return {
+    backup: {
+      id: result.id,
+      createdAt: result.manifest.createdAt,
+      path: result.path,
+      referencedObjectCount: result.manifest.referencedObjectCount,
+    },
+  };
 });
 
 app.post("/api/admin/storage/cleanup", async (req) => {
@@ -216,7 +228,7 @@ app.post("/api/admin/storage/cleanup", async (req) => {
     store,
     objectStore: store.objects,
     dryRun: !!req.body?.dryRun,
-    olderThanDays: req.body?.olderThanDays
+    olderThanDays: req.body?.olderThanDays,
   });
 });
 
@@ -225,7 +237,7 @@ app.post("/api/admin/restore", async (req, reply) => {
   const pending = await writePendingRestore({
     dataDir,
     backupId: req.body?.backupId,
-    confirm: req.body?.confirm
+    confirm: req.body?.confirm,
   });
   reply.status(202);
   return { restore: pending, applyOnRestart: true };
@@ -262,7 +274,9 @@ app.post("/api/feedback", { bodyLimit: 15 * 1024 * 1024 }, async (req, reply) =>
 });
 
 app.post("/api/auth/register", async (req, reply) => {
-  const email = String(req.body?.email || "").trim().toLowerCase();
+  const email = String(req.body?.email || "")
+    .trim()
+    .toLowerCase();
   const password = String(req.body?.password || "");
   if (String(req.body?.company || "").trim()) {
     reply.status(202);
@@ -293,7 +307,9 @@ app.post("/api/auth/register", async (req, reply) => {
 });
 
 app.post("/api/auth/login", async (req, reply) => {
-  const email = String(req.body?.email || "").trim().toLowerCase();
+  const email = String(req.body?.email || "")
+    .trim()
+    .toLowerCase();
   const password = String(req.body?.password || "");
   abuse.check("loginIp", clientIp(req));
   abuse.check("loginEmail", email || "missing");
@@ -305,7 +321,7 @@ app.post("/api/auth/login", async (req, reply) => {
   if (privateUser.deletion_scheduled_at) {
     return authError(reply, 403, "ACCOUNT_DELETION_PENDING", "This account is scheduled for deletion.", {
       email,
-      deletionScheduledAt: privateUser.deletion_scheduled_at
+      deletionScheduledAt: privateUser.deletion_scheduled_at,
     });
   }
   if (!privateUser.email_verified_at) {
@@ -332,7 +348,9 @@ app.post("/api/auth/verify-email", async (req, reply) => {
 });
 
 app.post("/api/auth/resend-verification", async (req) => {
-  const email = String(req.body?.email || "").trim().toLowerCase();
+  const email = String(req.body?.email || "")
+    .trim()
+    .toLowerCase();
   abuse.check("resendVerificationIp", clientIp(req));
   abuse.check("resendVerificationEmail", email || "missing");
   const user = store.getUserByEmail(email);
@@ -342,7 +360,9 @@ app.post("/api/auth/resend-verification", async (req) => {
 });
 
 app.post("/api/auth/forgot-password", async (req) => {
-  const email = String(req.body?.email || "").trim().toLowerCase();
+  const email = String(req.body?.email || "")
+    .trim()
+    .toLowerCase();
   abuse.check("forgotPasswordIp", clientIp(req));
   abuse.check("forgotPasswordEmail", email || "missing");
   const user = store.getUserByEmail(email);
@@ -431,6 +451,20 @@ app.put("/api/lessons/ccna/:lessonId/workspace", async (req) => {
   return { workspace: store.saveLessonWorkspace(user.id, "ccna", req.params.lessonId, req.body?.snapshot || req.body || {}) };
 });
 
+app.delete("/api/lessons/ccna/progress", async (req) => {
+  const user = requireUser(req);
+  requireCsrf(req);
+  abuse.check("lessonResetUser", user.id, { limit: 30, windowMs: 60 * 60_000 });
+  return store.resetAllLessonProgress(user.id, "ccna");
+});
+
+app.delete("/api/lessons/ccna/:lessonId/progress", async (req) => {
+  const user = requireUser(req);
+  requireCsrf(req);
+  abuse.check("lessonResetUser", user.id, { limit: 120, windowMs: 60 * 60_000 });
+  return store.resetLessonProgress(user.id, "ccna", req.params.lessonId);
+});
+
 app.post("/api/lessons/ccna/:lessonId/events", async (req) => {
   const user = requireUser(req);
   requireCsrf(req);
@@ -481,7 +515,9 @@ app.delete("/api/account", async (req, reply) => {
 });
 
 app.post("/api/account/deletion/cancel", async (req, reply) => {
-  const email = String(req.body?.email || "").trim().toLowerCase();
+  const email = String(req.body?.email || "")
+    .trim()
+    .toLowerCase();
   const password = String(req.body?.password || "");
   abuse.check("accountDeletionCancelIp", clientIp(req));
   abuse.check("accountDeletionCancelEmail", email || "missing");
@@ -522,7 +558,7 @@ app.get("/api/projects/:id", async (req) => {
   return {
     project: projectSummary(project),
     document,
-    lease: lease ? { clientId: lease.client_id, clientLabel: lease.client_label, expiresAt: lease.expires_at } : null
+    lease: lease ? { clientId: lease.client_id, clientLabel: lease.client_label, expiresAt: lease.expires_at } : null,
   };
 });
 
@@ -575,7 +611,7 @@ app.post("/api/projects/:id/lease", async (req) => {
     clientId: req.body?.clientId,
     clientLabel: req.body?.clientLabel,
     userId: user.id,
-    takeover: !!req.body?.takeover
+    takeover: !!req.body?.takeover,
   });
   return { lease: { id: lease.lease_id, clientId: lease.client_id, clientLabel: lease.client_label, expiresAt: lease.expires_at } };
 });
@@ -655,7 +691,7 @@ app.get("/api/share/:token", async (req) => {
   return {
     project: projectSummary(project, { shared: true, mode: project.mode }),
     document,
-    lease: lease ? { clientId: lease.client_id, clientLabel: lease.client_label, expiresAt: lease.expires_at } : null
+    lease: lease ? { clientId: lease.client_id, clientLabel: lease.client_label, expiresAt: lease.expires_at } : null,
   };
 });
 
@@ -670,7 +706,7 @@ app.post("/api/share/:token/lease", async (req) => {
     clientId: req.body?.clientId,
     clientLabel: req.body?.clientLabel,
     shareToken: req.params.token,
-    takeover: !!req.body?.takeover
+    takeover: !!req.body?.takeover,
   });
   return { lease: { id: lease.lease_id, clientId: lease.client_id, clientLabel: lease.client_label, expiresAt: lease.expires_at } };
 });
@@ -695,7 +731,7 @@ if (!backendOnly) {
   await app.register(staticPlugin, {
     root,
     prefix: "/",
-    wildcard: false
+    wildcard: false,
   });
 
   app.get("/jeopardy-theme.m4a", async (req, reply) => {
