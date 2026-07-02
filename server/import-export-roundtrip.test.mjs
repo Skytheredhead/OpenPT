@@ -34,7 +34,7 @@ async function loadOpenPTCore() {
   return { context, engine: context.OPT_Engine, format: context.OpenPTFormat };
 }
 
-async function loadPacketTracerImporter() {
+async function loadPacketTracerImporter({ importLimits = null } = {}) {
   const context = {
     console,
     setTimeout,
@@ -43,6 +43,7 @@ async function loadPacketTracerImporter() {
     TextEncoder,
     crypto: webcrypto,
   };
+  if (importLimits) context.OpenPTPacketTracerImportLimits = importLimits;
   context.window = context;
   vm.createContext(context);
   vm.runInContext(await readFile(join(rootDir, "packet-tracer-importer.js"), "utf8"), context, { filename: "packet-tracer-importer.js" });
@@ -69,6 +70,30 @@ function assertLinksHaveEndpoints(topology) {
     assert.ok(topology.devices[link.b].interfaces[link.bi], `missing interface ${link.b}:${link.bi}`);
   }
 }
+
+test("Packet Tracer importer rejects oversized files before decoding", async () => {
+  const importer = await loadPacketTracerImporter({ importLimits: { maxFileBytes: 32, maxXmlBytes: 1024, maxXmlDepth: 16 } });
+  await assert.rejects(
+    () => importer.importPacketTracerFile(asBrowserFile("oversized.pkt", new Uint8Array(33))),
+    /Packet Tracer file exceeds the 32 byte Packet Tracer import limit/
+  );
+});
+
+test("Packet Tracer importer rejects oversized and deeply nested XML payloads", async () => {
+  const importer = await loadPacketTracerImporter({ importLimits: { maxFileBytes: 4096, maxXmlBytes: 128, maxXmlDepth: 8 } });
+  const largeXml = new TextEncoder().encode(`<PACKETTRACER>${"x".repeat(160)}</PACKETTRACER>`);
+  await assert.rejects(
+    () => importer.importPacketTracerFile(asBrowserFile("large.pkt", largeXml)),
+    /Plain Packet Tracer XML payload exceeds the 128 byte Packet Tracer import limit/
+  );
+
+  const depthImporter = await loadPacketTracerImporter({ importLimits: { maxFileBytes: 4096, maxXmlBytes: 4096, maxXmlDepth: 8 } });
+  const nestedXml = new TextEncoder().encode(`${"<PACKETTRACER>"}${"<NODE>".repeat(10)}${"</NODE>".repeat(10)}</PACKETTRACER>`);
+  await assert.rejects(
+    () => depthImporter.importPacketTracerFile(asBrowserFile("deep.pkt", nestedXml)),
+    /Packet Tracer XML nesting exceeds the 8 level import limit/
+  );
+});
 
 test("JSON/OPT topology normalizes and re-imports without dropping state", async () => {
   const { engine, format } = await loadOpenPTCore();

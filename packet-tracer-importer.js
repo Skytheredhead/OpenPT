@@ -1,6 +1,12 @@
 // packet-tracer-importer.js - browser-side Packet Tracer assignment importer hook
 (function () {
   const ETHERCHANNEL_SHA256 = "f37cf1ca63177e6fa30799e28f1abac2b26cac26e6b652b0357cf51438d5081a";
+  const DEFAULT_IMPORT_LIMITS = {
+    maxFileBytes: 50 * 1024 * 1024,
+    maxXmlBytes: 25 * 1024 * 1024,
+    maxXmlDepth: 160,
+  };
+  const IMPORT_LIMIT_ERROR = "OPENPT_PACKET_TRACER_IMPORT_LIMIT";
   let twofishLoadPromise = null;
   const BUILT_IN_ASSESSMENT_COMPONENTS = new Set([
     "acl",
@@ -201,6 +207,32 @@ End of document`;
       ],
     },
   };
+
+  function importLimitError(message) {
+    const err = new Error(message);
+    err.code = IMPORT_LIMIT_ERROR;
+    return err;
+  }
+
+  function importLimitNumber(name) {
+    const configured = window.OpenPTPacketTracerImportLimits?.[name] ?? window.OpenPTImportLimits?.[name];
+    const parsed = Number(configured);
+    return Number.isFinite(parsed) && parsed > 0 ? parsed : DEFAULT_IMPORT_LIMITS[name];
+  }
+
+  function packetTracerImportLimits() {
+    return {
+      maxFileBytes: importLimitNumber("maxFileBytes"),
+      maxXmlBytes: importLimitNumber("maxXmlBytes"),
+      maxXmlDepth: importLimitNumber("maxXmlDepth"),
+    };
+  }
+
+  function assertByteLimit(label, size, maxBytes) {
+    if (Number(size) > maxBytes) {
+      throw importLimitError(`${label} exceeds the ${maxBytes} byte Packet Tracer import limit.`);
+    }
+  }
 
   function clone(value) {
     return JSON.parse(JSON.stringify(value));
@@ -488,31 +520,36 @@ End of document`;
     };
   }
 
-  async function qtUncompress(bytes) {
-    if (bytes.length < 6) throw new Error("Decoded Packet Tracer payload is too short for qUncompress.");
-    const expectedLength = (
-      (bytes[0] << 24) |
-      (bytes[1] << 16) |
-      (bytes[2] << 8) |
-      bytes[3]
-    ) >>> 0;
-    if (!window.DecompressionStream) {
-      throw new Error("This browser does not expose DecompressionStream for Qt/zlib payloads.");
-    }
-    const stream = new Blob([bytes.slice(4)]).stream().pipeThrough(new DecompressionStream("deflate"));
-    const inflated = new Uint8Array(await new Response(stream).arrayBuffer());
-    if (expectedLength && inflated.length !== expectedLength) {
-      throw new Error(`Qt/zlib payload inflated to ${inflated.length} bytes, expected ${expectedLength}.`);
-    }
-    return inflated;
-  }
+	  async function qtUncompress(bytes) {
+	    if (bytes.length < 6) throw new Error("Decoded Packet Tracer payload is too short for qUncompress.");
+	    const { maxXmlBytes } = packetTracerImportLimits();
+	    const expectedLength = (
+	      (bytes[0] << 24) |
+	      (bytes[1] << 16) |
+	      (bytes[2] << 8) |
+	      bytes[3]
+	    ) >>> 0;
+	    assertByteLimit("Decoded Packet Tracer XML payload", expectedLength, maxXmlBytes);
+	    if (!window.DecompressionStream) {
+	      throw new Error("This browser does not expose DecompressionStream for Qt/zlib payloads.");
+	    }
+	    const stream = new Blob([bytes.slice(4)]).stream().pipeThrough(new DecompressionStream("deflate"));
+	    const inflated = new Uint8Array(await new Response(stream).arrayBuffer());
+	    assertByteLimit("Decoded Packet Tracer XML payload", inflated.length, maxXmlBytes);
+	    if (expectedLength && inflated.length !== expectedLength) {
+	      throw new Error(`Qt/zlib payload inflated to ${inflated.length} bytes, expected ${expectedLength}.`);
+	    }
+	    return inflated;
+	  }
 
-  async function decodePacketTracerXml(bytes) {
-    const directText = new TextDecoder("utf-8", { fatal: false }).decode(bytes.slice(0, Math.min(bytes.length, 1024)));
-    if (/^\s*<PACKETTRACER/i.test(directText)) {
-      return {
-        profile: "plain-xml",
-        xmlBytes: bytes,
+	  async function decodePacketTracerXml(bytes) {
+	    const { maxXmlBytes } = packetTracerImportLimits();
+	    const directText = new TextDecoder("utf-8", { fatal: false }).decode(bytes.slice(0, Math.min(bytes.length, 1024)));
+	    if (/^\s*<PACKETTRACER/i.test(directText)) {
+	      assertByteLimit("Plain Packet Tracer XML payload", bytes.length, maxXmlBytes);
+	      return {
+	        profile: "plain-xml",
+	        xmlBytes: bytes,
         xmlText: new TextDecoder("utf-8", { fatal: false }).decode(bytes),
         stages: { rawLength: bytes.length },
       };
@@ -666,24 +703,61 @@ ${report.notes.map((n) => `- ${n}`).join("\n")}`;
     return { sanitized, replacements };
   }
 
-  function xmlParserError(doc) {
-    const parserError = doc.getElementsByTagName("parsererror")[0];
-    return parserError ? parserError.textContent || "Decoded Packet Tracer XML could not be parsed." : "";
+	  function xmlParserError(doc) {
+	    const parserError = doc.getElementsByTagName("parsererror")[0];
+	    return parserError ? parserError.textContent || "Decoded Packet Tracer XML could not be parsed." : "";
+	  }
+
+  function assertXmlDepth(root, maxDepth) {
+    if (!root) return;
+    const stack = [{ node: root, depth: 1 }];
+    while (stack.length) {
+      const { node, depth } = stack.pop();
+      if (depth > maxDepth) {
+        throw importLimitError(`Packet Tracer XML nesting exceeds the ${maxDepth} level import limit.`);
+      }
+      for (const child of Array.from(node.children || [])) stack.push({ node: child, depth: depth + 1 });
+    }
   }
 
-  function parseXmlDocument(xmlText) {
-    const firstDoc = new DOMParser().parseFromString(xmlText, "application/xml");
-    const firstError = xmlParserError(firstDoc);
-    if (!firstError) return { doc: firstDoc, sanitizedReplacements: 0 };
-
-    const { sanitized, replacements } = sanitizeXmlForParser(xmlText);
-    if (replacements > 0 && sanitized !== xmlText) {
-      const retryDoc = new DOMParser().parseFromString(sanitized, "application/xml");
-      const retryError = xmlParserError(retryDoc);
-      if (!retryError) {
-        return { doc: retryDoc, sanitizedReplacements: replacements, firstError };
+  function assertXmlTextDepth(xmlText, maxDepth) {
+    let depth = 0;
+    const tagPattern = /<\s*(\/?)([A-Za-z_][^\s/>]*)([^>]*)>/g;
+    for (const match of String(xmlText || "").matchAll(tagPattern)) {
+      const fullTag = match[0];
+      if (/^<\s*(?:\?|!)/.test(fullTag)) continue;
+      if (match[1]) {
+        depth = Math.max(0, depth - 1);
+        continue;
+      }
+      if (/\/\s*>$/.test(fullTag)) continue;
+      depth += 1;
+      if (depth > maxDepth) {
+        throw importLimitError(`Packet Tracer XML nesting exceeds the ${maxDepth} level import limit.`);
       }
     }
+  }
+
+	  function parseXmlDocument(xmlText) {
+	    const { maxXmlBytes, maxXmlDepth } = packetTracerImportLimits();
+	    assertByteLimit("Packet Tracer XML text", String(xmlText || "").length, maxXmlBytes);
+	    assertXmlTextDepth(xmlText, maxXmlDepth);
+	    const firstDoc = new DOMParser().parseFromString(xmlText, "application/xml");
+	    const firstError = xmlParserError(firstDoc);
+	    if (!firstError) {
+	      assertXmlDepth(firstDoc.documentElement, maxXmlDepth);
+	      return { doc: firstDoc, sanitizedReplacements: 0 };
+	    }
+
+	    const { sanitized, replacements } = sanitizeXmlForParser(xmlText);
+	    if (replacements > 0 && sanitized !== xmlText) {
+	      const retryDoc = new DOMParser().parseFromString(sanitized, "application/xml");
+	      const retryError = xmlParserError(retryDoc);
+	      if (!retryError) {
+	        assertXmlDepth(retryDoc.documentElement, maxXmlDepth);
+	        return { doc: retryDoc, sanitizedReplacements: replacements, firstError };
+	      }
+	    }
 
     throw new Error(firstError);
   }
@@ -1857,10 +1931,13 @@ ${report.notes.map((n) => `- ${n}`).join("\n")}`;
     }[ch]));
   }
 
-  async function importPacketTracerFile(file) {
-    const buffer = await file.arrayBuffer();
-    const bytes = new Uint8Array(buffer);
-    const sha256 = await sha256Hex(buffer);
+	  async function importPacketTracerFile(file) {
+	    const { maxFileBytes } = packetTracerImportLimits();
+	    assertByteLimit("Packet Tracer file", file?.size || 0, maxFileBytes);
+	    const buffer = await file.arrayBuffer();
+	    const bytes = new Uint8Array(buffer);
+	    assertByteLimit("Packet Tracer file", bytes.length, maxFileBytes);
+	    const sha256 = await sha256Hex(buffer);
     const head = headHex(bytes, 16);
     const knownByHash = sha256 === ETHERCHANNEL_SHA256;
     const knownByFallback = !sha256 && file.size === 641292 && /15\.2\.7 packet tracer - etherchannel review/i.test(file.name || "");
@@ -1871,13 +1948,14 @@ ${report.notes.map((n) => `- ${n}`).join("\n")}`;
       reason: err?.message || String(err),
     }));
     let activity = null;
-    try {
-      const decoded = await decodePacketTracerXml(bytes);
-      activity = parsePacketTracerXml(file, decoded, sha256, head, report, rawStorage);
-    } catch (err) {
-      report.decoder = {
-        status: "not-decoded",
-        attemptedProfile: "ptsave-eax-twofish-v1",
+	    try {
+	      const decoded = await decodePacketTracerXml(bytes);
+	      activity = parsePacketTracerXml(file, decoded, sha256, head, report, rawStorage);
+	    } catch (err) {
+	      if (err?.code === IMPORT_LIMIT_ERROR) throw err;
+	      report.decoder = {
+	        status: "not-decoded",
+	        attemptedProfile: "ptsave-eax-twofish-v1",
         error: err?.message || String(err),
       };
     }
@@ -1930,10 +2008,11 @@ ${report.notes.map((n) => `- ${n}`).join("\n")}`;
     return activity;
   }
 
-  window.PacketTracerImporter = {
-    importPacketTracerFile,
-    getRawPacketTracerFile,
-    profiles: {
+	  window.PacketTracerImporter = {
+	    importPacketTracerFile,
+	    getRawPacketTracerFile,
+	    __test: { packetTracerImportLimits, parseXmlDocument },
+	    profiles: {
       [ETHERCHANNEL_SHA256]: etherchannelActivity.title,
     },
   };

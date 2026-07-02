@@ -58,12 +58,14 @@ async function sendAccountEmail({ to, subject, body, env = process.env, transpor
   const config = accountMailConfig(env);
   if (config.debug) return { sent: false, reason: "debug" };
   if (!hasAccountMailConfig(env)) return { sent: false, reason: "not-configured" };
-  const mailer = transport || nodemailer.createTransport({
-    host: config.host,
-    port: config.port,
-    secure: config.secure,
-    auth: config.user || config.pass ? { user: config.user, pass: config.pass } : undefined
-  });
+	  const mailer = transport || nodemailer.createTransport({
+	    host: config.host,
+	    port: config.port,
+	    secure: config.secure,
+	    auth: config.user || config.pass ? { user: config.user, pass: config.pass } : undefined,
+	    disableFileAccess: true,
+	    disableUrlAccess: true
+	  });
   await mailer.sendMail({
     to,
     from: `"OpenPT accounts" <${config.from}>`,

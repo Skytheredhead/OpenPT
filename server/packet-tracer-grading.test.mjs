@@ -335,7 +335,7 @@ test("reports unsupported decoded checks separately from incorrect checks", () =
   assert.equal(result.gradingRun.unsupported[0].reason, "missing-xml-mapping");
 });
 
-test("grades transferred Packet Tracer state instead of leaving internal leaves unchecked", () => {
+test("leaves transferred Packet Tracer state unchecked unless grading explicitly opts in", () => {
   const devices = {
     r1: routerDevice("r1", "R1", {
       interfaces: { "GigabitEthernet0/0": iface() },
@@ -364,8 +364,45 @@ test("grades transferred Packet Tracer state instead of leaving internal leaves 
     },
   }, devices, []);
 
+  assert.equal(result.assessmentItems[0].status, "Unchecked");
+  assert.notEqual(result.assessmentItems[0].checkerId, "packet-tracer.transferred-state");
+  assert.equal(result.assessmentItems[0].earnedPoints, 0);
+  assert.equal(result.progress.counts.unchecked, 1);
+});
+
+test("grades transferred Packet Tracer state only after explicit opt-in", () => {
+  const devices = {
+    r1: routerDevice("r1", "R1", {
+      interfaces: { "GigabitEthernet0/0": iface() },
+    }),
+  };
+  const leaf = {
+    path: "Network / R1 / Ports / GigabitEthernet0/0 / BIA",
+    pathParts: ["Network", "R1", "Ports", "GigabitEthernet0/0", "BIA"],
+    components: "Physical",
+    points: 1,
+    value: "0030.F22E.9001",
+    visible: true,
+    rawXml: "<NODE><NAME>BIA</NAME></NODE>",
+  };
+  const result = grade({
+    gradingProfile: { allowTransferredStateGrading: true },
+    assessmentModel: { leaves: [leaf] },
+    packetTracerState: {
+      assessmentByPath: {
+        [leaf.path]: {
+          path: leaf.path,
+          value: leaf.value,
+          classification: "packet-tracer-internal-state",
+          source: { assessmentPath: leaf.path, sourceValue: leaf.value },
+        },
+      },
+    },
+  }, devices, []);
+
   assert.equal(result.assessmentItems[0].status, "Correct");
   assert.equal(result.assessmentItems[0].checkerId, "packet-tracer.transferred-state");
+  assert.equal(result.assessmentItems[0].evidence.transferredStateOptIn, true);
   assert.equal(result.progress.counts.unchecked, 0);
   assert.equal(result.gradingRun.unsupported.length, 0);
 });

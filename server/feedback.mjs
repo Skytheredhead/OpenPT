@@ -105,15 +105,17 @@ export async function sendFeedbackEmail(feedback, { env = process.env, transport
     throw err;
   }
 
-  const mailer = transport || nodemailer.createTransport({
-    host: config.host,
-    port: config.port,
-    secure: config.secure,
-    auth: config.user || config.pass ? {
-      user: config.user,
-      pass: config.pass,
-    } : undefined,
-  });
+	  const mailer = transport || nodemailer.createTransport({
+	    host: config.host,
+	    port: config.port,
+	    secure: config.secure,
+	    auth: config.user || config.pass ? {
+	      user: config.user,
+	      pass: config.pass,
+	    } : undefined,
+	    disableFileAccess: true,
+	    disableUrlAccess: true,
+	  });
   const subject = feedback.subject || "(no subject)";
   const lines = [
     "OpenPT feedback",

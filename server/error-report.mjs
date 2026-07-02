@@ -91,15 +91,17 @@ export async function sendErrorReportEmail(report, { env = process.env, transpor
 
   const smtpPort = Number(env.OPENPT_REPORT_SMTP_PORT || 587);
   const smtpSecure = env.OPENPT_REPORT_SMTP_SECURE === "1" || smtpPort === 465;
-  const mailer = transport || nodemailer.createTransport({
-    host: env.OPENPT_REPORT_SMTP_HOST,
-    port: smtpPort,
-    secure: smtpSecure,
-    auth: env.OPENPT_REPORT_SMTP_USER || env.OPENPT_REPORT_SMTP_PASS ? {
-      user: env.OPENPT_REPORT_SMTP_USER,
-      pass: env.OPENPT_REPORT_SMTP_PASS,
-    } : undefined,
-  });
+	  const mailer = transport || nodemailer.createTransport({
+	    host: env.OPENPT_REPORT_SMTP_HOST,
+	    port: smtpPort,
+	    secure: smtpSecure,
+	    auth: env.OPENPT_REPORT_SMTP_USER || env.OPENPT_REPORT_SMTP_PASS ? {
+	      user: env.OPENPT_REPORT_SMTP_USER,
+	      pass: env.OPENPT_REPORT_SMTP_PASS,
+	    } : undefined,
+	    disableFileAccess: true,
+	    disableUrlAccess: true,
+	  });
   const fingerprint = reportFingerprint(report);
   const subjectName = report.sourceName || report.sourceSha256?.slice(0, 12) || "Packet Tracer import";
   const body = [

@@ -6,7 +6,7 @@ import { join } from "node:path";
 import { ObjectStore } from "./object-store.mjs";
 import { OpenPTStore } from "./storage.mjs";
 import { applyJsonPatch } from "./json-patch.mjs";
-import { AbuseGuard } from "./abuse-guard.mjs";
+import { AbuseGuard, clientIp } from "./abuse-guard.mjs";
 
 async function makeStore() {
   const dir = await mkdtemp(join(tmpdir(), "openpt-sync-"));
@@ -182,4 +182,22 @@ test("abuse guard rate limits repeated keys with retry-after", () => {
     assert.ok(err.retryAfter > 0);
     return true;
   });
+});
+
+test("clientIp ignores spoofable proxy headers unless explicitly trusted", () => {
+  const req = {
+    headers: {
+      "cf-connecting-ip": "198.51.100.10",
+      "x-forwarded-for": "203.0.113.20, 203.0.113.21",
+    },
+    ip: "192.0.2.5",
+    socket: { remoteAddress: "192.0.2.6" },
+  };
+
+  assert.equal(clientIp(req, { env: {} }), "192.0.2.5");
+  assert.equal(clientIp(req, { trustProxyHeaders: true }), "198.51.100.10");
+  assert.equal(
+    clientIp({ ...req, headers: { "x-forwarded-for": "203.0.113.20, 203.0.113.21" } }, { trustProxyHeaders: true }),
+    "203.0.113.20"
+  );
 });

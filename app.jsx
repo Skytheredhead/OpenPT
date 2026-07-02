@@ -9161,7 +9161,12 @@ function packetTracerTransferredStateEntry(item, context = {}) {
   return state.assessmentByRawXml?.[item?.rawXml] || state.assessmentById?.[item?.id] || state.assessmentByPath?.[item?.path] || null;
 }
 
+function packetTracerAllowsTransferredState(context = {}) {
+  return context.allowTransferredStateGrading === true || context.activity?.gradingProfile?.allowTransferredStateGrading === true;
+}
+
 function packetTracerGradeTransferredState(item, base, context = {}) {
+  if (!packetTracerAllowsTransferredState(context)) return null;
   const entry = packetTracerTransferredStateEntry(item, context);
   if (!entry) return null;
   return packetTracerGradeResult(
@@ -9179,6 +9184,7 @@ function packetTracerGradeTransferredState(item, base, context = {}) {
           classification: entry.classification,
           source: entry.source,
         },
+        transferredStateOptIn: true,
       },
     }
   );
@@ -9733,10 +9739,12 @@ function gradePacketTracerActivity(activity, devices, links) {
   const sourceItems = packetTracerGradeSourceItems(activity);
   if (!sourceItems.length) return activity;
   const context = {
+    activity,
     devices,
     links,
     expected: packetTracerAnswerExpectations(activity, devices),
     packetTracerState: activity.packetTracerState || null,
+    allowTransferredStateGrading: activity.gradingProfile?.allowTransferredStateGrading === true,
   };
   const assessmentItems = sourceItems.map((item) => packetTracerGradeItem(item, context));
   const progress = packetTracerProgressFromItems(assessmentItems);

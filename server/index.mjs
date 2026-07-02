@@ -37,8 +37,10 @@ const allowedOrigins = (process.env.OPENPT_ALLOWED_ORIGINS || defaultAllowedOrig
   .filter(Boolean);
 const backendOnly = process.env.OPENPT_BACKEND_ONLY === "1";
 const adminToken = process.env.OPENPT_ADMIN_TOKEN || "";
+const DEFAULT_BODY_LIMIT = Number(process.env.OPENPT_BODY_LIMIT_BYTES || 2 * 1024 * 1024);
+const PROJECT_BODY_LIMIT = Number(process.env.OPENPT_PROJECT_BODY_LIMIT_BYTES || 505 * 1024 * 1024);
 
-const app = Fastify({ logger: true, bodyLimit: 520 * 1024 * 1024 });
+const app = Fastify({ logger: true, bodyLimit: DEFAULT_BODY_LIMIT });
 const pendingRestore = await applyPendingRestore({ dataDir });
 if (pendingRestore) {
   app.log.info(
@@ -536,7 +538,7 @@ app.get("/api/projects", async (req) => {
   return { projects: store.listProjects(user.id), usageBytes: store.userUsage(user.id), limits: store.limits };
 });
 
-app.post("/api/projects", async (req) => {
+app.post("/api/projects", { bodyLimit: PROJECT_BODY_LIMIT }, async (req) => {
   const user = requireUser(req);
   requireCsrf(req);
   abuse.check("projectCreateUser", user.id);
@@ -637,7 +639,7 @@ app.delete("/api/projects/:id/lease", async (req) => {
   return { ok: true };
 });
 
-app.patch("/api/projects/:id", async (req) => {
+app.patch("/api/projects/:id", { bodyLimit: PROJECT_BODY_LIMIT }, async (req) => {
   const user = requireUser(req);
   requireCsrf(req);
   abuse.check("patchUser", user.id);
@@ -711,7 +713,7 @@ app.post("/api/share/:token/lease", async (req) => {
   return { lease: { id: lease.lease_id, clientId: lease.client_id, clientLabel: lease.client_label, expiresAt: lease.expires_at } };
 });
 
-app.patch("/api/share/:token", async (req) => {
+app.patch("/api/share/:token", { bodyLimit: PROJECT_BODY_LIMIT }, async (req) => {
   abuse.check("sharePatchToken", req.params.token);
   const project = store.getProjectByShare(req.params.token);
   if (!project || project.mode !== "edit") {

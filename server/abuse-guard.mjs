@@ -24,12 +24,28 @@ const DEFAULT_LIMITS = {
   feedbackIpHour: { limit: 10, windowMs: 60 * 60_000 },
 };
 
-export function clientIp(req) {
-  const cf = req.headers["cf-connecting-ip"];
-  if (cf) return String(cf).split(",")[0].trim();
-  const forwarded = req.headers["x-forwarded-for"];
-  if (forwarded) return String(forwarded).split(",")[0].trim();
+function envFlag(value) {
+  return /^(1|true|yes)$/i.test(String(value || ""));
+}
+
+export function trustProxyHeaders(env = process.env) {
+  return envFlag(env.OPENPT_TRUST_PROXY_HEADERS || env.OPENPT_TRUST_PROXY);
+}
+
+function directIp(req) {
   return req.ip || req.socket?.remoteAddress || "unknown";
+}
+
+export function clientIp(req, opts = {}) {
+  const trustProxy = opts.trustProxyHeaders ?? trustProxyHeaders(opts.env || process.env);
+  const headers = req.headers || {};
+  if (trustProxy) {
+    const cf = headers["cf-connecting-ip"];
+    if (cf) return String(cf).split(",")[0].trim();
+    const forwarded = headers["x-forwarded-for"];
+    if (forwarded) return String(forwarded).split(",")[0].trim();
+  }
+  return directIp(req);
 }
 
 export class AbuseGuard {
