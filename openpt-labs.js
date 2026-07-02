@@ -117,22 +117,33 @@
   }
 
   function activity(lab) {
+    const items = assessmentItems(lab.title, lab.answerCommands).map((entry, index) => ({
+      id: `${lab.id}-${index}`,
+      points: 1,
+      pathParts: [entry.device, entry.iface, entry.name].filter(Boolean),
+      parentPath: [entry.rootName, entry.device, entry.iface].filter(Boolean).join(" / "),
+      path: [entry.rootName, entry.device, entry.iface, entry.name].filter(Boolean).join(" / "),
+      ...entry,
+    }));
     return {
       format: "openpt-authored-lab",
       labKey: lab.id,
       title: lab.title,
       sourceName: `${lab.id}.opt`,
+      category: lab.category || "CCNA Practice",
+      difficulty: lab.difficulty || "intermediate",
+      estimatedMinutes: lab.estimatedMinutes || 10,
+      skills: clone(lab.skills || []),
+      summary: lab.summary || "",
       instructionsHtml: lab.instructionsHtml,
       hints: lab.hints || [],
       answerCommands: clone(lab.answerCommands || {}),
-      assessmentItems: assessmentItems(lab.title, lab.answerCommands).map((entry, index) => ({
-        id: `${lab.id}-${index}`,
-        points: 1,
-        pathParts: [entry.device, entry.iface, entry.name].filter(Boolean),
-        parentPath: [entry.rootName, entry.device, entry.iface].filter(Boolean).join(" / "),
-        path: [entry.rootName, entry.device, entry.iface, entry.name].filter(Boolean).join(" / "),
-        ...entry,
-      })),
+      assessmentItems: items,
+      autograder: {
+        mode: "answer-command-checks",
+        itemCount: items.length,
+        deterministic: true,
+      },
     };
   }
 
@@ -156,6 +167,338 @@
   function sw(name, x, y, ifaces = {}, extra = {}) { return { kind: "l2switch", name, x, y, ifaces, extra }; }
   function pc(name, x, y, ip = "", gw = "") { return { kind: "pc", name, x, y, ifaces: { eth0: { ip, mask: ip ? "255.255.255.0" : "", gw } } }; }
   function server(name, x, y, ip = "") { return { kind: "server", name, x, y, ifaces: { eth0: { ip, mask: ip ? "255.255.255.0" : "", gw: "" } } }; }
+
+  function generatedLab(seed) {
+    return {
+      quizBank: seed.quizBank || "openpt/core",
+      estimatedMinutes: seed.estimatedMinutes || 12,
+      difficulty: seed.difficulty || "intermediate",
+      skills: seed.skills || [],
+      summary: seed.summary || seed.title,
+      generated: true,
+      ...seed,
+      instructionsHtml: seed.instructionsHtml || instructions(seed.summary || seed.title, seed.tasks || [], seed.notes || []),
+      hints: seed.hints || [
+        "Use the exact device names shown in the topology.",
+        "Configure only the devices named in the task list; the autograder checks running configuration and interface state.",
+      ],
+    };
+  }
+
+  function generatedVlanLabs() {
+    const defs = [
+      ["campus-vlan-access-trunks", "Campus Access VLANs and Trunk", "ASW1", "DSW1", "10,20,30", [["10", "Students", "FastEthernet0/3-4"], ["20", "Faculty", "FastEthernet0/5-6"], ["30", "Guests", "FastEthernet0/7"]]],
+      ["voice-data-access-edge", "Voice and Data Access Edge", "ASW2", "DSW1", "40,50,150", [["40", "DATA", "FastEthernet0/3-5"], ["50", "VOICE-USERS", "FastEthernet0/6"], ["150", "MGMT", "FastEthernet0/7"]]],
+      ["warehouse-vlan-cutover", "Warehouse VLAN Cutover", "WH-SW1", "CORE1", "12,22,32", [["12", "Scanners", "FastEthernet0/3-4"], ["22", "Printers", "FastEthernet0/5"], ["32", "Cameras", "FastEthernet0/6-7"]]],
+      ["branch-vlan-trunk-restrict", "Branch Trunk VLAN Restriction", "BR-SW1", "BR-SW2", "60,70,80", [["60", "Sales", "FastEthernet0/3"], ["70", "Support", "FastEthernet0/4-5"], ["80", "IoT", "FastEthernet0/6"]]],
+      ["native-vlan-hardening", "Native VLAN Hardening", "SW-A", "SW-B", "110,120,999", [["110", "Users", "FastEthernet0/3-4"], ["120", "Servers", "FastEthernet0/5"], ["999", "Blackhole", "FastEthernet0/6"]], 999],
+      ["access-layer-migration", "Access Layer Migration", "EDGE1", "DIST1", "210,220,230", [["210", "Blue", "FastEthernet0/8-9"], ["220", "Green", "FastEthernet0/10"], ["230", "Orange", "FastEthernet0/11-12"]]],
+    ];
+    return defs.map((def, index) => {
+      const [slug, title, left, right, allowed, vlanDefs, nativeVlan] = def;
+      const ifaces = { "FastEthernet0/1": {}, "FastEthernet0/2": {} };
+      for (const [, , ports] of vlanDefs) for (const port of expandRange(ports)) ifaces[port] = {};
+      const commands = [];
+      for (const [id, name, ports] of vlanDefs) commands.push("vlan " + id, "name " + name, "interface range " + ports, "switchport mode access", "switchport access vlan " + id);
+      commands.push("interface FastEthernet0/1", "switchport trunk encapsulation dot1q", "switchport mode trunk", "switchport trunk allowed vlan " + allowed);
+      if (nativeVlan) commands.push("switchport trunk native vlan " + nativeVlan);
+      return generatedLab({
+        id: "openpt-vlan-" + slug,
+        questionSlide: 100 + index,
+        title,
+        category: "Switching",
+        skills: ["VLANs", "trunks", "access ports"],
+        devices: [
+          sw(left, 280, 220, ifaces),
+          sw(right, 670, 220, { "FastEthernet0/1": { mode: "trunk", allowedVlans: allowed, nativeVlan: nativeVlan || 1 } }),
+          pc("Host-" + vlanDefs[0][1], 160, 430, "192.168." + vlanDefs[0][0] + ".10"),
+          pc("Host-" + vlanDefs[1][1], 400, 430, "192.168." + vlanDefs[1][0] + ".10"),
+        ],
+        links: [[left, "FastEthernet0/1", right, "FastEthernet0/1"], [left, expandRange(vlanDefs[0][2])[0], "Host-" + vlanDefs[0][1], "eth0"], [left, expandRange(vlanDefs[1][2])[0], "Host-" + vlanDefs[1][1], "eth0"]],
+        summary: "Create named VLANs, place access ports, and restrict the uplink trunk to the required VLAN list.",
+        tasks: [
+          "Create the VLANs and names shown in the lab title panel.",
+          "Configure the listed access ports for the correct VLANs.",
+          "Configure Fa0/1 as an 802.1Q trunk and allow only VLANs " + allowed + ".",
+          nativeVlan ? "Move the trunk native VLAN to VLAN " + nativeVlan + "." : "Leave the native VLAN unchanged.",
+        ],
+        hints: ["Build VLANs before assigning access ports.", "The autograder checks the trunk allowed VLAN list exactly."],
+        answerCommands: { [left]: commands },
+      });
+    });
+  }
+
+  function generatedRouterStickLabs() {
+    const defs = [
+      ["router-stick-school", "Router-on-a-Stick School LAN", "R-EDGE1", "SW-STUDENT", [["10", "192.168.10.1"], ["20", "192.168.20.1"], ["30", "192.168.30.1"]]],
+      ["router-stick-clinic", "Clinic Inter-VLAN Gateway", "R-CLINIC", "SW-CLINIC", [["31", "10.31.0.1"], ["32", "10.32.0.1"], ["33", "10.33.0.1"]]],
+      ["router-stick-branch", "Branch Router-on-a-Stick", "BR-R1", "BR-SW1", [["41", "172.16.41.1"], ["42", "172.16.42.1"], ["43", "172.16.43.1"]]],
+      ["router-stick-lab", "Training Lab Subinterfaces", "LAB-R1", "LAB-SW1", [["51", "192.0.2.1"], ["52", "192.0.52.1"], ["53", "192.0.53.1"]]],
+      ["router-stick-retail", "Retail Floor VLAN Gateways", "RTR-STORE", "SW-STORE", [["61", "10.61.0.1"], ["62", "10.62.0.1"], ["63", "10.63.0.1"]]],
+      ["router-stick-dmz", "Small Office DMZ Router-on-a-Stick", "SOHO-R1", "SOHO-SW1", [["71", "172.20.71.1"], ["72", "172.20.72.1"], ["73", "172.20.73.1"]]],
+    ];
+    return defs.map((def, index) => {
+      const [slug, title, router, switchName, vlans] = def;
+      const routerIfaces = { "GigabitEthernet0/0/0": {} };
+      const switchIfaces = { "FastEthernet0/1": {} };
+      const rCommands = ["interface GigabitEthernet0/0/0", "no shutdown"];
+      const sCommands = [];
+      vlans.forEach(([vlan, gateway], i) => {
+        routerIfaces["GigabitEthernet0/0/0." + vlan] = {};
+        switchIfaces["FastEthernet0/" + (i + 2)] = {};
+        rCommands.push("interface GigabitEthernet0/0/0." + vlan, "encapsulation dot1q " + vlan, "ip address " + gateway + " 255.255.255.0", "no shutdown");
+        sCommands.push("vlan " + vlan, "name VLAN" + vlan, "interface FastEthernet0/" + (i + 2), "switchport mode access", "switchport access vlan " + vlan);
+      });
+      sCommands.push("interface FastEthernet0/1", "switchport trunk encapsulation dot1q", "switchport mode trunk", "switchport trunk allowed vlan " + vlans.map(([vlan]) => vlan).join(","));
+      return generatedLab({
+        id: "openpt-ros-" + slug,
+        questionSlide: 120 + index,
+        title,
+        category: "Routing",
+        skills: ["router-on-a-stick", "subinterfaces", "VLAN gateways"],
+        devices: [
+          r(router, 300, 210, routerIfaces),
+          sw(switchName, 650, 210, switchIfaces),
+          pc("VLAN" + vlans[0][0] + "-PC", 540, 420, vlans[0][1].replace(/\.1$/, ".10"), vlans[0][1]),
+          pc("VLAN" + vlans[1][0] + "-PC", 750, 420, vlans[1][1].replace(/\.1$/, ".10"), vlans[1][1]),
+        ],
+        links: [[router, "GigabitEthernet0/0/0", switchName, "FastEthernet0/1"], [switchName, "FastEthernet0/2", "VLAN" + vlans[0][0] + "-PC", "eth0"], [switchName, "FastEthernet0/3", "VLAN" + vlans[1][0] + "-PC", "eth0"]],
+        summary: "Build VLAN gateways on router subinterfaces and trunk the access switch uplink.",
+        tasks: [
+          "Enable the router physical interface.",
+          "Create one dot1Q subinterface for each listed VLAN.",
+          "Address each subinterface with the listed default gateway.",
+          "Configure the switch uplink as a trunk and place access ports in the matching VLANs.",
+        ],
+        hints: ["The subinterface number matches the VLAN ID.", "Use encapsulation dot1q before assigning the subinterface IP address."],
+        answerCommands: { [router]: rCommands, [switchName]: sCommands },
+      });
+    });
+  }
+
+  function generatedStaticRouteLabs() {
+    const defs = [
+      ["static-triangle", "Three-Router Static Route Triangle", "10.10", "172.16.10"],
+      ["default-branch", "Branch Default Route and Return Paths", "10.20", "172.16.20"],
+      ["floating-backup", "Floating Backup Static Routes", "10.30", "172.16.30"],
+      ["hub-spoke-routes", "Hub and Spoke Static Routing", "10.40", "172.16.40"],
+      ["dmz-return-routes", "DMZ Return Static Routes", "10.50", "172.16.50"],
+      ["wan-summary", "WAN Summary Static Routes", "10.60", "172.16.60"],
+    ];
+    return defs.map((def, index) => {
+      const [slug, title, transit, lan] = def;
+      const leftLan = lan + ".0";
+      const rightPrefix = lan.replace("172.16.", "172.17.");
+      const rightLan = rightPrefix + ".0";
+      return generatedLab({
+        id: "openpt-route-" + slug,
+        questionSlide: 140 + index,
+        title,
+        category: "Routing",
+        skills: ["static routes", "default routes", "return paths"],
+        devices: [
+          r("R1", 170, 240, { "GigabitEthernet0/0/0": { ip: lan + ".1", mask: "255.255.255.0" }, "Serial0/1/0": { ip: transit + ".0.1", mask: "255.255.255.252" } }),
+          r("R2", 460, 240, { "Serial0/1/0": { ip: transit + ".0.2", mask: "255.255.255.252" }, "Serial0/1/1": { ip: transit + ".0.5", mask: "255.255.255.252" } }),
+          r("R3", 750, 240, { "Serial0/1/0": { ip: transit + ".0.6", mask: "255.255.255.252" }, "GigabitEthernet0/0/0": { ip: rightPrefix + ".1", mask: "255.255.255.0" } }),
+          pc("PC-A", 90, 430, lan + ".10", lan + ".1"),
+          pc("PC-C", 830, 430, rightPrefix + ".10", rightPrefix + ".1"),
+        ],
+        links: [["PC-A", "eth0", "R1", "GigabitEthernet0/0/0"], ["R1", "Serial0/1/0", "R2", "Serial0/1/0", "serial"], ["R2", "Serial0/1/1", "R3", "Serial0/1/0", "serial"], ["R3", "GigabitEthernet0/0/0", "PC-C", "eth0"]],
+        summary: "Complete static routing so the edge LANs can reach each other across the WAN.",
+        tasks: [
+          "Add R1 and R3 routes toward the remote LAN.",
+          "Add R2 return routes toward both edge LANs.",
+          "Use the next-hop addresses on the serial transit links.",
+        ],
+        hints: ["R2 needs both LAN routes because it is the transit router.", "The LAN masks are /24 and the serial masks are /30."],
+        answerCommands: {
+          R1: ["ip route " + rightLan + " 255.255.255.0 " + transit + ".0.2"],
+          R2: ["ip route " + leftLan + " 255.255.255.0 " + transit + ".0.1", "ip route " + rightLan + " 255.255.255.0 " + transit + ".0.6"],
+          R3: ["ip route " + leftLan + " 255.255.255.0 " + transit + ".0.5"],
+        },
+      });
+    });
+  }
+
+  function generatedDynamicRoutingLabs() {
+    const defs = [
+      ["ospf-area0-baseline", "OSPF Area 0 Baseline", "ospf", "1", [["10.1.0.0", "0.0.0.3", "0"], ["192.168.1.0", "0.0.0.255", "0"]]],
+      ["ospf-passive-edge", "OSPF Passive LAN Edge", "ospf", "10", [["10.2.0.0", "0.0.0.3", "0"], ["192.168.2.0", "0.0.0.255", "0"]], "GigabitEthernet0/0/1"],
+      ["ospf-default-originate", "OSPF Default Origination", "ospf", "20", [["10.3.0.0", "0.0.0.3", "0"], ["192.168.3.0", "0.0.0.255", "0"]], null, true],
+      ["rip-v2-no-auto", "RIP Version 2 Advertisement", "rip", "rip", [["10.4.0.0"], ["192.168.4.0"]]],
+      ["eigrp-dual-lans", "EIGRP Dual LAN Advertisement", "eigrp", "100", [["10.5.0.0", "0.0.0.3"], ["192.168.5.0", "0.0.0.255"]]],
+      ["bgp-edge-neighbor", "Single-Homed BGP Edge", "bgp", "65010", [["203.0.113.0", "255.255.255.252"], ["198.51.100.0", "255.255.255.0"]]],
+    ];
+    return defs.map((def, index) => {
+      const [slug, title, proto, pid, networks, passiveIface, originate] = def;
+      const commands = proto === "rip" ? ["router rip", "version 2", ...networks.map(([net]) => "network " + net)] :
+        proto === "bgp" ? ["router bgp " + pid, "neighbor 203.0.113.2 remote-as 65020", "network " + networks[1][0] + " mask " + networks[1][1]] :
+        ["router " + proto + " " + pid, "router-id " + (index + 1) + "." + (index + 1) + "." + (index + 1) + "." + (index + 1), ...networks.map((n) => "network " + n[0] + " " + n[1] + (proto === "ospf" ? " area " + n[2] : "")), ...(passiveIface ? ["passive-interface " + passiveIface] : []), ...(originate ? ["default-information originate"] : [])];
+      return generatedLab({
+        id: "openpt-dyn-" + slug,
+        questionSlide: 160 + index,
+        title,
+        category: "Routing Protocols",
+        skills: [proto.toUpperCase(), "routing process", "network statements"],
+        devices: [
+          r("EDGE1", 250, 230, { "GigabitEthernet0/0/0": { ip: networks[0][0].replace(/\.0$/, ".1"), mask: "255.255.255.252" }, "GigabitEthernet0/0/1": { ip: networks[1][0].replace(/\.0$/, ".1"), mask: "255.255.255.0" } }),
+          r("EDGE2", 610, 230, { "GigabitEthernet0/0/0": { ip: networks[0][0].replace(/\.0$/, ".2"), mask: "255.255.255.252" }, "GigabitEthernet0/0/1": { ip: networks[1][0].replace(/\.0$/, ".2"), mask: "255.255.255.0" } }),
+          pc("LAN-PC", 250, 430, networks[1][0].replace(/\.0$/, ".10"), networks[1][0].replace(/\.0$/, ".1")),
+        ],
+        links: [["EDGE1", "GigabitEthernet0/0/0", "EDGE2", "GigabitEthernet0/0/0"], ["EDGE1", "GigabitEthernet0/0/1", "LAN-PC", "eth0"]],
+        summary: "Configure the requested dynamic routing process and advertise the exact connected networks.",
+        tasks: ["Create the routing process.", "Set the router ID when requested.", "Advertise the WAN and LAN networks.", originate ? "Originate a default route into the process." : "Keep the scope limited to the listed networks."],
+        hints: ["Use wildcard masks for OSPF and EIGRP network statements.", "The autograder checks the exact routing process commands."],
+        answerCommands: { EDGE1: commands },
+      });
+    });
+  }
+
+  function generatedDhcpDnsLabs() {
+    const defs = [
+      ["dhcp-basic-office", "Office DHCP Pool", "R-DHCP1", "192.168.81.0", "192.168.81.1", "pool81"],
+      ["dhcp-voice-option", "Voice VLAN DHCP Pool", "R-DHCP2", "192.168.82.0", "192.168.82.1", "voice82"],
+      ["dhcp-relay-campus", "Campus DHCP Relay", "R-ACCESS", "192.168.83.0", "192.168.83.1", "campus83", "10.83.0.2"],
+      ["dhcp-guest-scope", "Guest DHCP Scope", "R-GUEST", "192.168.84.0", "192.168.84.1", "guest84"],
+      ["dns-host-records", "DNS Host Records", "R-DNS", "198.51.100.0", "198.51.100.1", "webpool", null, true],
+      ["dhcp-exclusions", "DHCP Exclusion Cleanup", "R-POOL", "192.168.86.0", "192.168.86.1", "pool86"],
+    ];
+    return defs.map((def, index) => {
+      const [slug, title, router, network, gateway, pool, helper, dnsOnly] = def;
+      const commands = dnsOnly
+        ? ["ip host www.openpt.local " + network.replace(/\.0$/, ".10"), "ip host api.openpt.local " + network.replace(/\.0$/, ".11")]
+        : ["ip dhcp excluded-address " + gateway + " " + network.replace(/\.0$/, ".20"), "ip dhcp pool " + pool, "network " + network + " 255.255.255.0", "default-router " + gateway, "dns-server " + network.replace(/\.0$/, ".53"), "domain-name openpt.local", ...(helper ? [] : ["netbios-name-server " + network.replace(/\.0$/, ".54")])];
+      const relayCommands = helper ? ["interface GigabitEthernet0/0/0", "ip helper-address " + helper] : [];
+      return generatedLab({
+        id: "openpt-dhcp-" + slug,
+        questionSlide: 180 + index,
+        title,
+        category: "Services",
+        skills: dnsOnly ? ["DNS host records"] : ["DHCP", "address pools", helper ? "relay" : "scope options"],
+        devices: [r(router, 320, 230, { "GigabitEthernet0/0/0": { ip: gateway, mask: "255.255.255.0" } }), server("Services", 650, 230, helper || network.replace(/\.0$/, ".53")), pc("Client", 320, 430)],
+        links: [[router, "GigabitEthernet0/0/0", "Client", "eth0"], [router, "GigabitEthernet0/0/1", "Services", "eth0"]],
+        summary: dnsOnly ? "Create local DNS host records for the web services." : "Configure a DHCP scope with exclusions and client options.",
+        tasks: dnsOnly ? ["Create A-record style host mappings for www.openpt.local and api.openpt.local."] : ["Exclude reserved addresses.", "Create the named DHCP pool.", "Set network, gateway, DNS, domain, and optional NetBIOS values.", helper ? "Configure the client-facing interface as a DHCP relay." : "Leave relay configuration unchanged."],
+        hints: ["DHCP pool subcommands are graded as running configuration.", helper ? "The helper address belongs on the client-facing interface." : "Excluded addresses are global DHCP commands."],
+        answerCommands: { [router]: [...commands, ...relayCommands] },
+      });
+    });
+  }
+
+  function generatedAclNatLabs() {
+    const defs = [
+      ["pat-lan-overload", "PAT Overload for LAN Users", "192.168.91.0", "203.0.91"],
+      ["static-nat-web", "Static NAT for Web Server", "192.168.92.0", "203.0.92"],
+      ["nat-pool-overload", "NAT Pool Overload", "192.168.93.0", "203.0.93"],
+      ["web-acl-filter", "Extended Web ACL Filter", "192.168.94.0", "198.51.94"],
+      ["ssh-only-acl", "SSH-Only Management ACL", "192.168.95.0", "198.51.95"],
+      ["dmz-acl-nat", "DMZ ACL and PAT Edge", "192.168.96.0", "203.0.96"],
+    ];
+    return defs.map((def, index) => {
+      const [slug, title, insideNet, outsideBase] = def;
+      const insideGw = insideNet.replace(/\.0$/, ".1");
+      const publicIp = outsideBase + ".2";
+      const commands = [
+        "interface GigabitEthernet0/0/0", "ip nat inside",
+        "interface GigabitEthernet0/0/1", "ip nat outside",
+        "access-list 10 permit " + insideNet + " 0.0.0.255",
+        index % 3 === 1 ? "ip nat inside source static " + insideNet.replace(/\.0$/, ".10") + " " + outsideBase + ".10" :
+          index % 3 === 2 ? "ip nat pool PUBLIC " + outsideBase + ".20 " + outsideBase + ".30 netmask 255.255.255.0" : "ip nat inside source list 10 interface GigabitEthernet0/0/1 overload",
+      ];
+      if (index % 3 === 2) commands.push("ip nat inside source list 10 pool PUBLIC overload");
+      if (index >= 3) commands.push("ip access-list extended WEB-FILTER", "10 permit tcp " + insideNet + " 0.0.0.255 any eq www", "20 permit tcp " + insideNet + " 0.0.0.255 any eq 443", "30 deny ip any any", "interface GigabitEthernet0/0/1", "ip access-group WEB-FILTER out");
+      return generatedLab({
+        id: "openpt-edge-" + slug,
+        questionSlide: 200 + index,
+        title,
+        category: "Security",
+        skills: ["ACLs", "NAT", "edge policy"],
+        devices: [r("EDGE-R1", 360, 240, { "GigabitEthernet0/0/0": { ip: insideGw, mask: "255.255.255.0" }, "GigabitEthernet0/0/1": { ip: publicIp, mask: "255.255.255.0" } }), pc("Inside-PC", 120, 420, insideNet.replace(/\.0$/, ".20"), insideGw), server("Internet-Web", 720, 420, outsideBase + ".80")],
+        links: [["Inside-PC", "eth0", "EDGE-R1", "GigabitEthernet0/0/0"], ["EDGE-R1", "GigabitEthernet0/0/1", "Internet-Web", "eth0"]],
+        summary: "Configure inside/outside NAT roles, translation rules, and an edge ACL where requested.",
+        tasks: ["Mark the LAN interface as NAT inside and the WAN interface as NAT outside.", "Permit the inside LAN with ACL 10.", "Configure the specified NAT translation.", index >= 3 ? "Apply the extended ACL outbound on the WAN interface." : "Do not add an extended edge filter."],
+        hints: ["NAT role commands are interface commands.", "Named extended ACL sequence numbers are accepted by OpenPT."],
+        answerCommands: { "EDGE-R1": commands },
+      });
+    });
+  }
+
+  function generatedSwitchSecurityLabs() {
+    const defs = [
+      ["port-security-basic", "Access Port Security Baseline", "SW-SEC1", "10"],
+      ["port-security-restrict", "Port Security Restrict Mode", "SW-SEC2", "20"],
+      ["stp-root-hardening", "STP Root Hardening", "SW-ROOT", "30"],
+      ["bpduguard-edge", "BPDU Guard on Edge Ports", "SW-BPDU", "40"],
+      ["dhcp-snooping-dai", "DHCP Snooping and DAI", "SW-SNOOP", "50"],
+      ["storm-portfast", "PortFast and Root Guard", "SW-GUARD", "60"],
+    ];
+    return defs.map((def, index) => {
+      const [slug, title, switchName, vlan] = def;
+      const commands = ["vlan " + vlan, "name USERS", "interface range FastEthernet0/3-4", "switchport mode access", "switchport access vlan " + vlan, "switchport port-security", "switchport port-security maximum " + (index + 2), "switchport port-security violation " + (index % 2 ? "restrict" : "shutdown")];
+      if (index >= 2) commands.push("spanning-tree vlan " + vlan + " root primary");
+      if (index >= 3) commands.push("interface range FastEthernet0/3-4", "spanning-tree portfast", "spanning-tree bpduguard enable");
+      if (index >= 4) commands.push("ip dhcp snooping", "ip dhcp snooping vlan " + vlan, "ip arp inspection vlan " + vlan, "interface FastEthernet0/1", "ip dhcp snooping trust", "ip arp inspection trust");
+      if (index === 5) commands.push("interface FastEthernet0/1", "spanning-tree guard root");
+      return generatedLab({
+        id: "openpt-switchsec-" + slug,
+        questionSlide: 220 + index,
+        title,
+        category: "Switch Security",
+        skills: ["port security", "STP hardening", "DHCP snooping"],
+        devices: [sw(switchName, 360, 240, { "FastEthernet0/1": {}, "FastEthernet0/3": {}, "FastEthernet0/4": {} }), sw("DIST", 680, 240, { "FastEthernet0/1": { mode: "trunk" } }), pc("User-A", 270, 430), pc("User-B", 450, 430)],
+        links: [[switchName, "FastEthernet0/1", "DIST", "FastEthernet0/1"], [switchName, "FastEthernet0/3", "User-A", "eth0"], [switchName, "FastEthernet0/4", "User-B", "eth0"]],
+        summary: "Harden access ports and enable layer-2 protections appropriate for the scenario.",
+        tasks: ["Create the user VLAN.", "Secure access ports Fa0/3-4.", index >= 2 ? "Make this switch the spanning-tree root for the user VLAN." : "Leave STP root settings unchanged.", index >= 4 ? "Enable DHCP snooping and dynamic ARP inspection for the user VLAN." : "Do not enable DHCP snooping unless listed."],
+        hints: ["Port security maximum and violation mode are checked separately.", "Trust only the uplink for DHCP snooping and DAI."],
+        answerCommands: { [switchName]: commands },
+      });
+    });
+  }
+
+  function generatedManagementLabs() {
+    const defs = [
+      ["ssh-baseline", "SSH Management Baseline", "R-MGMT1", "openpt.local"],
+      ["secure-lines", "Secure Console and VTY Lines", "SW-MGMT2", "branch.local"],
+      ["snmp-ntp-logging", "SNMP NTP and Syslog", "R-MGMT3", "ops.local"],
+      ["aaa-login", "AAA Login Skeleton", "SW-MGMT4", "aaa.local"],
+      ["domain-hosts", "Local Host Table and SSH", "R-MGMT5", "dns.local"],
+      ["hardening-combo", "Device Hardening Combo", "SW-MGMT6", "secure.local"],
+    ];
+    return defs.map((def, index) => {
+      const [slug, title, device, domain] = def;
+      const kind = device.includes("SW") ? "l2switch" : "router";
+      const commands = ["hostname " + device, "enable secret cisco123", "service password-encryption", "ip domain-name " + domain, "username admin secret netacad", "crypto key generate rsa modulus 2048", "ip ssh version 2", "line console 0", "exec-timeout " + (index + 3) + " 0", "logging synchronous", "line vty 0 4", "transport input ssh", "exec-timeout 10 0"];
+      if (index >= 2) commands.push("ntp server 192.0.2.123", "logging host 192.0.2.200", "snmp-server community OPENPT RO");
+      if (index >= 3) commands.push("aaa new-model", "aaa authentication login default local");
+      if (index >= 4) commands.push("ip host files.openpt.local 192.0.2.50", "ip host monitor.openpt.local 192.0.2.60");
+      return generatedLab({
+        id: "openpt-mgmt-" + slug,
+        questionSlide: 240 + index,
+        title,
+        category: "Management",
+        skills: ["SSH", "line security", "management services"],
+        devices: [kind === "router" ? r(device, 360, 240, { "GigabitEthernet0/0/0": { ip: "192.0.2." + (index + 1), mask: "255.255.255.0" } }) : sw(device, 360, 240, { Vlan1: { ip: "192.0.2." + (index + 1), mask: "255.255.255.0" } }), pc("Admin-PC", 650, 240, "192.0.2.100", "192.0.2.1")],
+        links: [[device, kind === "router" ? "GigabitEthernet0/0/0" : "FastEthernet0/1", "Admin-PC", "eth0"]],
+        summary: "Configure secure management access and supporting management services.",
+        tasks: ["Set identity, encrypted enable secret, and local admin user.", "Enable SSH version 2 with RSA keys and a domain name.", "Restrict VTY access to SSH.", index >= 2 ? "Add NTP, syslog, and SNMP monitoring." : "No monitoring service is required."],
+        hints: ["Use line console 0 and line vty 0 4 for timers and transports.", "OpenPT grades the resulting running configuration."],
+        answerCommands: { [device]: commands },
+      });
+    });
+  }
+
+  function generatedCoreLabs() {
+    return [
+      ...generatedVlanLabs(),
+      ...generatedRouterStickLabs(),
+      ...generatedStaticRouteLabs(),
+      ...generatedDynamicRoutingLabs(),
+      ...generatedDhcpDnsLabs(),
+      ...generatedAclNatLabs(),
+      ...generatedSwitchSecurityLabs(),
+      ...generatedManagementLabs(),
+    ];
+  }
 
   const LABS = [
     {
@@ -315,6 +658,7 @@
       hints: ["The helper address goes on the client-facing RouterA interface."],
       answerCommands: { RouterB: ["ip dhcp excluded-address 192.168.44.1", "ip dhcp pool boson", "network 192.168.44.0 255.255.255.0", "default-router 192.168.44.1"], RouterA: ["interface FastEthernet0/1", "ip helper-address 10.0.0.2"] },
     },
+    ...generatedCoreLabs(),
   ];
 
   const byId = Object.fromEntries(LABS.map((lab) => [lab.id, lab]));
@@ -331,8 +675,9 @@
   function labsForBanks(banks = []) {
     const wanted = new Set((banks || []).map((bank) => String(bank || "").trim()).filter(Boolean));
     const allCcnaB = wanted.has("ccna-b/all");
+    const allOpenPt = wanted.has("openpt/all");
     return LABS
-      .filter((lab) => allCcnaB || wanted.has(lab.quizBank))
+      .filter((lab) => allOpenPt || (allCcnaB && String(lab.quizBank || "").startsWith("ccna-b/")) || wanted.has(lab.quizBank))
       .sort(compareLabs);
   }
 
@@ -348,6 +693,30 @@
     return labs.sort(compareLabs);
   }
 
+  function catalogReport() {
+    const report = {
+      labCount: LABS.length,
+      generatedCount: LABS.filter((lab) => lab.generated).length,
+      assessmentItemCount: 0,
+      estimatedMinutes: 0,
+      byCategory: {},
+      byDifficulty: {},
+      byQuizBank: {},
+      skills: {},
+    };
+    for (const lab of LABS) {
+      const category = lab.category || "CCNA Practice";
+      const difficulty = lab.difficulty || "intermediate";
+      report.byCategory[category] = (report.byCategory[category] || 0) + 1;
+      report.byDifficulty[difficulty] = (report.byDifficulty[difficulty] || 0) + 1;
+      report.byQuizBank[lab.quizBank || "uncategorized"] = (report.byQuizBank[lab.quizBank || "uncategorized"] || 0) + 1;
+      report.estimatedMinutes += Number(lab.estimatedMinutes || 0);
+      report.assessmentItemCount += assessmentItems(lab.title, lab.answerCommands).length;
+      for (const skill of lab.skills || []) report.skills[skill] = (report.skills[skill] || 0) + 1;
+    }
+    return report;
+  }
+
   window.OpenPTLabs = {
     all: LABS,
     byId,
@@ -356,10 +725,19 @@
     metadataForQuestion: (bank, slide) => byQuestion[`${bank}:${slide}`] || null,
     labsForBanks,
     labsForRefs,
+    catalogReport,
     build: (id) => {
       const lab = byId[id];
       return lab ? buildLab(lab) : null;
     },
-    menuItems: () => LABS.map((lab) => ({ key: lab.id, title: lab.title, desc: `${COURSE} ${lab.quizBank.replace("ccna-b/", "").toUpperCase()} question ${lab.questionSlide}` })),
+    menuItems: () =>
+      LABS.map((lab) => ({
+        key: lab.id,
+        title: lab.title,
+        desc: lab.summary || `${COURSE} ${lab.quizBank.replace("ccna-b/", "").toUpperCase()} question ${lab.questionSlide}`,
+        category: lab.category || "CCNA Practice",
+        difficulty: lab.difficulty || "intermediate",
+        estimatedMinutes: lab.estimatedMinutes || 10,
+      })),
   };
 })();

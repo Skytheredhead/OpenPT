@@ -35,6 +35,28 @@ test("lab loads and starter flow creates a topology", async ({ page }) => {
   expect(errors, "browser console/page errors").toEqual([]);
 });
 
+test("generated autograded lab catalog loads with report dashboard", async ({ page }) => {
+  const errors = collectPageErrors(page);
+  await page.addInitScript(() => {
+    localStorage.clear();
+    localStorage.setItem("openpt:viewMode", "app");
+  });
+
+  await page.goto("/lab/?lab=openpt-vlan-campus-vlan-access-trunks");
+  await expect(page.locator(".node-label", { hasText: "ASW1" })).toBeVisible();
+  await expect(page.locator(".node-label", { hasText: "DSW1" })).toBeVisible();
+  await expect(page.locator(".pt-sb-title")).toContainText("Campus Access VLANs and Trunk");
+  await page.locator(".side-tab", { hasText: "Progress" }).click();
+  await expect(page.locator(".pt-autograder-report")).toContainText("Autograder report");
+  await expect(page.locator(".pt-autograder-report")).toContainText("Checks");
+
+  await page.locator(".tb-menu").filter({ hasText: "Lab" }).click();
+  await expect(page.locator(".tb-dropdown")).toContainText("60 autograded labs");
+  await expect(page.locator(".tb-dropdown")).toContainText("deterministic assessment checks");
+  await expect(page.locator(".tb-dropdown")).toContainText("Campus Access VLANs and Trunk");
+  expect(errors, "browser console/page errors").toEqual([]);
+});
+
 test("topology link status markers show down, blocking, and activity states", async ({ page }) => {
   const errors = collectPageErrors(page);
   await page.addInitScript(() => {

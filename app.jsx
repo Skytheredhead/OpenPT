@@ -862,6 +862,7 @@ const OPENPT_PRACTICE_LABS = window.OpenPTLabs?.menuItems?.() || [
   { key: "ospf-area0-dr", title: "OSPF Area 0 DR Election", desc: "Advertise exact subnets and tune shared-segment OSPF priorities." },
   { key: "ssh-line-access", title: "SSH and Line Access Controls", desc: "Set console idle timers, VTY transports, SSH keys, and SSHv2." },
 ];
+const OPENPT_LAB_CATALOG_REPORT = window.OpenPTLabs?.catalogReport?.() || null;
 
 function practiceActivity({ title, instructionsHtml, hints, answerCommands = {}, assessmentItems = [] }) {
   return {
@@ -7373,6 +7374,7 @@ function FeedbackWidget({ open, syncClient, onToggle, onClose }) {
 function TitleMenus(props) {
   const [open, setOpen] = useState(null);
   const ref = useRef(null);
+  const labReport = OPENPT_LAB_CATALOG_REPORT;
   useEffect(() => {
     const h = (e) => {
       if (ref.current && !ref.current.contains(e.target)) setOpen(null);
@@ -7469,7 +7471,14 @@ function TitleMenus(props) {
       })),
     ],
     Lab: [
-      { sect: "CCNA labs" },
+      { sect: labReport ? `${labReport.labCount} autograded labs` : "CCNA labs" },
+      ...(labReport
+        ? [
+            { label: `${labReport.assessmentItemCount} deterministic assessment checks`, disabled: true },
+            { label: `${Object.keys(labReport.byCategory || {}).length} lab categories`, disabled: true },
+            { sep: true },
+          ]
+        : []),
       { label: "Two-router VLAN routing  ●", on: () => props.onLab("starter") },
       { label: "Static routing basics", disabled: true },
       { label: "Spanning-tree loop", disabled: true },
@@ -9186,7 +9195,7 @@ function packetTracerGradeTransferredState(item, base, context = {}) {
 
 function packetTracerCommandLikeExpected(item) {
   const text = packetTracerExpectedText(item);
-  return /^(?:hostname|ip|switchport|channel-group|router|network|line|transport|access-list|interface|vlan|spanning-tree|service|crypto|username|enable|ntp|logging)\b/i.test(
+  return /^(?:hostname|ip|ipv6|switchport|channel-|router|network|neighbor|passive-interface|default-information|version|default-router|dns-server|domain-name|netbios-name-server|line|transport|exec-timeout|logging synchronous|access-list|interface|encapsulation|vlan|name |spanning-tree|service|crypto|username|enable|ntp|logging|snmp-server|aaa|\d+\s+(?:permit|deny)|permit|deny)\b/i.test(
     text.trim()
   )
     ? text.trim()
@@ -9620,6 +9629,14 @@ const PACKET_TRACER_CHECKERS = [
       const config = packetTracerConfigText(device);
       if (config.includes(packetTracerNormText(value)))
         return { status: "Correct", feedback: "Expected config value found", expected: value, actual: value, confidence: "low" };
+      if (packetTracerCommandLikeExpected(item))
+        return {
+          status: "Incorrect",
+          feedback: `Expected config command ${value}`,
+          expected: value,
+          actual: "not present",
+          confidence: "medium",
+        };
       return {
         status: "Unchecked",
         feedback: "Decoded value does not map to a precise OpenPT checker yet",
@@ -13556,6 +13573,73 @@ function PacketTracerImportReport({ activity }) {
   );
 }
 
+function PacketTracerAutograderReport({ activity, allAssessmentItems = [] }) {
+  const progress = activity?.progress || {};
+  const counts = progress.counts || {};
+  const gradingRun = activity?.gradingRun || {};
+  const checkerRows = (gradingRun.byChecker || [])
+    .slice()
+    .sort((a, b) => (b.total || 0) - (a.total || 0) || String(a.checkerId).localeCompare(String(b.checkerId)));
+  const importedItems = activity?.gradingProfile?.importedItems || activity?.autograder?.itemCount || allAssessmentItems.length || 0;
+  const unsupported = gradingRun.unsupported || [];
+  return (
+    <div className="pt-autograder-report" aria-label="Autograder report">
+      <div className="pt-autograder-head">
+        <div>
+          <div className="pt-import-kicker">Autograder report</div>
+          <div className="pt-import-title">{activity?.category || "Packet Tracer-style lab"}</div>
+        </div>
+        <span className={`pt-autograder-state ${(counts.unchecked || 0) > 0 ? "warn" : "ok"}`}>
+          {(counts.unchecked || 0) > 0 ? "Partial" : "Deterministic"}
+        </span>
+      </div>
+      <div className="pt-autograder-metrics">
+        <div>
+          <span>{progress.score || "0/0"}</span>
+          <strong>Score</strong>
+        </div>
+        <div>
+          <span>{progress.itemCount || `${counts.correct || 0}/${importedItems}`}</span>
+          <strong>Items</strong>
+        </div>
+        <div>
+          <span>{importedItems}</span>
+          <strong>Checks</strong>
+        </div>
+        <div>
+          <span>{counts.unchecked || 0}</span>
+          <strong>Unchecked</strong>
+        </div>
+      </div>
+      {checkerRows.length > 0 && (
+        <>
+          <div className="pt-sb-h">Checker Coverage</div>
+          <div className="pt-autograder-checkers">
+            {checkerRows.map((row) => (
+              <div key={row.checkerId} className="pt-autograder-checker">
+                <span title={row.checkerId}>{row.checkerId}</span>
+                <strong>
+                  {row.correct}/{row.total}
+                </strong>
+                {!!row.unchecked && <em>{row.unchecked} unchecked</em>}
+              </div>
+            ))}
+          </div>
+        </>
+      )}
+      {unsupported.length > 0 && (
+        <div className="pt-autograder-unsupported">
+          {unsupported.map((item) => (
+            <span key={item.reason}>
+              {item.count} {item.reason}
+            </span>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function PacketTracerSidebar({ activity, onClose, onReportError, requestedTab, onRequestedTabHandled }) {
   const hasImportReport = !!(
     activity?.format === "packet-tracer-activity" ||
@@ -13702,6 +13786,7 @@ function PacketTracerSidebar({ activity, onClose, onReportError, requestedTab, o
                 </div>
               )}
             </div>
+            <PacketTracerAutograderReport activity={activity} allAssessmentItems={allAssessmentItems} />
             {components.length > 0 ? (
               <>
                 <div className="pt-sb-h">Components</div>
