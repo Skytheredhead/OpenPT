@@ -1426,7 +1426,9 @@ function App({ initialViewMode = null, initialHomeAction = null } = {}) {
       return "app";
     }
   });
-  const initialHomeActionRef = useRef(initialHomeAction);
+  const initialHomeActionRef = useRef(
+    initialHomeAction || (new URLSearchParams(location.search).get("starter") === "1" ? "starter" : null)
+  );
   const [routePath, setRoutePath] = useState(() => appRoutePath(location.pathname));
   const initialPracticeLabRef = useRef(new URLSearchParams(location.search).get("lab") || "");
   const quizEmbedReturnKey = useMemo(() => new URLSearchParams(location.search).get("returnToQuiz") || "", []);
@@ -5385,7 +5387,7 @@ function App({ initialViewMode = null, initialHomeAction = null } = {}) {
         enterLabFromHome("import");
         return;
       }
-      enterLabFromHome("lab");
+      enterLabFromHome(action === "starter" ? "starter" : "lab");
     };
     window.addEventListener("message", onHomeAction);
     return () => window.removeEventListener("message", onHomeAction);

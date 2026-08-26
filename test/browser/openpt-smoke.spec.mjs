@@ -35,6 +35,21 @@ test("lab loads and starter flow creates a topology", async ({ page }) => {
   expect(errors, "browser console/page errors").toEqual([]);
 });
 
+test("home embed opens the starter lab", async ({ page }) => {
+  const errors = collectPageErrors(page);
+  await page.addInitScript(() => localStorage.clear());
+
+  await page.goto("/");
+  const home = page.frameLocator('iframe[title="OpenPT home"]');
+  await expect(home.getByRole("button", { name: "open starter lab" })).toBeVisible();
+  await home.getByRole("button", { name: "open starter lab" }).click();
+
+  await expect(page).toHaveURL(/\/lab$/);
+  await expect.poll(async () => page.locator(".node").count(), { message: "starter topology node count" }).toBeGreaterThanOrEqual(5);
+  await expect(page.locator(".node-label", { hasText: "R1" })).toBeVisible();
+  expect(errors, "browser console/page errors").toEqual([]);
+});
+
 test("topology link status markers show down, blocking, and activity states", async ({ page }) => {
   const errors = collectPageErrors(page);
   await page.addInitScript(() => {

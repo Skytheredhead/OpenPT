@@ -1881,7 +1881,7 @@
         if (event.origin !== location.origin || !event.data || event.data.type !== 'openpt:home-action') return;
         if (event.data.action === 'quiz') window.location.href = '/quiz/?view=library';
         else if (event.data.action === 'jeopardy') window.location.href = '/jeopardy';
-        else enterLab(event.data.action === 'import' ? 'import' : 'lab');
+        else enterLab(event.data.action === 'import' ? 'import' : event.data.action === 'starter' ? 'starter' : 'lab');
       });
       var preloadSimulator = function () {
         window.OpenPTModuleLoader.loadSimulator().then(function () {
